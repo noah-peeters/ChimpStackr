@@ -30,7 +30,7 @@ def setup_actions(parent):
     file.addAction(export_image)
 
     save_file = qtg.QAction("&Save project", parent)
-    save_file.setShortcut(qtg.QKeySequence("Ctrl+Alt+S"))
+    save_file.setShortcut(qtg.QKeySequence("Ctrl+S"))
     save_file.setStatusTip("Save a project file to disk.")
     save_file.triggered.connect(parent.save_project_to_file)
     file.addAction(save_file)
