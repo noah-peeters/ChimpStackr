@@ -3,6 +3,7 @@
     It is the "root display".
 """
 import os
+import PySide6.QtGui as qtg
 import PySide6.QtWidgets as qtw
 
 import MainWindow.QActions as qt_actions_setup
@@ -23,6 +24,20 @@ class Window(qtw.QMainWindow):
         # Set min. window size based on pixel size
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(int(geometry.width() * 0.7), int(geometry.height() * 0.7))
+
+    # Display dialog if user is sure they want to quit
+    def closeEvent(self, event):
+        reply = qtw.QMessageBox.question(
+            self,
+            "Exit program",
+            "Are you sure you want to exit the program? You might lose unsaved work!",
+            qtw.QMessageBox.Yes,
+            qtw.QMessageBox.No,
+        )
+        if reply == qtw.QMessageBox.Yes:
+            event.accept()
+        else:
+            event.ignore()
 
     # Export output image to file on disk
     def export_output_image(self):
