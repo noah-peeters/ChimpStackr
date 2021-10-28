@@ -29,7 +29,7 @@ class Window(qtw.QMainWindow):
     def closeEvent(self, event):
         reply = qtw.QMessageBox.question(
             self,
-            "Exit program",
+            "Exit program?",
             "Are you sure you want to exit the program? You might lose unsaved work!",
             qtw.QMessageBox.Yes,
             qtw.QMessageBox.No,
