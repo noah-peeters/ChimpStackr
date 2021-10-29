@@ -3,10 +3,10 @@
     It is the "root display".
 """
 import os
-import PySide6.QtGui as qtg
 import PySide6.QtWidgets as qtw
 
 import MainWindow.QActions as qt_actions_setup
+from MainWindow.MainLayout import CenterWidget
 
 SUPPORTED_IMAGE_FORMATS = "(*.jpg *.png)"
 
@@ -20,6 +20,8 @@ class Window(qtw.QMainWindow):
         self.setWindowTitle("Test")
         # Setup actions
         qt_actions_setup.setup_actions(self)
+        # Set center widget
+        self.setCentralWidget(CenterWidget(self))
 
         # Set min. window size based on pixel size
         geometry = self.screen().availableGeometry()
