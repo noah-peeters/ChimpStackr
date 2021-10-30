@@ -2,6 +2,7 @@
     Center widget layout for MainWindow.
 """
 import PySide6.QtWidgets as qtw
+import PySide6.QtGui as qtg
 
 from MainWindow.ImageViewer import ImageViewer
 
@@ -20,7 +21,7 @@ class CenterWidget(qtw.QWidget):
                 "Please load them in from the 'file' menu.",
             ]
         )
-        
+
         # Image display widget
         image_display = ImageViewer()
 
@@ -29,6 +30,10 @@ class CenterWidget(qtw.QWidget):
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(loaded_images_list)
         splitter.addWidget(image_display)
+
+        # Set splitter default size
+        width = main_window.screen().availableGeometry().width()
+        splitter.setSizes([int(width / 5), width])
 
         # Set horizontal layout
         layout = qtw.QHBoxLayout(self)
