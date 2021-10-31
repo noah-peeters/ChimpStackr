@@ -4,6 +4,7 @@
 """
 import os
 import PySide6.QtWidgets as qtw
+import PySide6.QtCore as qtc
 
 from MainWindow.ImageViewer import ImageViewer
 from UI_utilities import int_string_sorting
@@ -57,6 +58,6 @@ class CenterWidget(qtw.QWidget):
         for path in sorted(new_image_files, int_string_sorting):
             name = os.path.basename(path)
             item = qtw.QListWidgetItem()
-            item.setData(path)  # Set data to full image path
+            item.setData(qtc.Qt.UserRole, path)  # Set data to full image path
             item.setText(name)  # Set text to image name
             self.loaded_images_list.addItem(item)

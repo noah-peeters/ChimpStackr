@@ -72,8 +72,10 @@ class ImageViewer(qtw.QGraphicsView):
     #         self.fitInView()
 
     # Change displayed image
-    def update_displayed_image(new_widget_item, prev_widget_item):
+    def update_displayed_image(self, new_widget_item, prev_widget_item):
         print("Change image display")
+        path = new_widget_item.data(qtc.Qt.UserRole)
+        print(path)
 
     """
         Overridden signals
