@@ -1,3 +1,6 @@
+# Pure UI requirements
 PySide6
 qt-material
+
+# Algorithm requirements (open-cv is also used for UI)
 opencv-python-headless # UI is not needed
