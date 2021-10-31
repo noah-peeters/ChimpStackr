@@ -2,13 +2,10 @@
     Image viewer usinng QGraphicsView.
     Allows for zooming in/out on image and panning on mouse drag.
 """
-from PyQt5.QtGui import QImage
 import PySide6.QtCore as qtc
 import PySide6.QtGui as qtg
 import PySide6.QtWidgets as qtw
 
-from PIL import Image, ImageQt
-import qimage2ndarray
 import cv2
 
 
