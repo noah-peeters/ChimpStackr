@@ -6,7 +6,8 @@ import PySide6.QtCore as qtc
 import PySide6.QtGui as qtg
 import PySide6.QtWidgets as qtw
 
-import qimage2ndarray
+from PIL import Image, ImageQt
+import cv2
 
 
 class ImageViewer(qtw.QGraphicsView):
@@ -16,7 +17,6 @@ class ImageViewer(qtw.QGraphicsView):
         super().__init__()
         self.current_zoom_level = 0
         self.reset_zoom = True
-        self.image_loaded = True
         self._scene = qtw.QGraphicsScene(self)
         self._photo = qtw.QGraphicsPixmapItem()
         self._scene.addItem(self._photo)
@@ -35,15 +35,12 @@ class ImageViewer(qtw.QGraphicsView):
         # Display selected image from list (connection to signal)
         loaded_images_list.currentItemChanged.connect(self.update_displayed_image)
 
-    def hasImage(self):
-        return not self.image_loaded
-
     # Fit image to view
     def fitInView(self, scale=True):  # TODO: Implement/remove self.scale
         rect = qtc.QRectF(self._photo.pixmap().rect())
         if not rect.isNull():
             self.setSceneRect(rect)
-            if self.hasImage():
+            if self.hasImage:
                 unity = self.transform().mapRect(qtc.QRectF(0, 0, 1, 1))
                 self.scale(1 / unity.width(), 1 / unity.height())
                 viewrect = self.viewport().rect()
@@ -73,16 +70,32 @@ class ImageViewer(qtw.QGraphicsView):
 
     # Change displayed image
     def update_displayed_image(self, new_widget_item, prev_widget_item):
-        print("Change image display")
-        path = new_widget_item.data(qtc.Qt.UserRole)
-        print(path)
+        print("Change clicked image")
+        # TODO: Gets called many times on loaded images widget item change
+        if new_widget_item:
+            # Display selected image
+            path = new_widget_item.data(qtc.Qt.UserRole)
+            if path != None:
+                image = cv2.imread(path)
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                qimage = ImageQt.ImageQt(Image.fromarray(image))
+
+                self.setDragMode(qtw.QGraphicsView.ScrollHandDrag)
+                self._photo.setPixmap(qtg.QPixmap.fromImage(qimage))
+
+                self.hasImage = True
+        else:
+            # Clear image view
+            self.setDragMode(qtw.QGraphicsView.NoDrag)
+            self._photo.setPixmap(qtg.QPixmap())
+            self.hasImage = False
 
     """
         Overridden signals
     """
 
     def wheelEvent(self, event):
-        if self.hasImage():
+        if self.hasImage:
             if event.angleDelta().y() > 0:
                 factor = 1.25
                 self.current_zoom_level += 1

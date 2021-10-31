@@ -62,7 +62,7 @@ class Window(qtw.QMainWindow):
             "Loading selected images...", self.statusbar_msg_display_time
         )
         home_dir = os.path.expanduser("~")
-        new_image_files = qtw.QFileDialog.getOpenFileNames(
+        new_image_files, _ = qtw.QFileDialog.getOpenFileNames(
             self,
             "Select images to load.",
             home_dir,
