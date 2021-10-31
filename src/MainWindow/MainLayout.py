@@ -55,7 +55,7 @@ class CenterWidget(qtw.QWidget):
 
         # Clear and set new files
         self.loaded_images_list.clear()
-        for path in sorted(new_image_files, int_string_sorting):
+        for path in sorted(new_image_files, key=int_string_sorting):
             name = os.path.basename(path)
             item = qtw.QListWidgetItem()
             item.setData(qtc.Qt.UserRole, path)  # Set data to full image path
