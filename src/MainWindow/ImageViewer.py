@@ -6,11 +6,13 @@ import PySide6.QtCore as qtc
 import PySide6.QtGui as qtg
 import PySide6.QtWidgets as qtw
 
+import qimage2ndarray
+
 
 class ImageViewer(qtw.QGraphicsView):
     photoClicked = qtc.Signal(qtc.QPoint)
 
-    def __init__(self):
+    def __init__(self, loaded_images_list):
         super().__init__()
         self.current_zoom_level = 0
         self.reset_zoom = True
@@ -19,19 +21,25 @@ class ImageViewer(qtw.QGraphicsView):
         self._photo = qtw.QGraphicsPixmapItem()
         self._scene.addItem(self._photo)
 
+        # Scene setup
         self.setScene(self._scene)
         self.setTransformationAnchor(qtw.QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(qtw.QGraphicsView.AnchorUnderMouse)
+
         self.setVerticalScrollBarPolicy(qtc.Qt.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(qtc.Qt.ScrollBarAlwaysOff)
+
         self.setBackgroundBrush(qtg.QBrush(qtg.QColor(30, 30, 30)))
         self.setFrameShape(qtw.QFrame.NoFrame)
+
+        # Display selected image from list (connection to signal)
+        loaded_images_list.currentItemChanged.connect(self.update_displayed_image)
 
     def hasImage(self):
         return not self.image_loaded
 
     # Fit image to view
-    def fitInView(self, scale=True):
+    def fitInView(self, scale=True):  # TODO: Implement/remove self.scale
         rect = qtc.QRectF(self._photo.pixmap().rect())
         if not rect.isNull():
             self.setSceneRect(rect)
@@ -48,20 +56,28 @@ class ImageViewer(qtw.QGraphicsView):
             self.current_zoom_level = 0
 
     # Set image
-    def setImage(self, pixmap=None):
-        if pixmap and not pixmap.isNull():
-            self.image_loaded = False
-            self.setDragMode(qtw.QGraphicsView.ScrollHandDrag)
-            self._photo.setPixmap(pixmap)
-        else:
-            self.image_loaded = True
-            self.setDragMode(qtw.QGraphicsView.NoDrag)
-            self._photo.setPixmap(qtg.QPixmap())
+    # def setImage(self, pixmap=None):
+    #     if pixmap and not pixmap.isNull():
+    #         self.image_loaded = False
+    #         self.setDragMode(qtw.QGraphicsView.ScrollHandDrag)
+    #         self._photo.setPixmap(pixmap)
+    #     else:
+    #         self.image_loaded = True
+    #         self.setDragMode(qtw.QGraphicsView.NoDrag)
+    #         self._photo.setPixmap(qtg.QPixmap())
 
-        # Reset zoom
-        if self.reset_zoom:
-            self.current_zoom_level = 0
-            self.fitInView()
+    #     # Reset zoom
+    #     if self.reset_zoom:
+    #         self.current_zoom_level = 0
+    #         self.fitInView()
+
+    # Change displayed image
+    def update_displayed_image(new_widget_item, prev_widget_item):
+        print("Change image display")
+
+    """
+        Overridden signals
+    """
 
     def wheelEvent(self, event):
         if self.hasImage():

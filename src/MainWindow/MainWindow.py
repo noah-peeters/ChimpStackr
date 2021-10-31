@@ -68,6 +68,7 @@ class Window(qtw.QMainWindow):
             home_dir,
             "Image files " + SUPPORTED_IMAGE_FORMATS,
         )
+        self.centralWidget.set_loaded_images(new_image_files)
 
     # Shutdown all currently running processes, cleanup and close window
     def shutdown_application(self):
