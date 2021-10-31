@@ -27,7 +27,7 @@ class Window(qtw.QMainWindow):
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(int(geometry.width() * 0.7), int(geometry.height() * 0.7))
 
-    # Display dialog if user is sure they want to quit
+    # Display dialog to confirm if user wants to quit
     def closeEvent(self, event):
         reply = qtw.QMessageBox.question(
             self,
