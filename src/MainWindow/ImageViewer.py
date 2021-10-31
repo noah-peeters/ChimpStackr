@@ -62,6 +62,9 @@ class ImageViewer(qtw.QGraphicsView):
             if path != None:
                 image = cv2.imread(path)
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+                # Convert np RGB array to QImage
+                # src: https://stackoverflow.com/questions/34232632/convert-python-opencv-image-numpy-array-to-pyqt-qpixmap-image
                 qimage = qtg.QImage(
                     image,
                     image.shape[1],
