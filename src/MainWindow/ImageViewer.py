@@ -51,22 +51,6 @@ class ImageViewer(qtw.QGraphicsView):
                 self.scale(factor, factor)
             self.current_zoom_level = 0
 
-    # Set image
-    # def setImage(self, pixmap=None):
-    #     if pixmap and not pixmap.isNull():
-    #         self.image_loaded = False
-    #         self.setDragMode(qtw.QGraphicsView.ScrollHandDrag)
-    #         self._photo.setPixmap(pixmap)
-    #     else:
-    #         self.image_loaded = True
-    #         self.setDragMode(qtw.QGraphicsView.NoDrag)
-    #         self._photo.setPixmap(qtg.QPixmap())
-
-    #     # Reset zoom
-    #     if self.reset_zoom:
-    #         self.current_zoom_level = 0
-    #         self.fitInView()
-
     # Change displayed image
     def update_displayed_image(self, new_widget_item, prev_widget_item):
         print("Change clicked image")
