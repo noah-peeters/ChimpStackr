@@ -55,6 +55,7 @@ class ImageViewer(qtw.QGraphicsView):
     def update_displayed_image(self, new_widget_item, prev_widget_item):
         print("Change clicked image")
         # TODO: Gets called many times on loaded images widget item change
+        # TODO: Option to display image using JPEG compression
         if new_widget_item:
             # Display selected image
             path = new_widget_item.data(qtc.Qt.UserRole)
