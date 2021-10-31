@@ -77,6 +77,11 @@ class ImageViewer(qtw.QGraphicsView):
             self.setDragMode(qtw.QGraphicsView.NoDrag)
             self._photo.setPixmap(qtg.QPixmap())
             self.hasImage = False
+        
+        # Reset zoom if enabled
+        if self.reset_zoom:
+            self.current_zoom_level = 0
+            self.fitInView()
 
     """
         Overridden signals
