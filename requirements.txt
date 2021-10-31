@@ -1,2 +1,3 @@
 PySide6
 qt-material
+opencv-python-headless # UI is not needed
