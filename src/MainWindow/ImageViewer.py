@@ -53,8 +53,6 @@ class ImageViewer(qtw.QGraphicsView):
 
     # Change displayed image
     def update_displayed_image(self, new_widget_item, prev_widget_item):
-        print("Change clicked image")
-        # TODO: Gets called many times on loaded images widget item change
         # TODO: Option to display image using JPEG compression
         if new_widget_item:
             # Display selected image
@@ -81,7 +79,7 @@ class ImageViewer(qtw.QGraphicsView):
             self.setDragMode(qtw.QGraphicsView.NoDrag)
             self._photo.setPixmap(qtg.QPixmap())
             self.hasImage = False
-        
+
         # Reset zoom if enabled
         if self.reset_zoom:
             self.current_zoom_level = 0
