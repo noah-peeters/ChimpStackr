@@ -73,8 +73,6 @@ class Window(qtw.QMainWindow):
     # Shutdown all currently running processes, cleanup and close window
     def shutdown_application(self):
         self.close()
-        # TODO: Display dialog to make sure user wants to quit
-        # qtw.qApp.aboutToQuit()
 
     # Save project file to disk
     def save_project_to_file(self):
