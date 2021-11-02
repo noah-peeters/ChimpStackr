@@ -53,7 +53,6 @@ class ImageViewer(qtw.QGraphicsView):
 
     # Change displayed image
     def update_displayed_image(self, new_widget_item, prev_widget_item):
-        # TODO: Option to display image using JPEG compression
         if new_widget_item:
             # Display selected image
             path = new_widget_item.data(qtc.Qt.UserRole)
