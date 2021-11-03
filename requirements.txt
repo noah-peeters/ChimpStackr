@@ -1,7 +1,6 @@
 # Pure UI requirements
 PySide6==6.2.1
 qt-material==2.8.12
-QtAwesome==1.1.0
 
 # Algorithm requirements (UI not needed)
 opencv-python-headless==4.5.4.58
