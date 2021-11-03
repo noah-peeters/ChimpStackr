@@ -12,7 +12,7 @@ if __name__ == "__main__":
     # TODO: Make setting toggle that saves stylesheet
     # TODO: Add icons using qta-browser
     # Setup stylesheet
-    apply_stylesheet(app, "dark_amber.xml")
+    apply_stylesheet(app, "dark_blue.xml")
 
     window.show()
     sys.exit(app.exec())
