@@ -4,9 +4,9 @@
 import tempfile
 
 import utilities
-import pyramid
-import post_processing
-import algorithm
+import algorithm.pyramid as pyramid
+import algorithm.post_processing as post_processing
+import algorithm.algorithm as algorithm
 
 
 class LaplacianPyramid:

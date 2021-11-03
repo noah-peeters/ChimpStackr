@@ -2,7 +2,6 @@
     Class that handles creating Laplacian (+Gaussian) pyramids for images.
     Can reconstruct image from pyramid.
 """
-import tempfile
 
 import cv2
 import numpy as np
