@@ -10,6 +10,7 @@ if __name__ == "__main__":
     window = Window()
 
     # TODO: Make setting toggle that saves stylesheet
+    # TODO: Add icons using qta-browser
     # Setup stylesheet
     apply_stylesheet(app, "dark_amber.xml")
 
