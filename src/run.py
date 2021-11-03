@@ -9,7 +9,7 @@ if __name__ == "__main__":
     app = qtw.QApplication(sys.argv)
     window = Window()
 
-    # TODO: Make setting toggle that saves stylesheet
+    # TODO: Make setting toggle that saves stylesheet (change happens without restart)
     # TODO: Add icons using qta-browser
     # Setup stylesheet
     apply_stylesheet(app, "dark_blue.xml")
