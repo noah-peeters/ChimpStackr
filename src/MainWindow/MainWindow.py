@@ -5,8 +5,12 @@
 import os
 import PySide6.QtWidgets as qtw
 
+# UI dependencies
 import MainWindow.QActions as qt_actions_setup
-from MainWindow.MainLayout import CenterWidget
+import MainWindow.MainLayout as main_layout
+
+# Algorithm
+import algorithm.API as algorithm_API
 
 SUPPORTED_IMAGE_FORMATS = "(*.jpg *.png)"
 
@@ -21,11 +25,15 @@ class Window(qtw.QMainWindow):
         # Setup actions
         qt_actions_setup.setup_actions(self)
         # Set center widget
-        self.setCentralWidget(CenterWidget(self))
+        self.setCentralWidget(main_layout.CenterWidget(self))
 
         # Set min. window size based on pixel size
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(int(geometry.width() * 0.7), int(geometry.height() * 0.7))
+
+        # Setup algorithm API
+        # TODO: Allow user to change settings
+        self.LaplacianAlgorithm = algorithm_API.LaplacianPyramid(6, 8)
 
     # Display dialog to confirm if user wants to quit
     def closeEvent(self, event):
@@ -43,12 +51,13 @@ class Window(qtw.QMainWindow):
 
     # Export output image to file on disk
     def export_output_image(self):
-        self.statusBar().showMessage(
-            "Exporting output image...", self.statusbar_msg_display_time
-        )
+        if self.LaplacianAlgorithm.output_image:
+            self.statusBar().showMessage(
+                "Exporting output image...", self.statusbar_msg_display_time
+            )
 
-        # rgb = cv2.cvtColor(output, cv2.COLOR_BGR2RGB)
-        # cv2.imwrite(path, rgb)
+            # rgb = cv2.cvtColor(self.LaplacianAlgorithm.output_image, cv2.COLOR_BGR2RGB)
+            # cv2.imwrite(path, rgb)
 
     # Clear all loaded images
     def clear_all_images(self):
@@ -70,6 +79,8 @@ class Window(qtw.QMainWindow):
         )
         self.centralWidget().set_loaded_images(new_image_files)
 
+        self.LaplacianAlgorithm.update_image_paths(new_image_files)
+
     # Shutdown all currently running processes, cleanup and close window
     def shutdown_application(self):
         self.close()
@@ -84,8 +95,10 @@ class Window(qtw.QMainWindow):
         self.statusBar().showMessage(
             "Started aligning & stacking images...", self.statusbar_msg_display_time
         )
+        self.LaplacianAlgorithm.align_and_stack_images()
 
     def stack_loaded_images(self):
         self.statusBar().showMessage(
             "Started stacking images...", self.statusbar_msg_display_time
         )
+        self.LaplacianAlgorithm.stack_images()
