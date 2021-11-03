@@ -3,6 +3,7 @@
     It is the "root display".
 """
 import os
+import cv2
 import PySide6.QtWidgets as qtw
 
 # UI dependencies
@@ -51,13 +52,18 @@ class Window(qtw.QMainWindow):
 
     # Export output image to file on disk
     def export_output_image(self):
-        if self.LaplacianAlgorithm.output_image != None:
-            self.statusBar().showMessage(
-                "Exporting output image...", self.statusbar_msg_display_time
+        if self.LaplacianAlgorithm.output_image is not None:
+            home_dir = os.path.expanduser("~")
+            file_path, _ = qtw.QFileDialog.getSaveFileName(
+                self, "Export stacked image", home_dir, SUPPORTED_IMAGE_FORMATS
             )
-
-            # rgb = cv2.cvtColor(self.LaplacianAlgorithm.output_image, cv2.COLOR_BGR2RGB)
-            # cv2.imwrite(path, rgb)
+            if file_path:
+                file_path = os.path.abspath(file_path)
+                self.statusBar().showMessage(
+                    "Exporting output image...", self.statusbar_msg_display_time
+                )
+                
+                cv2.imwrite(file_path, self.LaplacianAlgorithm.output_image)
 
     # Clear all loaded images
     def clear_all_images(self):
