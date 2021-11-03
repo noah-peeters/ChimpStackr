@@ -51,7 +51,7 @@ class Window(qtw.QMainWindow):
 
     # Export output image to file on disk
     def export_output_image(self):
-        if self.LaplacianAlgorithm.output_image:
+        if self.LaplacianAlgorithm.output_image != None:
             self.statusBar().showMessage(
                 "Exporting output image...", self.statusbar_msg_display_time
             )
