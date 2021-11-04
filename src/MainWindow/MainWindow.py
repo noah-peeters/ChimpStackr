@@ -39,20 +39,6 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         # TODO: Allow user to change program settings
         self.LaplacianAlgorithm = algorithm_API.LaplacianPyramid(6, 8)
 
-    # Display dialog to confirm if user wants to quit
-    def closeEvent(self, event):
-        reply = qtw.QMessageBox.question(
-            self,
-            "Exit program?",
-            "Are you sure you want to exit the program? You might lose unsaved work!",
-            qtw.QMessageBox.Yes,
-            qtw.QMessageBox.No,
-        )
-        if reply == qtw.QMessageBox.Yes:
-            event.accept()
-        else:
-            event.ignore()
-
     # Export output image to file on disk
     def export_output_image(self):
         if self.LaplacianAlgorithm.output_image is not None:
@@ -111,3 +97,20 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             "Started stacking images...", self.statusbar_msg_display_time
         )
         self.LaplacianAlgorithm.stack_images()
+
+    """
+        Overridden signals
+    """
+    # Display dialog to confirm if user wants to quit
+    def closeEvent(self, event):
+        reply = qtw.QMessageBox.question(
+            self,
+            "Exit program?",
+            "Are you sure you want to exit the program? You might lose unsaved work!",
+            qtw.QMessageBox.Yes,
+            qtw.QMessageBox.No,
+        )
+        if reply == qtw.QMessageBox.Yes:
+            event.accept()
+        else:
+            event.ignore()
