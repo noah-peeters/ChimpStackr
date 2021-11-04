@@ -20,18 +20,17 @@ SUPPORTED_IMAGE_FORMATS = "(*.jpg *.png)"
 class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     def __init__(self):
         super().__init__()
-
         self.statusbar_msg_display_time = 2000  # Time in ms
-
         self.setWindowTitle("Test")
+        # Set min. window size based on pixel size
+        geometry = self.screen().availableGeometry()
+        self.setMinimumSize(int(geometry.width() * 0.5), int(geometry.height() * 0.5))
+        self.showFullScreen()
+
         # Setup actions
         qt_actions_setup.setup_actions(self)
         # Set center widget
         self.setCentralWidget(main_layout.CenterWidget(self))
-
-        # Set min. window size based on pixel size
-        geometry = self.screen().availableGeometry()
-        self.setMinimumSize(int(geometry.width() * 0.7), int(geometry.height() * 0.7))
 
         # Stylesheet
         # TODO: Make setting toggle that saves stylesheet
