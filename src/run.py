@@ -11,7 +11,7 @@ if __name__ == "__main__":
 
     # TODO: Make setting toggle that saves stylesheet (change happens without restart)
     # Setup stylesheet
-    apply_stylesheet(app, "dark_blue.xml")
+    apply_stylesheet(app, theme="dark_blue.xml")
 
     window.show()
     sys.exit(app.exec())
