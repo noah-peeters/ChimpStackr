@@ -5,6 +5,7 @@
 import os
 import cv2
 import PySide6.QtWidgets as qtw
+import qt_material
 
 # UI dependencies
 import MainWindow.QActions as qt_actions_setup
@@ -16,9 +17,9 @@ import algorithm.API as algorithm_API
 SUPPORTED_IMAGE_FORMATS = "(*.jpg *.png)"
 
 
-class Window(qtw.QMainWindow):
+class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     def __init__(self):
-        qtw.QMainWindow.__init__(self)
+        super().__init__()
 
         self.statusbar_msg_display_time = 2000  # Time in ms
 
@@ -32,8 +33,12 @@ class Window(qtw.QMainWindow):
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(int(geometry.width() * 0.7), int(geometry.height() * 0.7))
 
+        # Stylesheet
+        # TODO: Make setting toggle that saves stylesheet
+        self.apply_stylesheet(self, "dark_blue.xml")
+
         # Setup algorithm API
-        # TODO: Allow user to change settings
+        # TODO: Allow user to change program settings
         self.LaplacianAlgorithm = algorithm_API.LaplacianPyramid(6, 8)
 
     # Display dialog to confirm if user wants to quit
@@ -62,7 +67,7 @@ class Window(qtw.QMainWindow):
                 self.statusBar().showMessage(
                     "Exporting output image...", self.statusbar_msg_display_time
                 )
-                
+
                 cv2.imwrite(file_path, self.LaplacianAlgorithm.output_image)
 
     # Clear all loaded images
