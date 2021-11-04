@@ -4,6 +4,7 @@
 """
 import os
 import cv2
+import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 import qt_material
 
@@ -17,6 +18,80 @@ import algorithm.API as algorithm_API
 SUPPORTED_IMAGE_FORMATS = "(*.jpg *.png)"
 
 
+import traceback, sys
+
+
+class WorkerSignals(qtc.QObject):
+    """
+    Defines the signals available from a running worker thread.
+
+    Supported signals are:
+
+    finished
+        No data
+
+    error
+        tuple (exctype, value, traceback.format_exc() )
+
+    result
+        object data returned from processing, anything
+
+    progress
+        int indicating % progress
+
+    """
+
+    finished = qtc.Signal()
+    error = qtc.Signal(tuple)
+    result = qtc.Signal(object)
+    progress = qtc.Signal(int)
+
+
+class Worker(qtc.QRunnable):
+    """
+    Worker thread
+
+    Inherits from QRunnable to handler worker thread setup, signals and wrap-up.
+
+    :param callback: The function callback to run on this worker thread. Supplied args and
+                     kwargs will be passed through to the runner.
+    :type callback: function
+    :param args: Arguments to pass to the callback function
+    :param kwargs: Keywords to pass to the callback function
+
+    """
+
+    def __init__(self, fn, *args, **kwargs):
+        super(Worker, self).__init__()
+
+        # Store constructor arguments (re-used for processing)
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+        self.signals = WorkerSignals()
+
+        # Add the callback to our kwargs
+        #self.kwargs["progress_callback"] = self.signals.progress
+
+    @qtc.Slot()
+    def run(self):
+        """
+        Initialise the runner function with passed args, kwargs.
+        """
+
+        # Retrieve args/kwargs here; and fire processing using them
+        try:
+            result = self.fn(*self.args, **self.kwargs)
+        except:
+            traceback.print_exc()
+            exctype, value = sys.exc_info()[:2]
+            self.signals.error.emit((exctype, value, traceback.format_exc()))
+        else:
+            self.signals.result.emit(result)  # Return the result of the processing
+        finally:
+            self.signals.finished.emit()  # Done
+
+
 class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     def __init__(self):
         super().__init__()
@@ -24,7 +99,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.setWindowTitle("Test")
         # Set min. window size based on pixel size
         geometry = self.screen().availableGeometry()
-        self.setMinimumSize(int(geometry.width() * 0.5), int(geometry.height() * 0.5))
+        self.setMinimumSize(int(geometry.width() * 0.6), int(geometry.height() * 0.6))
 
         # Setup actions
         qt_actions_setup.setup_actions(self)
@@ -38,6 +113,12 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         # Setup algorithm API
         # TODO: Allow user to change program settings
         self.LaplacianAlgorithm = algorithm_API.LaplacianPyramid(6, 8)
+
+        # Threadpool for multi-threading (prevent UI freezing)
+        self.threadpool = qtc.QThreadPool()
+        print(
+            "Multithreading with maximum %d threads" % self.threadpool.maxThreadCount()
+        )
 
     # Export output image to file on disk
     def export_output_image(self):
@@ -96,7 +177,24 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.statusBar().showMessage(
             "Started stacking images...", self.statusbar_msg_display_time
         )
-        self.LaplacianAlgorithm.stack_images()
+        # self.LaplacianAlgorithm.stack_images()
+
+        def print_output(s):
+            print(s)
+
+        def thread_complete():
+            print("COMPLETED")
+
+        def progress_fn(n):
+            print("%d%% done" % n)
+
+        worker = Worker(self.LaplacianAlgorithm.stack_images)
+        worker.signals.result.connect(print_output)
+        worker.signals.finished.connect(thread_complete)
+        worker.signals.progress.connect(progress_fn)
+
+        # Execute
+        self.threadpool.start(worker)
 
     """
         Overridden signals

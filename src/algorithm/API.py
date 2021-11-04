@@ -85,6 +85,7 @@ class LaplacianPyramid:
         )
 
 
+# Test algorithm
 if __name__ == "__main__":
     import glob, cv2, time
     import numba.cuda as cu
