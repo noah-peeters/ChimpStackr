@@ -25,7 +25,6 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         # Set min. window size based on pixel size
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(int(geometry.width() * 0.5), int(geometry.height() * 0.5))
-        self.showFullScreen()
 
         # Setup actions
         qt_actions_setup.setup_actions(self)
