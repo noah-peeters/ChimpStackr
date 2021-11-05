@@ -7,29 +7,19 @@ import PySide6.QtCore as qtc
 import traceback, sys
 
 
+# Signals available from a running worker thread
 class WorkerSignals(qtc.QObject):
-    """
-    Defines the signals available from a running worker thread.
-
-    Supported signals are:
-
-    finished
-        No data
-
-    error
-        tuple (exctype, value, traceback.format_exc() )
-
-    result
-        object data returned from processing, anything
-
-    progress
-        int indicating % progress
-    """
-
+    # Fire when process finishes
     finished = qtc.Signal()
+    # Error message
     error = qtc.Signal(tuple)
+    # Result object
+    # TODO: Check if necessary
     result = qtc.Signal(object)
-    progress = qtc.Signal(int)
+    # Integer to set progressbar value to
+    progress_update = qtc.Signal(int)
+    # Progressbar status update string
+    status_update = qtc.Signal(str)
 
 
 class Worker(qtc.QRunnable):
@@ -64,10 +54,13 @@ class Worker(qtc.QRunnable):
             # TODO: Pass signals, so function can update progress
             result = self.fn(*self.args, self.signals)
         except:
+            # Emit error message
             traceback.print_exc()
             exctype, value = sys.exc_info()[:2]
             self.signals.error.emit((exctype, value, traceback.format_exc()))
         else:
-            self.signals.result.emit(result)  # Return the result of the processing
-        
+            # Emit result object
+            self.signals.result.emit(result)
+
+        # Emit finished signal
         self.signals.finished.emit()

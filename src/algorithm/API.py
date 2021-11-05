@@ -3,6 +3,8 @@
 """
 import tempfile
 
+from numpy import sign
+
 import utilities
 import algorithm.pyramid as pyramid
 import algorithm.post_processing as post_processing
@@ -78,14 +80,14 @@ class LaplacianPyramid:
             # Compute Laplacian pyramids of src images
             self.laplacian_pyramid_archive_names = (
                 self.Algorithm.generate_laplacian_pyramids(
-                    self.image_paths, self.root_temp_directory, self.pyramid_num_levels
+                    self.image_paths, self.root_temp_directory, self.pyramid_num_levels, signals
                 )
             )
 
         laplacian_time = time.time()
 
         stacked_pyramid = self.Algorithm.focus_fuse_pyramids(
-            self.laplacian_pyramid_archive_names, self.fusion_kernel_size_pixels
+            self.laplacian_pyramid_archive_names, self.fusion_kernel_size_pixels, signals
         )
 
         pyramid_fusion_time = time.time()

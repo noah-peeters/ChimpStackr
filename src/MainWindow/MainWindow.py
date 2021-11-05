@@ -114,16 +114,23 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         def thread_complete():
             print("COMPLETED")
 
+        def status_update(msg):
+            print(msg)
+
         worker = QThreading.Worker(self.LaplacianAlgorithm.stack_images)
         worker.signals.result.connect(print_output)
         worker.signals.finished.connect(thread_complete)
-        worker.signals.progress.connect(self.update_progressbar_value)
+        worker.signals.progress_update.connect(self.update_progressbar_value)
+        worker.signals.status_update.connect(status_update)
 
         # Execute
         self.threadpool.start(worker)
 
+        self.progressbar.setVisible(True)
+
     # Update progressbar value to new number
     def update_progressbar_value(self, number):
+        print("Set progressbar value: " + str(number))
         self.progressbar.setValue(number)
 
     # Update progressbar max value

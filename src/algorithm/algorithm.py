@@ -1,7 +1,7 @@
 """
     Main pyramid stacking algorithm(s) + image alignment algorithm.
 """
-import os, tempfile
+import os, tempfile, time
 import cv2
 import numpy as np
 import numba as nb
@@ -9,6 +9,7 @@ from numba.typed import List
 
 import algorithm.image_storage as image_storage
 import algorithm.pyramid as pyramid
+import algorithm.time_remaining_handler as time_remaining
 
 
 @nb.njit(nb.float32[:, :, :](nb.float32[:, :, :], nb.int64, nb.int64), fastmath=True)
@@ -182,14 +183,15 @@ class Algorithm:
 
     # Generate laplacian pyramids for every image (if not already created) and write to disk archive
     def generate_laplacian_pyramids(
-        self, image_paths, root_dir, num_levels, load_from_tempfile=False
+        self, image_paths, root_dir, num_levels, signals, load_from_tempfile=False
     ):
         laplacian_pyramid_archive_names = []
         for i, path in enumerate(image_paths):
-            # Not yet created; create now
-            print(
-                "Creating Laplacian pyramid " + str(i + 1) + "/" + str(len(image_paths))
-            )
+            # signals.status_update.emit(
+            #     "Creating Laplacian pyramid " + str(i + 1) + "/" + str(len(image_paths))
+            # )
+            start_time = time.time()
+
             if not load_from_tempfile:
                 # Load from src image
                 image = cv2.imread(path)
@@ -205,13 +207,32 @@ class Algorithm:
             laplacian_pyramid_archive_names.append(tmp_file)
             del pyramid
 
+            # Send signals
+            percentage_finished = (i + 1) / len(image_paths) * 100
+            signals.status_update.emit(
+                time_remaining.calculate_time_remaining(
+                    "pyramid_focus_fusion",
+                    percentage_finished,
+                    time.time() - start_time,
+                )
+            )
+            signals.progress_update.emit(
+                time_remaining.calculate_progressbar_value(
+                    "pyramid_focus_fusion", percentage_finished
+                )
+            )
+
         return laplacian_pyramid_archive_names
 
     # Fuse all images from their Laplacian pyramids
-    def focus_fuse_pyramids(self, image_archive_names, kernel_size):
+    def focus_fuse_pyramids(self, image_archive_names, kernel_size, signals):
         output_pyramid = List()
         for i, archive_name in enumerate(image_archive_names):
-            print("Fusing image " + str(i + 1) + "/" + str(len(image_archive_names)))
+            # signals.status_update.emit(
+            #     "Fusing image " + str(i + 1) + "/" + str(len(image_archive_names))
+            # )
+            start_time = time.time()
+
             if i == 0:
                 # Directly "copy" first image's pyramid into output
                 laplacian_pyramid = self.ImageStorage.load_laplacian_pyramid(
@@ -254,5 +275,20 @@ class Algorithm:
                     new_pyr.append(new_pyr_level)
                 # Set updated pyramid
                 output_pyramid = new_pyr
+
+            # Send signals
+            percentage_finished = (i + 1) / len(image_archive_names) * 100
+            signals.status_update.emit(
+                time_remaining.calculate_time_remaining(
+                    "pyramid_focus_fusion",
+                    percentage_finished,
+                    time.time() - start_time,
+                )
+            )
+            signals.progress_update.emit(
+                time_remaining.calculate_progressbar_value(
+                    "pyramid_focus_fusion", percentage_finished
+                )
+            )
 
         return output_pyramid
