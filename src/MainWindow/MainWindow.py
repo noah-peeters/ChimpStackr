@@ -130,7 +130,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
 
     # Update progressbar value to new number
     def update_progressbar_value(self, number):
-        print("Set progressbar value: " + str(number))
+        # print("Set progressbar value: " + str(number))
         self.progressbar.setValue(number)
 
     # Update progressbar max value

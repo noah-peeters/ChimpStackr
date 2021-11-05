@@ -30,17 +30,19 @@ def calculate_progressbar_value(operation_name, percentage_finished):
 
 
 # Return remaining time of algorithm (hh:mm:ss)
-def calculate_time_remaining(operation_name, percentage_finished, time_taken):
-    multiplier = time_spent_percentages[operation_name] / percentage_finished
-    # Time remaining to complete *this* operation
-    calc = time_taken * multiplier
+def calculate_time_remaining(
+    operation_name, percentage_increment, percentage_left, time_taken
+):
+    # Time to 100% completion of current operation
+    time_left = percentage_left / percentage_increment * time_taken
+
     if operation_name == "laplacian_generation":
-        # Sum with (approx.) time of next operation
+        # Add in approx. time of focus fusion
         multiplier = (
             time_spent_percentages["pyramid_focus_fusion"]
             / time_spent_percentages["laplacian_generation"]
         )
-        calc *= multiplier
+        time_left += time_left * multiplier
 
     # TODO: Process format to be hh:mm:ss
-    return str(calc) + " seconds left until program finish"
+    return str(time_left) + " seconds left until program finish"

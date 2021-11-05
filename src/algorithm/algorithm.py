@@ -186,6 +186,7 @@ class Algorithm:
         self, image_paths, root_dir, num_levels, signals, load_from_tempfile=False
     ):
         laplacian_pyramid_archive_names = []
+        percentage_increment = 1 / len(image_paths) * 100
         for i, path in enumerate(image_paths):
             # signals.status_update.emit(
             #     "Creating Laplacian pyramid " + str(i + 1) + "/" + str(len(image_paths))
@@ -212,7 +213,8 @@ class Algorithm:
             signals.status_update.emit(
                 time_remaining.calculate_time_remaining(
                     "pyramid_focus_fusion",
-                    percentage_finished,
+                    percentage_increment,
+                    100 - (i + 1) * percentage_increment,
                     time.time() - start_time,
                 )
             )
@@ -232,6 +234,7 @@ class Algorithm:
             #     "Fusing image " + str(i + 1) + "/" + str(len(image_archive_names))
             # )
             start_time = time.time()
+            percentage_increment = 1 / len(image_archive_names) * 100
 
             if i == 0:
                 # Directly "copy" first image's pyramid into output
@@ -281,7 +284,8 @@ class Algorithm:
             signals.status_update.emit(
                 time_remaining.calculate_time_remaining(
                     "pyramid_focus_fusion",
-                    percentage_finished,
+                    percentage_increment,
+                    100 - (i + 1) * percentage_increment,
                     time.time() - start_time,
                 )
             )
