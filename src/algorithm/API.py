@@ -32,6 +32,7 @@ class LaplacianPyramid:
         new_image_paths = sorted(new_image_paths, key=utilities.int_string_sorting)
         if new_image_paths != self.image_paths:
             # Reset loaded Laplacians
+            # TODO: Remove tempfiles
             self.laplacian_pyramid_archive_names = []
             self.laplacian_pyramid_archive_names_aligned = []
         
