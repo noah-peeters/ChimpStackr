@@ -64,7 +64,9 @@ class LaplacianPyramid:
         )
 
     # Stack loaded images ( +create laplacian pyramids if not already created)
-    def stack_images(self):
+    def stack_images(self, signals):
+        import time
+        start_time = time.time()
         if len(self.laplacian_pyramid_archive_names) <= 0:
             # Compute Laplacian pyramids of src images
             self.laplacian_pyramid_archive_names = (
@@ -73,15 +75,49 @@ class LaplacianPyramid:
                 )
             )
 
+        laplacian_time = time.time()
+
         stacked_pyramid = self.Algorithm.focus_fuse_pyramids(
             self.laplacian_pyramid_archive_names, self.fusion_kernel_size_pixels
         )
 
+        pyramid_fusion_time = time.time()
+
         # Reconstruct image from Laplacian pyramid
         fused_image = self.Pyramid.reconstruct(stacked_pyramid)
 
+        pyramid_reconstruction_time = time.time()
+
         self.output_image = self.PostProcessing.apply_brightness_contrast(
             fused_image, 8, 8
+        )
+
+        post_processing_time = time.time()
+
+        total_time = post_processing_time - start_time
+
+        print("Total time: " + str(total_time) + "s")
+        print(
+            "Laplacian: " + str((laplacian_time - start_time) / total_time * 100) + "%"
+        )
+        print(
+            "Pyramid fusion: "
+            + str((pyramid_fusion_time - laplacian_time) / total_time * 100)
+            + "%"
+        )
+        print(
+            "Pyramid reconstruction: "
+            + str(
+                (pyramid_reconstruction_time - pyramid_fusion_time) / total_time * 100
+            )
+            + "%"
+        )
+        print(
+            "Post processing: "
+            + str(
+                (post_processing_time - pyramid_reconstruction_time) / total_time * 100
+            )
+            + "%"
         )
 
 

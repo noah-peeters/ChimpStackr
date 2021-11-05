@@ -31,6 +31,11 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         # Set center widget
         self.setCentralWidget(main_layout.CenterWidget(self))
 
+        # Permanent progressbar inside statusbar
+        self.progressbar = qtw.QProgressBar()
+        self.statusBar().addPermanentWidget(self.progressbar)
+        self.progressbar.setVisible(False)
+
         # Stylesheet
         # TODO: Make setting toggle that saves stylesheet
         self.apply_stylesheet(self, "dark_blue.xml")
@@ -109,16 +114,21 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         def thread_complete():
             print("COMPLETED")
 
-        def progress_fn(n):
-            print("%d%% done" % n)
-
         worker = QThreading.Worker(self.LaplacianAlgorithm.stack_images)
         worker.signals.result.connect(print_output)
         worker.signals.finished.connect(thread_complete)
-        worker.signals.progress.connect(progress_fn)
+        worker.signals.progress.connect(self.update_progressbar_value)
 
         # Execute
         self.threadpool.start(worker)
+
+    # Update progressbar value to new number
+    def update_progressbar_value(self, number):
+        self.progressbar.setValue(number)
+
+    # Update progressbar max value
+    def update_progressbar_max_value(self, max_val):
+        self.progressbar.setMaximum(max_val)
 
     """
         Overridden signals

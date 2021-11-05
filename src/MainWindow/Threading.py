@@ -24,7 +24,6 @@ class WorkerSignals(qtc.QObject):
 
     progress
         int indicating % progress
-
     """
 
     finished = qtc.Signal()
@@ -47,32 +46,28 @@ class Worker(qtc.QRunnable):
 
     """
 
-    def __init__(self, fn, *args, **kwargs):
+    def __init__(self, fn, *args):
         super(Worker, self).__init__()
 
-        # Store constructor arguments (re-used for processing)
         self.fn = fn
         self.args = args
-        self.kwargs = kwargs
         self.signals = WorkerSignals()
-
-        # Add the callback to our kwargs
-        # self.kwargs["progress_callback"] = self.signals.progress
 
     @qtc.Slot()
     def run(self):
         """
-        Initialise the runner function with passed args, kwargs.
+        Initialise the runner function with passed args.
         """
 
         # Retrieve args/kwargs here; and fire processing using them
         try:
-            result = self.fn(*self.args, **self.kwargs)
+            # TODO: Pass signals, so function can update progress
+            result = self.fn(*self.args, self.signals)
         except:
             traceback.print_exc()
             exctype, value = sys.exc_info()[:2]
             self.signals.error.emit((exctype, value, traceback.format_exc()))
         else:
             self.signals.result.emit(result)  # Return the result of the processing
-        finally:
-            self.signals.finished.emit()  # Done
+        
+        self.signals.finished.emit()
