@@ -12,7 +12,7 @@
     Quick note: when re-stacking the same images; laplacian pyramids are kept on disk.
     They don't need to be recalculated, making the algorithm faster.
 """
-from time import time
+import time
 
 
 time_spent_percentages = {
@@ -42,7 +42,8 @@ def calculate_time_remaining(
             time_spent_percentages["pyramid_focus_fusion"]
             / time_spent_percentages["laplacian_generation"]
         )
-        time_left += time_left * multiplier
+        time_left += time_taken * multiplier
 
     # TODO: Process format to be hh:mm:ss
-    return str(time_left) + " seconds left until program finish"
+    formatted = time.strftime("%H:%M:%S", time.gmtime(time_left))
+    return "Time left until program finish: " + formatted

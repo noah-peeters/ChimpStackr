@@ -212,7 +212,7 @@ class Algorithm:
             percentage_finished = (i + 1) / len(image_paths) * 100
             signals.status_update.emit(
                 time_remaining.calculate_time_remaining(
-                    "pyramid_focus_fusion",
+                    "laplacian_generation",
                     percentage_increment,
                     100 - (i + 1) * percentage_increment,
                     time.time() - start_time,
@@ -220,7 +220,7 @@ class Algorithm:
             )
             signals.progress_update.emit(
                 time_remaining.calculate_progressbar_value(
-                    "pyramid_focus_fusion", percentage_finished
+                    "laplacian_generation", percentage_finished
                 )
             )
 
