@@ -29,7 +29,13 @@ class LaplacianPyramid:
 
     # Set new image paths and sort them
     def update_image_paths(self, new_image_paths):
-        self.image_paths = sorted(new_image_paths, key=utilities.int_string_sorting)
+        new_image_paths = sorted(new_image_paths, key=utilities.int_string_sorting)
+        if new_image_paths != self.image_paths:
+            # Reset loaded Laplacians
+            self.laplacian_pyramid_archive_names = []
+            self.laplacian_pyramid_archive_names_aligned = []
+        
+        self.image_paths = new_image_paths
 
     # Align and stack images
     def align_and_stack_images(self):
