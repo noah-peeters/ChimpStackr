@@ -10,6 +10,7 @@ from numba.typed import List
 import algorithm.image_storage as image_storage
 import algorithm.pyramid as pyramid
 import algorithm.TimeRemainingHandler as TimeRemaining
+import algorithm.ImageLoadingHandler as ImageLoadingHandler
 
 
 @nb.njit(nb.float32[:, :, :](nb.float32[:, :, :], nb.int64, nb.int64), fastmath=True)
@@ -118,13 +119,14 @@ class Algorithm:
         self.ImageStorage = image_storage.ImageStorageHandler()
         self.Pyramid = pyramid.Pyramid()
         self.TimeRemaining = TimeRemaining.TimeRemainingHandler()
+        self.ImageLoadingHandler = ImageLoadingHandler.ImageLoadingHandler()
 
     # ECC image alignment using pyramid approximation
     # src: https://stackoverflow.com/questions/45997891/cv2-motion-euclidean-for-the-warp-mode-in-ecc-image-alignment-method
     def align_image_pair(self, ref_im_path, im2_path, root_temp_dir):
         # Load images
-        ref_im = cv2.imread(ref_im_path)
-        im2 = cv2.imread(im2_path)
+        ref_im = self.ImageLoadingHandler.read_image_from_path(ref_im_path)
+        im2 = self.ImageLoadingHandler.read_image_from_path(im2_path)
 
         # ECC params
         n_iters = 500
@@ -195,7 +197,7 @@ class Algorithm:
 
             if not load_from_tempfile:
                 # Load from src image
-                image = cv2.imread(path)
+                image = self.ImageLoadingHandler.read_image_from_path(path)
             else:
                 # Load from tempfile (aligned image)
                 image = np.load(path, allow_pickle=False)

@@ -54,7 +54,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         if self.LaplacianAlgorithm.output_image is not None:
             home_dir = os.path.expanduser("~")
             file_path, _ = qtw.QFileDialog.getSaveFileName(
-                self, "Export stacked image", home_dir, qtw.QFileDialog.AnyFile()
+                self, "Export stacked image", home_dir
             )
             if file_path:
                 file_path = os.path.abspath(file_path)
@@ -77,7 +77,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         )
         home_dir = os.path.expanduser("~")
         new_image_files, _ = qtw.QFileDialog.getOpenFileNames(
-            self, "Select images to load.", home_dir, qtw.QFileDialog.AnyFile()
+            self, "Select images to load.", home_dir
         )
         self.centralWidget().set_loaded_images(new_image_files)
 
