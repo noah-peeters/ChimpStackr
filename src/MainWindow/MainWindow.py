@@ -11,6 +11,7 @@ import qt_material
 import MainWindow.QActions as qt_actions_setup
 import MainWindow.MainLayout as main_layout
 import MainWindow.Threading as QThreading
+import MainWindow.ProgressBar as ProgressBar
 
 import algorithm.API as algorithm_API
 
@@ -32,9 +33,9 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.setCentralWidget(main_layout.CenterWidget(self))
 
         # Permanent progressbar inside statusbar
-        self.progressbar = qtw.QProgressBar()
-        self.statusBar().addPermanentWidget(self.progressbar)
-        self.progressbar.setVisible(False)
+        self.progress_widget = ProgressBar.ProgressBar()
+        self.statusBar().addPermanentWidget(self.progress_widget)
+        self.progress_widget.setVisible(False)
 
         # Stylesheet
         # TODO: Make setting toggle that saves stylesheet
@@ -126,16 +127,16 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         # Execute
         self.threadpool.start(worker)
 
-        self.progressbar.setVisible(True)
+        self.progress_widget.setVisible(True)
 
     # Update progressbar value to new number
     def update_progressbar_value(self, number):
         # print("Set progressbar value: " + str(number))
-        self.progressbar.setValue(number)
+        self.progress_widget.progressbar.setValue(number)
 
     # Update progressbar max value
-    def update_progressbar_max_value(self, max_val):
-        self.progressbar.setMaximum(max_val)
+    # def update_progressbar_max_value(self, max_val):
+    #     self.progress_widget.setMaximum(max_val)
 
     """
         Overridden signals
