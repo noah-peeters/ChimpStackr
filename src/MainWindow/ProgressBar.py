@@ -1,8 +1,9 @@
 """
     Class that houses a QWidget displaying a progressbar + progress text.
+    Progressbar is used to display progress on a task;
+    Progress text is used to display "time left until completed" messages.
 """
 import PySide6.QtWidgets as qtw
-import PySide6.QtGui as qtg
 
 class ProgressBar(qtw.QWidget):
     def __init__(self):
