@@ -187,6 +187,7 @@ class Algorithm:
         self, image_paths, root_dir, num_levels, signals, load_from_tempfile=False
     ):
         laplacian_pyramid_archive_names = []
+        self.TimeRemaining.clear_cache()
         percentage_increment = 1 / len(image_paths) * 100
         self.TimeRemaining.percentage_increment = percentage_increment
         for i, path in enumerate(image_paths):
@@ -235,6 +236,7 @@ class Algorithm:
             #     "Fusing image " + str(i + 1) + "/" + str(len(image_archive_names))
             # )
             start_time = time.time()
+            self.TimeRemaining.clear_cache()
             percentage_increment = 1 / len(image_archive_names) * 100
             self.TimeRemaining.percentage_increment = percentage_increment
 

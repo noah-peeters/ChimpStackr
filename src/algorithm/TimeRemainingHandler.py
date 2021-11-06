@@ -12,8 +12,7 @@
     Quick note: when re-stacking the same images; laplacian pyramids are kept on disk.
     They don't need to be recalculated, making the algorithm faster.
 """
-# TODO: Cleanup inside class + keep average of times (can be reset on ask)
-import time
+import time, statistics
 
 
 time_spent_percentages = {
@@ -25,7 +24,7 @@ time_spent_percentages = {
 class TimeRemainingHandler:
     def __init__(self):
         self.percentage_increment = 0  # Increment of percentage change per call
-        return
+        self.cached_time_taken = []  # List of cached time taken
 
     # Calculate progressbar value (range: [0, 100]) from current operation percentage
     def calculate_progressbar_value(self, operation_name, percentage_finished):
@@ -38,8 +37,12 @@ class TimeRemainingHandler:
 
     # Return remaining time of algorithm (hh:mm:ss)
     def calculate_time_remaining(self, operation_name, percentage_left, time_taken):
+        self.cached_time_taken.append(time_taken)
+
+        mean_time_taken = statistics.mean(self.cached_time_taken)
+
         # Time to 100% completion of current operation
-        time_left = percentage_left / self.percentage_increment * time_taken
+        time_left = percentage_left / self.percentage_increment * mean_time_taken
 
         if operation_name == "laplacian_generation":
             # Add in approx. time of focus fusion
@@ -47,12 +50,12 @@ class TimeRemainingHandler:
                 time_spent_percentages["pyramid_focus_fusion"]
                 / time_spent_percentages["laplacian_generation"]
             )
-            time_left += time_taken * multiplier
+            time_left += mean_time_taken * multiplier
 
         formatted = time.strftime("%H:%M:%S", time.gmtime(time_left))
         return "Time left until program finish: " + formatted
 
-    # Remove cached times
+    # Remove cached variables
     def clear_cache(self):
         self.percentage_increment = 0
-        return
+        self.cached_time_taken = []
