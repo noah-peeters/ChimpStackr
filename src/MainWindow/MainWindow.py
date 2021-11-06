@@ -139,6 +139,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             qtw.QMessageBox.No,
         )
         if reply == qtw.QMessageBox.Yes:
+            # TODO: Tell possibly running tasks to quit
             event.accept()
         else:
             event.ignore()
