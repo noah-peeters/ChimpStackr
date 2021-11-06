@@ -191,9 +191,6 @@ class Algorithm:
         percentage_increment = 1 / len(image_paths) * 100
         self.TimeRemaining.percentage_increment = percentage_increment
         for i, path in enumerate(image_paths):
-            # signals.status_update.emit(
-            #     "Creating Laplacian pyramid " + str(i + 1) + "/" + str(len(image_paths))
-            # )
             start_time = time.time()
 
             if not load_from_tempfile:
@@ -232,13 +229,8 @@ class Algorithm:
     def focus_fuse_pyramids(self, image_archive_names, kernel_size, signals):
         output_pyramid = List()
         for i, archive_name in enumerate(image_archive_names):
-            # signals.status_update.emit(
-            #     "Fusing image " + str(i + 1) + "/" + str(len(image_archive_names))
-            # )
             start_time = time.time()
-            # self.TimeRemaining.clear_cache()
             percentage_increment = 1 / len(image_archive_names) * 100
-            # self.TimeRemaining.percentage_increment = percentage_increment
 
             if i == 0:
                 # Directly "copy" first image's pyramid into output
