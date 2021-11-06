@@ -69,6 +69,8 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.statusBar().showMessage(
             "Clearing all loaded images...", self.statusbar_msg_display_time
         )
+        self.centralWidget().set_loaded_images([])
+        self.LaplacianAlgorithm.update_image_paths([])
 
     # Load images from a file on disk
     def load_images_from_file(self):
@@ -80,7 +82,6 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             self, "Select images to load.", home_dir
         )
         self.centralWidget().set_loaded_images(new_image_files)
-
         self.LaplacianAlgorithm.update_image_paths(new_image_files)
 
     # Shutdown all currently running processes, cleanup and close window
