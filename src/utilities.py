@@ -1,5 +1,5 @@
 """
-    Utility functions for UI.
+    Utility functions for UI/algorithm.
 """
 import re
 
