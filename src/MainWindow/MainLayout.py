@@ -10,6 +10,11 @@ from MainWindow.ImageViewer import ImageViewer
 from utilities import int_string_sorting
 
 
+class LoadedImagesWidget(qtw.QListWidget):
+    def __init__(self):
+        super().__init__()
+
+
 class CenterWidget(qtw.QWidget):
     default_loaded_images_items = [
         "Loaded images will appear here.",
@@ -49,13 +54,13 @@ class CenterWidget(qtw.QWidget):
     # Called from parent MainWindow. Process image path names and display new loaded images inside list widget.
     # QListWidget data is set to the full image path for quick retrieval later.
     def set_loaded_images(self, new_image_files):
+        self.loaded_images_list.clear()
         if len(new_image_files) <= 0:
             # No images selected, set default
             self.loaded_images_list.addItems(self.default_loaded_images_items)
             return
 
-        # Clear and set new files
-        self.loaded_images_list.clear()
+        # Set new files (if there)
         for path in sorted(new_image_files, key=int_string_sorting):
             name = os.path.basename(path)
             item = qtw.QListWidgetItem()
