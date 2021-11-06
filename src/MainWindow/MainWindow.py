@@ -104,6 +104,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.LaplacianAlgorithm.align_and_stack_images()
 
     def stack_loaded_images(self):
+        # TODO: Handle not having an image loaded
         self.statusBar().showMessage(
             "Started stacking images...", self.statusbar_msg_display_time
         )
