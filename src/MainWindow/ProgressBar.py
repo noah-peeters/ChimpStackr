@@ -15,7 +15,6 @@ class ProgressBar(qtw.QWidget):
 
         self.progressbar = qtw.QProgressBar(self)
         self.progressbar.setVisible(True)
-        self.progressbar.setFormat("%p%")
         layout.addWidget(self.progressbar)
 
         self.progress_label = qtw.QLabel("Please wait while the task is beginning...")
