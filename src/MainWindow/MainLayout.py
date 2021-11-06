@@ -13,6 +13,21 @@ from utilities import int_string_sorting
 class LoadedImagesWidget(qtw.QListWidget):
     def __init__(self):
         super().__init__()
+        self.default_loaded_images_items = [
+            "Loaded images will appear here.",
+            "Please load them in from the 'file' menu.",
+        ]
+        self.setSelectionMode(
+            qtw.QAbstractItemView.ExtendedSelection
+        )
+        self.setAlternatingRowColors(True)
+        
+        self.header_label = qtw.QLabel("Source images")
+
+        v_layout = qtw.QVBoxLayout()
+        v_layout.addWidget(self.header_label)
+        v_layout.addWidget(self)
+        self.setLayout(v_layout)
 
 
 class CenterWidget(qtw.QWidget):
@@ -26,7 +41,6 @@ class CenterWidget(qtw.QWidget):
 
         # Loaded images list widget
         self.loaded_images_list = qtw.QListWidget()
-        self.loaded_images_list.setWindowTitle("Source images")
         # loaded_images_list.setAlternatingRowColors(True)
         self.loaded_images_list.setSelectionMode(
             qtw.QAbstractItemView.ExtendedSelection

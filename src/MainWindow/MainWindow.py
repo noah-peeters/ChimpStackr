@@ -61,8 +61,11 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                 self.statusBar().showMessage(
                     "Exporting output image...", self.statusbar_msg_display_time
                 )
-
-                cv2.imwrite(file_path, self.LaplacianAlgorithm.output_image)
+                try:
+                    cv2.imwrite(file_path, self.LaplacianAlgorithm.output_image)
+                except:
+                    # TODO: Display error in UI
+                    print("ERROR SAVING IMAGE!")
 
     # Clear all loaded images
     def clear_all_images(self):
