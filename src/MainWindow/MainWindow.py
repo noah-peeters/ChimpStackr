@@ -14,7 +14,7 @@ import MainWindow.Threading as QThreading
 import MainWindow.ProgressBar as ProgressBar
 
 import algorithm.API as algorithm_API
-
+# TODO: Make UI more expressive after long operation finished. Show success/error messages
 
 class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     def __init__(self):
