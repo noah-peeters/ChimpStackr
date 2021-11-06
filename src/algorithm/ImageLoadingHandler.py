@@ -83,7 +83,6 @@ class ImageLoadingHandler:
         # Get extension without dot at beginning
         _, extension = os.path.splitext(path)
         extension = extension[1:]
-        print(extension)
         if extension in supported_opencv_formats:
             # Regular imread
             return cv2.imread(path)
