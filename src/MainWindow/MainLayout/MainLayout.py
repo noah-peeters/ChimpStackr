@@ -70,6 +70,7 @@ class CenterWidget(qtw.QWidget):
             self.ImageWidgets.processed_images_widget.list.clear()
             self.ImageWidgets.processed_images_widget.setVisible(False)
         else:
+            # TODO: Doesn't get deleted
             self.ImageWidgets.processed_images_widget.setVisible(True)
             # Add image to list & store data file
             file_handle, tmp_file = tempfile.mkstemp(suffix=".jpg")
