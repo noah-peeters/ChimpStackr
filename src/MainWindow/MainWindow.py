@@ -15,8 +15,6 @@ import MainWindow.ProgressBar as ProgressBar
 
 import algorithm.API as algorithm_API
 
-SUPPORTED_IMAGE_FORMATS = "(*.jpg *.png)"
-
 
 class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     def __init__(self):
@@ -56,7 +54,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         if self.LaplacianAlgorithm.output_image is not None:
             home_dir = os.path.expanduser("~")
             file_path, _ = qtw.QFileDialog.getSaveFileName(
-                self, "Export stacked image", home_dir, SUPPORTED_IMAGE_FORMATS
+                self, "Export stacked image", home_dir, qtw.QFileDialog.AnyFile()
             )
             if file_path:
                 file_path = os.path.abspath(file_path)
@@ -79,10 +77,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         )
         home_dir = os.path.expanduser("~")
         new_image_files, _ = qtw.QFileDialog.getOpenFileNames(
-            self,
-            "Select images to load.",
-            home_dir,
-            "Image files " + SUPPORTED_IMAGE_FORMATS,
+            self, "Select images to load.", home_dir, qtw.QFileDialog.AnyFile()
         )
         self.centralWidget().set_loaded_images(new_image_files)
 
