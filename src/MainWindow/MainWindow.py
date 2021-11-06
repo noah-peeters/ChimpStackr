@@ -28,7 +28,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         # Setup actions
         qt_actions_setup.setup_actions(self)
         # Set center widget
-        self.setCentralWidget(main_layout.CenterWidget(self))
+        self.setCentralWidget(main_layout.CenterWidget())
 
         # Permanent progressbar inside statusbar
         self.progress_widget = ProgressBar.ProgressBar()
