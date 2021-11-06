@@ -16,8 +16,8 @@ import time, statistics
 
 
 time_spent_percentages = {
-    "laplacian_generation": 40,
-    "pyramid_focus_fusion": 60,
+    "laplacian_generation": 45,
+    "pyramid_focus_fusion": 55,
 }
 
 
