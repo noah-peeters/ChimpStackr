@@ -2,7 +2,8 @@
     Center widget layout for MainWindow.
     Parent of loaded images widget, ImageViewer and splitter layout(s).
 """
-import os
+import os, tempfile
+import cv2
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 
@@ -14,10 +15,17 @@ from utilities import int_string_sorting
 class CenterWidget(qtw.QWidget):
     def __init__(self):
         super().__init__()
-        self.ImageWidgets = ImageWidgets.ImageWidgets()
 
-        # Image display widget
-        image_display = ImageViewer.ImageViewer(self.ImageWidgets.loaded_images_widget.list)
+        self.ImageWidgets = ImageWidgets.ImageWidgets()
+        image_display = ImageViewer.ImageViewer()
+
+        # Connect to "selected item change" signals
+        self.ImageWidgets.loaded_images_widget.list.itemClicked.connect(
+            image_display.update_displayed_image
+        )
+        self.ImageWidgets.processed_images_widget.list.itemClicked.connect(
+            image_display.update_displayed_image
+        )
 
         # Create vertical splitter (QListWidgets/ImageViewer)
         v_splitter = qtw.QSplitter()
@@ -55,3 +63,21 @@ class CenterWidget(qtw.QWidget):
             item.setData(qtc.Qt.UserRole, path)  # Set data to full image path
             item.setText(name)  # Set text to image name
             self.ImageWidgets.loaded_images_widget.list.addItem(item)
+
+    # Called from parent MainWindow. Display generated name inside ProcessedImagesWidget
+    def add_processed_image(self, new_image_array):
+        if new_image_array is None:
+            self.ImageWidgets.processed_images_widget.list.clear()
+            self.ImageWidgets.processed_images_widget.setVisible(False)
+        else:
+            self.ImageWidgets.processed_images_widget.setVisible(True)
+            # Add image to list & store data file
+            file_handle, tmp_file = tempfile.mkstemp(suffix=".jpg")
+            item = qtw.QListWidgetItem()
+            item.setText("lap_pyr_stacked")
+            item.setData(qtc.Qt.UserRole, tmp_file)
+
+            cv2.imwrite(tmp_file, new_image_array)
+
+            os.close(file_handle)
+            self.ImageWidgets.processed_images_widget.list.addItem(item)

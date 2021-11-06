@@ -12,7 +12,7 @@ import cv2
 class ImageViewer(qtw.QGraphicsView):
     photoClicked = qtc.Signal(qtc.QPoint)
 
-    def __init__(self, loaded_images_list):
+    def __init__(self):
         super().__init__()
         self.current_zoom_level = 0
         self.reset_zoom = True
@@ -30,9 +30,6 @@ class ImageViewer(qtw.QGraphicsView):
 
         self.setBackgroundBrush(qtg.QBrush(qtg.QColor(30, 30, 30)))
         self.setFrameShape(qtw.QFrame.NoFrame)
-
-        # Display selected image from list (connection to signal)
-        loaded_images_list.currentItemChanged.connect(self.update_displayed_image)
 
     # Fit image to view
     def fitInView(self):
@@ -52,14 +49,13 @@ class ImageViewer(qtw.QGraphicsView):
             self.current_zoom_level = 0
 
     # Change displayed image
-    def update_displayed_image(self, new_widget_item, prev_widget_item):
-        if new_widget_item:
+    def update_displayed_image(self, selected_widget_item):
+        if selected_widget_item:
             # Display selected image
-            path = new_widget_item.data(qtc.Qt.UserRole)
+            path = selected_widget_item.data(qtc.Qt.UserRole)
             if path != None:
                 image = cv2.imread(path)
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
                 # Convert np RGB array to QImage
                 # src: https://stackoverflow.com/questions/34232632/convert-python-opencv-image-numpy-array-to-pyqt-qpixmap-image
                 qimage = qtg.QImage(

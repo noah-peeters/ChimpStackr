@@ -50,6 +50,8 @@ class ProcessedImagesWidget(qtw.QWidget):
         self.setLayout(v_layout)
 
         self.setVisible(False)
+    
+
 
 
 # Widget bringing both QListWidgets together in a horizontal splitter layout

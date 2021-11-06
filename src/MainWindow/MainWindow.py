@@ -85,6 +85,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             self, "Select images to load.", home_dir
         )
         self.centralWidget().set_loaded_images(new_image_files)
+        self.centralWidget().add_processed_image(None)
         self.LaplacianAlgorithm.update_image_paths(new_image_files)
 
     # Shutdown all currently running processes, cleanup and close window
@@ -113,7 +114,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             self.progress_widget.progress_label.setText(msg)
 
         worker = QThreading.Worker(self.LaplacianAlgorithm.stack_images)
-        worker.signals.finished.connect(self.progress_widget.reset_and_hide)
+        worker.signals.finished.connect(self.finished_stack)
         worker.signals.progress_update.connect(self.update_progressbar_value)
         worker.signals.status_update.connect(status_update)
 
@@ -125,6 +126,13 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     # Update progressbar value to new number
     def update_progressbar_value(self, number):
         self.progress_widget.progressbar.setValue(number)
+
+    # Handle progressbar reset & output image display
+    def finished_stack(self):
+        self.progress_widget.reset_and_hide()
+
+        self.centralWidget().add_processed_image(self.LaplacianAlgorithm.output_image)
+
 
     """
         Overridden signals
