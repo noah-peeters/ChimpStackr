@@ -38,19 +38,21 @@ class TimeRemainingHandler:
     # Return remaining time of algorithm (hh:mm:ss)
     def calculate_time_remaining(self, operation_name, percentage_left, time_taken):
         self.cached_time_taken.append(time_taken)
-
         mean_time_taken = statistics.mean(self.cached_time_taken)
 
-        # Time to 100% completion of current operation
+        # Time left to 100% completion of current operation
         time_left = percentage_left / self.percentage_increment * mean_time_taken
 
         if operation_name == "laplacian_generation":
-            # Add in approx. time of focus fusion
+            # Add in approx. time of focus fusion (100% completion)
             multiplier = (
                 time_spent_percentages["pyramid_focus_fusion"]
                 / time_spent_percentages["laplacian_generation"]
             )
-            time_left += mean_time_taken * multiplier
+            # Multiply with needed percentage
+            time_left *= multiplier ** -1
+            # Add percentage of other task
+            time_left += 100 / self.percentage_increment * mean_time_taken * multiplier
 
         formatted = time.strftime("%H:%M:%S", time.gmtime(time_left))
         return "Time left until program finish: " + formatted

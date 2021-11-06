@@ -236,9 +236,9 @@ class Algorithm:
             #     "Fusing image " + str(i + 1) + "/" + str(len(image_archive_names))
             # )
             start_time = time.time()
-            self.TimeRemaining.clear_cache()
+            # self.TimeRemaining.clear_cache()
             percentage_increment = 1 / len(image_archive_names) * 100
-            self.TimeRemaining.percentage_increment = percentage_increment
+            # self.TimeRemaining.percentage_increment = percentage_increment
 
             if i == 0:
                 # Directly "copy" first image's pyramid into output
