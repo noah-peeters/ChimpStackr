@@ -4,5 +4,5 @@ qt-material==2.8.12
 
 # Algorithm requirements (UI not needed)
 opencv-python-headless==4.5.4.58
-numpy
-numba
+numpy==1.21.4
+numba==0.54.1
