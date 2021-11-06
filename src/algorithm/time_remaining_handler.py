@@ -12,6 +12,7 @@
     Quick note: when re-stacking the same images; laplacian pyramids are kept on disk.
     They don't need to be recalculated, making the algorithm faster.
 """
+# TODO: Cleanup inside class + keep average of times (can be reset on ask)
 import time
 
 
@@ -44,6 +45,5 @@ def calculate_time_remaining(
         )
         time_left += time_taken * multiplier
 
-    # TODO: Process format to be hh:mm:ss
     formatted = time.strftime("%H:%M:%S", time.gmtime(time_left))
     return "Time left until program finish: " + formatted

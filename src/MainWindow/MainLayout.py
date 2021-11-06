@@ -21,6 +21,7 @@ class CenterWidget(qtw.QWidget):
 
         # Loaded images list widget
         self.loaded_images_list = qtw.QListWidget()
+        self.loaded_images_list.setWindowTitle("Source images")
         # loaded_images_list.setAlternatingRowColors(True)
         self.loaded_images_list.setSelectionMode(
             qtw.QAbstractItemView.ExtendedSelection

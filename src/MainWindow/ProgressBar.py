@@ -4,6 +4,8 @@
     Progress text is used to display "time left until completed" messages.
 """
 import PySide6.QtWidgets as qtw
+import PySide6.QtCore as qtc
+
 
 class ProgressBar(qtw.QWidget):
     def __init__(self):
@@ -14,9 +16,16 @@ class ProgressBar(qtw.QWidget):
 
         self.progressbar = qtw.QProgressBar(self)
         self.progressbar.setVisible(True)
+        self.progressbar.setFormat("%p%")
         layout.addWidget(self.progressbar)
 
-        self.progress_label = qtw.QLabel("This is a progress text: 4/5")
+        self.progress_label = qtw.QLabel("Please wait while the task is beginning...")
         layout.addWidget(self.progress_label)
 
         self.setLayout(layout)
+
+    # Reset and hide widget (after task completed)
+    def reset_and_hide(self):
+        self.setVisible(False)
+        self.progressbar.reset()
+        self.progress_label.setText("Please wait while the task is beginning...")

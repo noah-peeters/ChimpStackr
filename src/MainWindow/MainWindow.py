@@ -109,15 +109,12 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             "Started stacking images...", self.statusbar_msg_display_time
         )
 
-        def thread_complete():
-            self.progress_widget.setVisible(False)
-
         def status_update(msg):
             self.progress_widget.progress_label.setText(msg)
 
         worker = QThreading.Worker(self.LaplacianAlgorithm.stack_images)
         # worker.signals.result.connect(print_output)
-        worker.signals.finished.connect(thread_complete)
+        worker.signals.finished.connect(self.progress_widget.reset_and_hide)
         worker.signals.progress_update.connect(self.update_progressbar_value)
         worker.signals.status_update.connect(status_update)
 
