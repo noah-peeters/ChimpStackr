@@ -125,12 +125,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
 
     # Update progressbar value to new number
     def update_progressbar_value(self, number):
-        # print("Set progressbar value: " + str(number))
         self.progress_widget.progressbar.setValue(number)
-
-    # Update progressbar max value
-    # def update_progressbar_max_value(self, max_val):
-    #     self.progress_widget.setMaximum(max_val)
 
     """
         Overridden signals
