@@ -6,3 +6,4 @@ qt-material==2.8.12
 opencv-python-headless==4.5.4.58
 numpy==1.20.3 # Update to 1.21 when numba supports it
 numba==0.54.1
+rawpy==0.16.0
