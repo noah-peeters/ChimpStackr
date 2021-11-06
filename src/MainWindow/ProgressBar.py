@@ -4,7 +4,6 @@
     Progress text is used to display "time left until completed" messages.
 """
 import PySide6.QtWidgets as qtw
-import PySide6.QtCore as qtc
 
 
 class ProgressBar(qtw.QWidget):
