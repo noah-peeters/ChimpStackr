@@ -113,7 +113,6 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             self.progress_widget.progress_label.setText(msg)
 
         worker = QThreading.Worker(self.LaplacianAlgorithm.stack_images)
-        # worker.signals.result.connect(print_output)
         worker.signals.finished.connect(self.progress_widget.reset_and_hide)
         worker.signals.progress_update.connect(self.update_progressbar_value)
         worker.signals.status_update.connect(status_update)

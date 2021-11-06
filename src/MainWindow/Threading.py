@@ -13,9 +13,6 @@ class WorkerSignals(qtc.QObject):
     finished = qtc.Signal()
     # Error message
     error = qtc.Signal(tuple)
-    # Result object
-    # TODO: Check if necessary
-    result = qtc.Signal(object)
     # Integer to set progressbar value to
     progress_update = qtc.Signal(int)
     # Progressbar status update string
@@ -33,7 +30,6 @@ class Worker(qtc.QRunnable):
     :type callback: function
     :param args: Arguments to pass to the callback function
     :param kwargs: Keywords to pass to the callback function
-
     """
 
     def __init__(self, fn, *args):
@@ -51,16 +47,12 @@ class Worker(qtc.QRunnable):
 
         # Retrieve args/kwargs here; and fire processing using them
         try:
-            # TODO: Pass signals, so function can update progress
-            result = self.fn(*self.args, self.signals)
+            self.fn(*self.args, self.signals)
         except:
             # Emit error message
             traceback.print_exc()
             exctype, value = sys.exc_info()[:2]
             self.signals.error.emit((exctype, value, traceback.format_exc()))
-        else:
-            # Emit result object
-            self.signals.result.emit(result)
 
         # Emit finished signal
         self.signals.finished.emit()
