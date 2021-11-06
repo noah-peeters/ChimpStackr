@@ -9,7 +9,7 @@ import PySide6.QtWidgets as qtw
 import qt_material
 
 import MainWindow.QActions as qt_actions_setup
-import MainWindow.MainLayout as main_layout
+import MainWindow.MainLayout.MainLayout as MainLayout
 import MainWindow.Threading as QThreading
 import MainWindow.ProgressBar as ProgressBar
 
@@ -28,7 +28,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         # Setup actions
         qt_actions_setup.setup_actions(self)
         # Set center widget
-        self.setCentralWidget(main_layout.CenterWidget())
+        self.setCentralWidget(MainLayout.CenterWidget())
 
         # Permanent progressbar inside statusbar
         self.progress_widget = ProgressBar.ProgressBar()
