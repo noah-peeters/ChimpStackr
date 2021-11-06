@@ -1,7 +1,7 @@
 """
     Exposed API for easily aligning/stacking multiple images.
 """
-import tempfile
+import tempfile, os
 
 import utilities
 import algorithm.pyramid as pyramid
@@ -31,8 +31,17 @@ class LaplacianPyramid:
     def update_image_paths(self, new_image_paths):
         new_image_paths = sorted(new_image_paths, key=utilities.int_string_sorting)
         if new_image_paths != self.image_paths:
-            # Reset loaded Laplacians
-            # TODO: Remove tempfiles
+            # Delete tempfiles
+            for path in (
+                self.laplacian_pyramid_archive_names
+                + self.laplacian_pyramid_archive_names_aligned
+            ):
+                try:
+                    os.remove(path)
+                except:
+                    print("Unable to remove tempfile")
+
+            # Reset loaded Laplacian lists
             self.laplacian_pyramid_archive_names = []
             self.laplacian_pyramid_archive_names_aligned = []
 

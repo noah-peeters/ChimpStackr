@@ -35,7 +35,7 @@ class ImageViewer(qtw.QGraphicsView):
         loaded_images_list.currentItemChanged.connect(self.update_displayed_image)
 
     # Fit image to view
-    def fitInView(self, scale=True):  # TODO: Implement/remove self.scale
+    def fitInView(self):
         rect = qtc.QRectF(self._photo.pixmap().rect())
         if not rect.isNull():
             self.setSceneRect(rect)
