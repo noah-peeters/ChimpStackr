@@ -9,7 +9,7 @@ from numba.typed import List
 
 import algorithm.image_storage as image_storage
 import algorithm.pyramid as pyramid
-import algorithm.time_remaining_handler as time_remaining
+import algorithm.TimeRemainingHandler as TimeRemaining
 
 
 @nb.njit(nb.float32[:, :, :](nb.float32[:, :, :], nb.int64, nb.int64), fastmath=True)
@@ -117,6 +117,7 @@ class Algorithm:
     def __init__(self):
         self.ImageStorage = image_storage.ImageStorageHandler()
         self.Pyramid = pyramid.Pyramid()
+        self.TimeRemaining = TimeRemaining.TimeRemainingHandler()
 
     # ECC image alignment using pyramid approximation
     # src: https://stackoverflow.com/questions/45997891/cv2-motion-euclidean-for-the-warp-mode-in-ecc-image-alignment-method
@@ -187,6 +188,7 @@ class Algorithm:
     ):
         laplacian_pyramid_archive_names = []
         percentage_increment = 1 / len(image_paths) * 100
+        self.TimeRemaining.percentage_increment = percentage_increment
         for i, path in enumerate(image_paths):
             # signals.status_update.emit(
             #     "Creating Laplacian pyramid " + str(i + 1) + "/" + str(len(image_paths))
@@ -211,15 +213,14 @@ class Algorithm:
             # Send signals
             percentage_finished = (i + 1) / len(image_paths) * 100
             signals.status_update.emit(
-                time_remaining.calculate_time_remaining(
+                self.TimeRemaining.calculate_time_remaining(
                     "laplacian_generation",
-                    percentage_increment,
                     100 - (i + 1) * percentage_increment,
                     time.time() - start_time,
                 )
             )
             signals.progress_update.emit(
-                time_remaining.calculate_progressbar_value(
+                self.TimeRemaining.calculate_progressbar_value(
                     "laplacian_generation", percentage_finished
                 )
             )
@@ -235,6 +236,7 @@ class Algorithm:
             # )
             start_time = time.time()
             percentage_increment = 1 / len(image_archive_names) * 100
+            self.TimeRemaining.percentage_increment = percentage_increment
 
             if i == 0:
                 # Directly "copy" first image's pyramid into output
@@ -282,15 +284,14 @@ class Algorithm:
             # Send signals
             percentage_finished = (i + 1) / len(image_archive_names) * 100
             signals.status_update.emit(
-                time_remaining.calculate_time_remaining(
+                self.TimeRemaining.calculate_time_remaining(
                     "pyramid_focus_fusion",
-                    percentage_increment,
                     100 - (i + 1) * percentage_increment,
                     time.time() - start_time,
                 )
             )
             signals.progress_update.emit(
-                time_remaining.calculate_progressbar_value(
+                self.TimeRemaining.calculate_progressbar_value(
                     "pyramid_focus_fusion", percentage_finished
                 )
             )
