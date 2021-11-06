@@ -55,7 +55,7 @@ class CenterWidget(qtw.QWidget):
 
         # Set splitter default size
         width = main_window.screen().availableGeometry().width()
-        splitter.setSizes([int(width / 3.5), width])
+        splitter.setSizes([int(width / 4), width])
 
         # Set horizontal layout
         layout = qtw.QHBoxLayout(self)
