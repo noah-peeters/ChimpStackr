@@ -89,6 +89,8 @@ class ImageLoadingHandler:
         elif extension in supported_rawpy_formats:
             # Read RAW image
             raw = rawpy.imread(path)
+
+            # Use "AMAZE" demosaicing
             processed = raw.postprocess(use_camera_wb=True)
             processed = cv2.cvtColor(processed, cv2.COLOR_RGB2BGR)
 

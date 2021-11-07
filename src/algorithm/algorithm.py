@@ -10,7 +10,7 @@ from numba.typed import List
 import algorithm.image_storage as image_storage
 import algorithm.pyramid as pyramid
 import algorithm.TimeRemainingHandler as TimeRemaining
-import algorithm.ImageLoadingHandler as ImageLoadingHandler
+import ImageLoadingHandler 
 
 
 @nb.njit(nb.float32[:, :, :](nb.float32[:, :, :], nb.int64, nb.int64), fastmath=True)

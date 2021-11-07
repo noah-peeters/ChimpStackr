@@ -8,12 +8,17 @@ import PySide6.QtWidgets as qtw
 
 import cv2
 
+import ImageLoadingHandler
+
 
 class ImageViewer(qtw.QGraphicsView):
     photoClicked = qtc.Signal(qtc.QPoint)
 
     def __init__(self):
         super().__init__()
+
+        self.ImageLoading = ImageLoadingHandler.ImageLoadingHandler()
+
         self.current_zoom_level = 0
         self.reset_zoom = True
         self._scene = qtw.QGraphicsScene(self)
@@ -54,7 +59,7 @@ class ImageViewer(qtw.QGraphicsView):
             # Display selected image
             path = selected_widget_item.data(qtc.Qt.UserRole)
             if path != None:
-                image = cv2.imread(path)
+                image = self.ImageLoading.read_image_from_path(path)
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 # Convert np RGB array to QImage
                 # src: https://stackoverflow.com/questions/34232632/convert-python-opencv-image-numpy-array-to-pyqt-qpixmap-image
