@@ -76,6 +76,10 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                     )
                     msg.setInformativeText("Error:\n" + str(e))
                     msg.show()
+        else:
+            self.statusBar().showMessage(
+                "No image to export!", self.statusbar_msg_display_time
+            )
 
     # Clear all loaded images
     def clear_all_images(self):
