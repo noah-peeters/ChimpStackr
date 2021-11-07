@@ -65,9 +65,17 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                 )
                 try:
                     cv2.imwrite(file_path, self.LaplacianAlgorithm.output_image)
-                except:
-                    # TODO: Display error in UI
-                    print("ERROR SAVING IMAGE!")
+                except Exception as e:
+                    # Display Error message
+                    msg = qtw.QMessageBox(self)
+                    msg.setStandardButtons(qtw.QMessageBox.Ok)
+                    msg.setIcon(qtw.QMessageBox.Critical)
+                    msg.setWindowTitle("Export failed")
+                    msg.setText(
+                        "Failed to export output image.\nHave you used a supported file extension?\n"
+                    )
+                    msg.setInformativeText("Error:\n" + str(e))
+                    msg.show()
 
     # Clear all loaded images
     def clear_all_images(self):
