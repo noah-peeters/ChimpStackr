@@ -14,7 +14,9 @@ import MainWindow.Threading as QThreading
 import MainWindow.ProgressBar as ProgressBar
 
 import algorithm.API as algorithm_API
+
 # TODO: Make UI more expressive after long operation finished. Show success/error messages
+
 
 class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     def __init__(self):
@@ -84,7 +86,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         new_image_files, _ = qtw.QFileDialog.getOpenFileNames(
             self, "Select images to load.", home_dir
         )
-        # TODO: Check if valid (and same??) format; dicard unsupported formats + show warning
+        # TODO: Check if valid (and same??) format; discard unsupported formats + show warning
         self.centralWidget().set_loaded_images(new_image_files)
         self.centralWidget().add_processed_image(None)
         self.LaplacianAlgorithm.update_image_paths(new_image_files)
@@ -97,6 +99,13 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     def save_project_to_file(self):
         self.statusBar().showMessage(
             "Saving project file to disk...", self.statusbar_msg_display_time
+        )
+        # Display success message
+        qtw.QMessageBox.information(
+            self,
+            "Save completed",
+            "Successfully saved project to disk.",
+            qtw.QMessageBox.Ok,
         )
 
     def align_and_stack_loaded_images(self):
@@ -133,7 +142,6 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.progress_widget.reset_and_hide()
 
         self.centralWidget().add_processed_image(self.LaplacianAlgorithm.output_image)
-
 
     """
         Overridden signals
