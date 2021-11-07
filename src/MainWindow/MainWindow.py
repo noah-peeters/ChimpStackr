@@ -120,6 +120,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             qtw.QMessageBox.Ok,
         )
 
+    # TODO: re-implement (with QThread + timing percentages)
     def align_and_stack_loaded_images(self):
         self.statusBar().showMessage(
             "Started aligning & stacking images...", self.statusbar_msg_display_time
