@@ -11,6 +11,7 @@ import cv2
 import ImageLoadingHandler
 
 
+# TODO: Display current zoom factor (%)
 class ImageViewer(qtw.QGraphicsView):
     photoClicked = qtc.Signal(qtc.QPoint)
 

@@ -84,6 +84,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         new_image_files, _ = qtw.QFileDialog.getOpenFileNames(
             self, "Select images to load.", home_dir
         )
+        # TODO: Check if valid (and same??) format; dicard unsupported formats + show warning
         self.centralWidget().set_loaded_images(new_image_files)
         self.centralWidget().add_processed_image(None)
         self.LaplacianAlgorithm.update_image_paths(new_image_files)
