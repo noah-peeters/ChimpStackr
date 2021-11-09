@@ -4,8 +4,10 @@
     Else use rawpy to load RAW image.
 """
 import os
+from io import BytesIO
 import rawpy
 import cv2
+import imageio
 
 # All RAW formats; src: https://fileinfo.com/filetypes/camera_raw
 supported_rawpy_formats = [
@@ -90,8 +92,21 @@ class ImageLoadingHandler:
             # Read RAW image
             raw = rawpy.imread(path)
 
-            # Use "AMAZE" demosaicing
-            processed = raw.postprocess(use_camera_wb=True)
+            processed = None
+            try:
+                # Extract thumbnail or preview (faster)
+                thumb = raw.extract_thumb()
+            except:
+                # If not thumb/preview, then postprocess RAW image (slower)
+                processed = raw.postprocess(use_camera_wb=True)
+            else:
+                if thumb.format == rawpy.ThumbFormat.JPEG:
+                    # Convert bytes object to ndarray
+                    processed = imageio.imread(BytesIO(thumb.data))
+                elif thumb.format == rawpy.ThumbFormat.BITMAP:
+                    # Ndarray
+                    processed = thumb.data
+
             processed = cv2.cvtColor(processed, cv2.COLOR_RGB2BGR)
 
             raw.close()
