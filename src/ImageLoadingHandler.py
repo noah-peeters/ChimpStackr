@@ -85,10 +85,10 @@ class ImageLoadingHandler:
         # Get extension without dot at beginning
         _, extension = os.path.splitext(path)
         extension = extension[1:]
-        if extension in supported_opencv_formats:
+        if str.lower(extension) in supported_opencv_formats:
             # Regular imread
             return cv2.imread(path)
-        elif extension in supported_rawpy_formats:
+        elif str.upper(extension) in supported_rawpy_formats:
             # Read RAW image
             raw = rawpy.imread(path)
 
