@@ -82,9 +82,8 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             )
 
     # Clear all loaded images
-    # TODO: Clear output images
     def clear_all_images(self):
-        reply=qtw.QMessageBox.Yes
+        reply = qtw.QMessageBox.Yes
         if len(self.LaplacianAlgorithm.image_paths) == 0:
             # Ask confirmation (if there are loaded images)
             reply = qtw.QMessageBox.question(
@@ -112,9 +111,13 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         new_image_files, _ = qtw.QFileDialog.getOpenFileNames(
             self, "Select images to load.", home_dir
         )
+
+        # Clear previous images
+        self.clear_all_images()
+
         # TODO: Check if valid (and same??) format; discard unsupported formats + show warning
+        # Set new loaded images
         self.centralWidget().set_loaded_images(new_image_files)
-        self.centralWidget().add_processed_image(None)
         self.LaplacianAlgorithm.update_image_paths(new_image_files)
 
     # Shutdown all currently running processes, cleanup and close window
