@@ -97,7 +97,7 @@ class ImageLoadingHandler:
                 # Extract thumbnail or preview (faster)
                 thumb = raw.extract_thumb()
             except:
-                # If not thumb/preview, then postprocess RAW image (slower)
+                # If no thumb/preview, then postprocess RAW image (slower)
                 processed = raw.postprocess(use_camera_wb=True)
             else:
                 if thumb.format == rawpy.ThumbFormat.JPEG:
@@ -111,3 +111,11 @@ class ImageLoadingHandler:
 
             raw.close()
             return processed
+    
+    # Get RAW image view from path (uses copy() to allow usage after closing raw file)
+    def get_raw_view(self, path):
+        raw = rawpy.imread(path)
+        image = raw.raw_image_visible.copy()
+        raw.close()
+        return image
+
