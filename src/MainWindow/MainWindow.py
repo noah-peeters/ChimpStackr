@@ -98,7 +98,9 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             self.statusBar().showMessage(
                 "Clearing all loaded images...", self.statusbar_msg_display_time
             )
+            # Clear loaded and processed images from list
             self.centralWidget().set_loaded_images([])
+            self.centralWidget().add_processed_image(None)
             self.LaplacianAlgorithm.update_image_paths([])
 
     # Load images from a file on disk
