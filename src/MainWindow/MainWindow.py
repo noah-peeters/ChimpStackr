@@ -82,12 +82,24 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             )
 
     # Clear all loaded images
+    # TODO: Clear output images
     def clear_all_images(self):
-        self.statusBar().showMessage(
-            "Clearing all loaded images...", self.statusbar_msg_display_time
-        )
-        self.centralWidget().set_loaded_images([])
-        self.LaplacianAlgorithm.update_image_paths([])
+        reply=qtw.QMessageBox.Yes
+        if len(self.LaplacianAlgorithm.image_paths) == 0:
+            # Ask confirmation (if there are loaded images)
+            reply = qtw.QMessageBox.question(
+                self,
+                "Clear images?",
+                "Are you sure you want to clear all loaded images? Output image(s) will be cleared to!",
+                qtw.QMessageBox.Yes,
+                qtw.QMessageBox.No,
+            )
+        if reply == qtw.QMessageBox.Yes:
+            self.statusBar().showMessage(
+                "Clearing all loaded images...", self.statusbar_msg_display_time
+            )
+            self.centralWidget().set_loaded_images([])
+            self.LaplacianAlgorithm.update_image_paths([])
 
     # Load images from a file on disk
     def load_images_from_file(self):
