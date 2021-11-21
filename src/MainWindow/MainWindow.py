@@ -65,7 +65,16 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                 )
                 try:
                     cv2.imwrite(file_path, self.LaplacianAlgorithm.output_image)
-                    # TODO: Show success message
+                    # Display success message
+                    msg = qtw.QMessageBox(self)
+                    msg.setStandardButtons(qtw.QMessageBox.Ok)
+                    msg.setIcon(qtw.QMessageBox.Information)
+                    msg.setWindowTitle("Export success")
+                    msg.setText(
+                        "Successfully exported output image."
+                    )
+                    msg.setInformativeText("File location:\n" + file_path)
+                    msg.show()
                 except Exception as e:
                     # Display Error message
                     msg = qtw.QMessageBox(self)
