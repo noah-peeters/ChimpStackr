@@ -65,6 +65,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                 )
                 try:
                     cv2.imwrite(file_path, self.LaplacianAlgorithm.output_image)
+                    # TODO: Show success message
                 except Exception as e:
                     # Display Error message
                     msg = qtw.QMessageBox(self)
