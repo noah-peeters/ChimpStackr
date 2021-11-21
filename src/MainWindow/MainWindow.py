@@ -19,6 +19,8 @@ import algorithm.API as algorithm_API
 
 
 class Window(qtw.QMainWindow, qt_material.QtStyleTools):
+    loaded_image_names = []
+
     def __init__(self, root_temp_directory):
         super().__init__()
 
@@ -107,6 +109,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                 "Clearing all loaded images...", self.statusbar_msg_display_time
             )
             # Clear loaded and processed images from list
+            self.loaded_image_names = []
             self.centralWidget().set_loaded_images([])
             self.centralWidget().add_processed_image(None)
             self.LaplacianAlgorithm.update_image_paths([])
@@ -119,19 +122,19 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             "Loading selected images...", self.statusbar_msg_display_time
         )
         home_dir = os.path.expanduser("~")
-        new_image_files, _ = qtw.QFileDialog.getOpenFileNames(
+        self.loaded_image_names, _ = qtw.QFileDialog.getOpenFileNames(
             self, "Select images to load.", home_dir
         )
 
-        if len(new_image_files) > 0:
+        if len(self.loaded_image_names) > 0:
             # Clear previous images
             success = self.clear_all_images()
 
             # TODO: Check if valid (and same??) format; discard unsupported formats + show warning
             if success == True:
                 # Set new loaded images
-                self.centralWidget().set_loaded_images(new_image_files)
-                self.LaplacianAlgorithm.update_image_paths(new_image_files)
+                self.centralWidget().set_loaded_images(self.loaded_image_names)
+                self.LaplacianAlgorithm.update_image_paths(self.loaded_image_names)
 
     # Shutdown all currently running processes, cleanup and close window
     def shutdown_application(self):
@@ -152,13 +155,32 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
 
     # TODO: re-implement (with QThread + timing percentages)
     def align_and_stack_loaded_images(self):
+        if len(self.loaded_image_names) == 0:
+            # Display Error message
+            msg = qtw.QMessageBox(self)
+            msg.setStandardButtons(qtw.QMessageBox.Ok)
+            msg.setIcon(qtw.QMessageBox.Critical)
+            msg.setWindowTitle("Stacking failed")
+            msg.setText("Failed to stack images.\nPlease load images first.\n")
+            msg.show()
+            return
+
         self.statusBar().showMessage(
             "Started aligning & stacking images...", self.statusbar_msg_display_time
         )
         self.LaplacianAlgorithm.align_and_stack_images()
 
     def stack_loaded_images(self):
-        # TODO: Handle not having an image loaded
+        if len(self.loaded_image_names) == 0:
+            # Display Error message
+            msg = qtw.QMessageBox(self)
+            msg.setStandardButtons(qtw.QMessageBox.Ok)
+            msg.setIcon(qtw.QMessageBox.Critical)
+            msg.setWindowTitle("Stacking failed")
+            msg.setText("Failed to stack images.\nPlease load images first.\n")
+            msg.show()
+            return
+
         self.statusBar().showMessage(
             "Started stacking images...", self.statusbar_msg_display_time
         )
