@@ -191,6 +191,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     """
     # Display dialog to confirm if user wants to quit
     def closeEvent(self, event):
+        # TODO: Only ask confirmation if any unsaved progress
         reply = qtw.QMessageBox.question(
             self,
             "Exit program?",
