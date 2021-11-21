@@ -82,9 +82,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                     msg.setStandardButtons(qtw.QMessageBox.Ok)
                     msg.setIcon(qtw.QMessageBox.Information)
                     msg.setWindowTitle("Export success")
-                    msg.setText(
-                        "Successfully exported output image."
-                    )
+                    msg.setText("Successfully exported output image.")
                     msg.setInformativeText("File location:\n" + file_path)
                     msg.show()
         else:
@@ -125,14 +123,15 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             self, "Select images to load.", home_dir
         )
 
-        # Clear previous images
-        success = self.clear_all_images()
+        if len(new_image_files) > 0:
+            # Clear previous images
+            success = self.clear_all_images()
 
-        # TODO: Check if valid (and same??) format; discard unsupported formats + show warning
-        if success == True:
-            # Set new loaded images
-            self.centralWidget().set_loaded_images(new_image_files)
-            self.LaplacianAlgorithm.update_image_paths(new_image_files)
+            # TODO: Check if valid (and same??) format; discard unsupported formats + show warning
+            if success == True:
+                # Set new loaded images
+                self.centralWidget().set_loaded_images(new_image_files)
+                self.LaplacianAlgorithm.update_image_paths(new_image_files)
 
     # Shutdown all currently running processes, cleanup and close window
     def shutdown_application(self):
