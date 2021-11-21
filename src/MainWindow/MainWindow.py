@@ -19,10 +19,11 @@ import algorithm.API as algorithm_API
 
 
 class Window(qtw.QMainWindow, qt_material.QtStyleTools):
-    def __init__(self):
+    def __init__(self, root_temp_directory):
         super().__init__()
+
         self.statusbar_msg_display_time = 2000  # Time in ms
-        self.setWindowTitle("Test")
+        self.setWindowTitle("ChimpStackr")
         # Set min. window size based on pixel size
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(int(geometry.width() * 0.6), int(geometry.height() * 0.6))
@@ -30,7 +31,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         # Setup actions
         qt_actions_setup.setup_actions(self)
         # Set center widget
-        self.setCentralWidget(MainLayout.CenterWidget())
+        self.setCentralWidget(MainLayout.CenterWidget(root_temp_directory))
 
         # Permanent progressbar inside statusbar
         self.progress_widget = ProgressBar.ProgressBar()
@@ -43,13 +44,12 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
 
         # Setup algorithm API
         # TODO: Allow user to change program settings
-        self.LaplacianAlgorithm = algorithm_API.LaplacianPyramid(6, 8)
+        self.LaplacianAlgorithm = algorithm_API.LaplacianPyramid(
+            root_temp_directory, 6, 8
+        )
 
         # Threadpool for multi-threading (prevent UI freezing)
         self.threadpool = qtc.QThreadPool()
-        print(
-            "Multithreading with maximum %d threads" % self.threadpool.maxThreadCount()
-        )
 
     # Export output image to file on disk
     def export_output_image(self):

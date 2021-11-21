@@ -13,10 +13,12 @@ from utilities import int_string_sorting
 
 
 class CenterWidget(qtw.QWidget):
-    def __init__(self):
+    def __init__(self, root_temp_directory):
         super().__init__()
 
+        self.root_temp_directory = root_temp_directory
         self.ImageWidgets = ImageWidgets.ImageWidgets()
+
         image_display = ImageViewer.ImageViewer()
 
         # Connect to "selected item change" signals
@@ -70,10 +72,11 @@ class CenterWidget(qtw.QWidget):
             self.ImageWidgets.processed_images_widget.list.clear()
             self.ImageWidgets.processed_images_widget.setVisible(False)
         else:
-            # TODO: Doesn't get deleted
             self.ImageWidgets.processed_images_widget.setVisible(True)
             # Add image to list & store data file
-            file_handle, tmp_file = tempfile.mkstemp(suffix=".jpg")
+            file_handle, tmp_file = tempfile.mkstemp(
+                suffix=".jpg", dir=self.root_temp_directory.name
+            )
             item = qtw.QListWidgetItem()
             item.setText("lap_pyr_stacked")
             item.setData(qtc.Qt.UserRole, tmp_file)

@@ -1,7 +1,7 @@
 """
     Exposed API for easily aligning/stacking multiple images.
 """
-import tempfile, os
+import os
 
 import utilities
 import algorithm.pyramid as pyramid
@@ -10,13 +10,13 @@ import algorithm.algorithm as algorithm
 
 
 class LaplacianPyramid:
-    def __init__(self, fusion_kernel_size=6, pyramid_num_levels=8):
+    def __init__(self, root_temp_directory, fusion_kernel_size=6, pyramid_num_levels=8):
         self.output_image = None
         self.image_paths = []
         # Archive names for Laplacian pyramids of src and aligned images
         self.laplacian_pyramid_archive_names = []
         self.laplacian_pyramid_archive_names_aligned = []
-        self.root_temp_directory = tempfile.TemporaryDirectory(prefix="FocusStacking_")
+        self.root_temp_directory = root_temp_directory
 
         # Load classes
         self.Pyramid = pyramid.Pyramid()
