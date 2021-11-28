@@ -19,21 +19,21 @@ class CenterWidget(qtw.QWidget):
         self.root_temp_directory = root_temp_directory
         self.ImageWidgets = ImageWidgets.ImageWidgets()
 
-        image_display = ImageViewer.ImageViewer()
+        self.image_display = ImageViewer.ImageViewer()
 
         # Connect to "selected item change" signals
         self.ImageWidgets.loaded_images_widget.list.itemClicked.connect(
-            image_display.update_displayed_image
+            self.image_display.update_displayed_image
         )
         self.ImageWidgets.processed_images_widget.list.itemClicked.connect(
-            image_display.update_displayed_image
+            self.image_display.update_displayed_image
         )
 
         # Create vertical splitter (QListWidgets/ImageViewer)
         v_splitter = qtw.QSplitter()
         v_splitter.setChildrenCollapsible(False)
         v_splitter.addWidget(self.ImageWidgets)
-        v_splitter.addWidget(image_display)
+        v_splitter.addWidget(self.image_display)
 
         # Set splitter default size
         width = self.screen().availableGeometry().width()
@@ -48,6 +48,8 @@ class CenterWidget(qtw.QWidget):
     # QListWidget data is set to the full image path for quick retrieval later.
     def set_loaded_images(self, new_image_files):
         self.ImageWidgets.loaded_images_widget.reset_to_default()
+        # Clear currently displaying image
+        self.image_display.update_displayed_image(None)
         if len(new_image_files) <= 0:
             # No images selected, use default
             return
