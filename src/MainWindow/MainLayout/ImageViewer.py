@@ -119,7 +119,6 @@ class ImageViewer(qtw.QGraphicsView):
         super().mousePressEvent(event)
 
     def contextMenuEvent(self, event: qtg.QContextMenuEvent) -> None:
-        print("Right click")
         menu = qtw.QMenu("Image viewer options")
 
         reset_zoom_action = qtg.QAction("Reset zoom")
@@ -132,4 +131,3 @@ class ImageViewer(qtw.QGraphicsView):
 
         if selected_action == reset_zoom_action:
             self.reset_zoom = reset_zoom_action.isChecked()
-            print(self.reset_zoom)
