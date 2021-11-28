@@ -105,6 +105,8 @@ class ImageViewer(qtw.QGraphicsView):
             else:
                 self.current_zoom_level = 0
 
+            print(self.current_zoom_level)
+
     def toggleDragMode(self):
         if self.dragMode() == qtw.QGraphicsView.ScrollHandDrag:
             self.setDragMode(qtw.QGraphicsView.NoDrag)
@@ -115,3 +117,19 @@ class ImageViewer(qtw.QGraphicsView):
         if self._photo.isUnderMouse():
             self.photoClicked.emit(self.mapToScene(event.pos()).toPoint())
         super().mousePressEvent(event)
+
+    def contextMenuEvent(self, event: qtg.QContextMenuEvent) -> None:
+        print("Right click")
+        menu = qtw.QMenu("Image viewer options")
+
+        reset_zoom_action = qtg.QAction("Reset zoom")
+        reset_zoom_action.setStatusTip("Reset zoom in between image selections.")
+        reset_zoom_action.setCheckable(True)
+        reset_zoom_action.setChecked(self.reset_zoom)
+
+        menu.addAction(reset_zoom_action)
+        selected_action = menu.exec(event.globalPos())
+
+        if selected_action == reset_zoom_action:
+            self.reset_zoom = reset_zoom_action.isChecked()
+            print(self.reset_zoom)
