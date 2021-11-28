@@ -93,7 +93,6 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             )
 
     # Clear all loaded images
-    # TODO: Not yet working correctly
     def clear_all_images(self):
         if len(self.LaplacianAlgorithm.image_paths) > 0:
             # Ask confirmation (if there are loaded images)
@@ -113,8 +112,11 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                 self.centralWidget().set_loaded_images([])
                 self.centralWidget().add_processed_image(None)
                 self.LaplacianAlgorithm.update_image_paths([])
-                # Return success
+                # Successfully removed images
                 return True
+        else:
+            # No images were originally loaded
+            return True
 
     # Load images from a file on disk
     def load_images_from_file(self):
@@ -122,18 +124,20 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             "Loading selected images...", self.statusbar_msg_display_time
         )
         home_dir = os.path.expanduser("~")
-        self.loaded_image_names, _ = qtw.QFileDialog.getOpenFileNames(
+        new_loaded_images, _ = qtw.QFileDialog.getOpenFileNames(
             self, "Select images to load.", home_dir
         )
 
-        if len(self.loaded_image_names) > 0:
+        if len(new_loaded_images) > 0:
             # Clear previous images (if there)
-            self.clear_all_images()
+            clear_success = self.clear_all_images()
 
             # TODO: Check if valid (and same??) format; discard unsupported formats + show warning
-            # Set new loaded images
-            self.centralWidget().set_loaded_images(self.loaded_image_names)
-            self.LaplacianAlgorithm.update_image_paths(self.loaded_image_names)
+            if clear_success == True:
+                # Set new loaded images
+                self.loaded_image_names = new_loaded_images
+                self.centralWidget().set_loaded_images(self.loaded_image_names)
+                self.LaplacianAlgorithm.update_image_paths(self.loaded_image_names)
 
     # Shutdown all currently running processes, cleanup and close window
     def shutdown_application(self):
