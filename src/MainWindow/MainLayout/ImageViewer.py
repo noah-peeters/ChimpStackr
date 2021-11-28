@@ -119,7 +119,7 @@ class ImageViewer(qtw.QGraphicsView):
         super().mousePressEvent(event)
 
     def contextMenuEvent(self, event: qtg.QContextMenuEvent) -> None:
-        menu = qtw.QMenu("Image viewer options")
+        menu = qtw.QMenu()
 
         reset_zoom_action = qtg.QAction("Reset zoom")
         reset_zoom_action.setStatusTip("Reset zoom in between image selections.")
