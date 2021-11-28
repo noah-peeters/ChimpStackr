@@ -14,7 +14,7 @@
 """
 import time, statistics
 
-
+# TODO: Really large value in second phase of staking process??
 time_spent_percentages = {
     "laplacian_generation": 45,
     "pyramid_focus_fusion": 55,
