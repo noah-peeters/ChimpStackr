@@ -20,6 +20,8 @@ import algorithm.API as algorithm_API
 
 class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     loaded_image_names = []
+    # Reference dir for image loading/export
+    current_image_directory = os.path.expanduser("~")
 
     def __init__(self, root_temp_directory):
         super().__init__()
@@ -56,15 +58,17 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     # Export output image to file on disk
     def export_output_image(self):
         if self.LaplacianAlgorithm.output_image is not None:
-            home_dir = os.path.expanduser("~")
             file_path, _ = qtw.QFileDialog.getSaveFileName(
-                self, "Export stacked image", home_dir
+                self, "Export stacked image", self.current_image_directory
             )
             if file_path:
                 file_path = os.path.abspath(file_path)
+                self.current_image_directory = os.path.dirname(file_path)
+
                 self.statusBar().showMessage(
                     "Exporting output image...", self.statusbar_msg_display_time
                 )
+
                 try:
                     cv2.imwrite(file_path, self.LaplacianAlgorithm.output_image)
                 except Exception as e:
@@ -123,12 +127,13 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.statusBar().showMessage(
             "Loading selected images...", self.statusbar_msg_display_time
         )
-        home_dir = os.path.expanduser("~")
         new_loaded_images, _ = qtw.QFileDialog.getOpenFileNames(
-            self, "Select images to load.", home_dir
+            self, "Select images to load.", self.current_image_directory
         )
 
         if len(new_loaded_images) > 0:
+            self.current_image_directory = os.path.dirname(new_loaded_images[0])
+            
             # Clear previous images (if there)
             clear_success = self.clear_all_images()
 
