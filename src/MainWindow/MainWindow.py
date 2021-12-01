@@ -214,10 +214,12 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     def update_progressbar_value(self, number):
         self.progress_widget.progressbar.setValue(number)
 
-    # Handle progressbar reset & output image display
-    def finished_stack(self):
-        self.progress_widget.reset_and_hide()
+    # Handle stack finish
+    def finished_stack(self, data_dictionary):
+        # Display information bar
 
+        # Reset progressbar and add selectable stack result
+        self.progress_widget.reset_and_hide()
         self.centralWidget().add_processed_image(self.LaplacianAlgorithm.output_image)
 
     """
