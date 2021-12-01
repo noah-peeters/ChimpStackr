@@ -78,7 +78,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                     msg.setIcon(qtw.QMessageBox.Critical)
                     msg.setWindowTitle("Export failed")
                     msg.setText(
-                        "Failed to export output image.\nHave you used a supported file extension?\n"
+                        "Failed to export!\nHave you used a supported file extension?\n"
                     )
                     msg.setInformativeText("Error:\n" + str(e))
                     msg.show()
@@ -92,9 +92,13 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                     msg.setInformativeText("File location:\n" + file_path)
                     msg.show()
         else:
-            self.statusBar().showMessage(
-                "No image to export!", self.statusbar_msg_display_time
-            )
+            # Display Error message
+            msg = qtw.QMessageBox(self)
+            msg.setStandardButtons(qtw.QMessageBox.Ok)
+            msg.setIcon(qtw.QMessageBox.Critical)
+            msg.setWindowTitle("Export failed")
+            msg.setText("Failed to export!\nPlease load images first.\n")
+            msg.show()
 
     # Clear all loaded images
     def clear_all_images(self):
@@ -133,7 +137,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
 
         if len(new_loaded_images) > 0:
             self.current_image_directory = os.path.dirname(new_loaded_images[0])
-            
+
             # Clear previous images (if there)
             clear_success = self.clear_all_images()
 
