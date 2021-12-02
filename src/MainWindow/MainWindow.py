@@ -12,6 +12,7 @@ import MainWindow.QActions as qt_actions_setup
 import MainWindow.MainLayout.MainLayout as MainLayout
 import MainWindow.Threading as QThreading
 import MainWindow.ProgressBar as ProgressBar
+import MainWindow.StackSuccessDialog as StackFinishedDialog
 
 import algorithm.API as algorithm_API
 
@@ -215,8 +216,9 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.progress_widget.progressbar.setValue(number)
 
     # Handle stack finish
-    def finished_stack(self, data_dictionary):
-        # Display information bar
+    def finished_stack(self): # , data_dictionary
+        # Display stack info dialog
+        StackFinishedDialog.Message()
 
         # Reset progressbar and add selectable stack result
         self.progress_widget.reset_and_hide()
