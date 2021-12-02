@@ -17,6 +17,7 @@ class StatsWindow(qtw.QWidget):
         v_layout.addWidget(stat2)
 
         self.setLayout(v_layout)
+        # self.exec()
 
 
 class Message(qtw.QMessageBox):
@@ -35,7 +36,7 @@ class Message(qtw.QMessageBox):
         stats_button = self.addButton("Show statistics...", qtw.QMessageBox.ActionRole)
 
         self.exec()
-        
+
         if self.clickedButton() == stats_button:
             # Display stats widget
             print("Display stats widget")
