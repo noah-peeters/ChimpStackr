@@ -5,7 +5,7 @@
 import PySide6.QtWidgets as qtw
 
 
-class StatsWindow(qtw.QWidget):
+class StatsWindow(qtw.QDialog):
     def __init__(self):
         super().__init__()
 
@@ -17,7 +17,10 @@ class StatsWindow(qtw.QWidget):
         v_layout.addWidget(stat2)
 
         self.setLayout(v_layout)
-        # self.exec()
+        self.setWindowTitle("Stacking stats")
+
+        self.setModal(True)
+        self.exec()
 
 
 class Message(qtw.QMessageBox):
@@ -38,6 +41,6 @@ class Message(qtw.QMessageBox):
         self.exec()
 
         if self.clickedButton() == stats_button:
-            # Display stats widget
-            print("Display stats widget")
+            # Display stats QDialog
+            print("Display stats QDialog")
             StatsWindow()
