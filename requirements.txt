@@ -1,5 +1,5 @@
 # Pure UI requirements
-PySide6==6.2.1
+PySide6==6.2.2.1
 qt-material==2.8.13
 
 # Algorithm requirements (UI not needed)
