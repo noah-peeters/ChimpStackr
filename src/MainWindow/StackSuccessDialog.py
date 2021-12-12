@@ -41,12 +41,12 @@ class Message(qtw.QMessageBox):
 
         self.setStandardButtons(qtw.QMessageBox.Ok)
         self.setDefaultButton(qtw.QMessageBox.Ok)
+
         # Setup "Statistics" button
         stats_button = self.addButton("Show statistics...", qtw.QMessageBox.ActionRole)
-
+        
         self.exec()
 
         if self.clickedButton() == stats_button:
             # Display stats QDialog
-            print("Display stats QDialog")
             StatsWindow()
