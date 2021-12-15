@@ -106,7 +106,15 @@ class ImageViewer(qtw.QGraphicsView):
             else:
                 self.current_zoom_level = 0
 
-            print(self.scale)
+            # rect = qtc.QRectF(self._photo.pixmap().rect())
+            # viewrect = self.viewport().rect()
+            # scenerect = self.transform().mapRect(rect)
+            # print(
+            #     scenerect.width() / viewrect.width(),
+            #     scenerect.height() / viewrect.height(),
+            # )
+
+            # print(self.scale)
             # print(self.current_zoom_level)
 
     def toggleDragMode(self):
