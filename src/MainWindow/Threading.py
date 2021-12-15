@@ -6,17 +6,15 @@
 import PySide6.QtCore as qtc
 import traceback, sys
 
-
 # Signals available from a running worker thread
 class WorkerSignals(qtc.QObject):
     # Fire when process finishes
     finished = qtc.Signal()
     # Error message
+    # TODO: Use error signal
     error = qtc.Signal(tuple)
-    # Integer to set progressbar value to
-    progress_update = qtc.Signal(int)
-    # Progressbar status update string
-    status_update = qtc.Signal(str)
+    # General signal to call once part of a task has finished
+    finished_inter_task = qtc.Signal(list)
 
 
 class Worker(qtc.QRunnable):

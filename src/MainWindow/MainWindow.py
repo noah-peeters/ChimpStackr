@@ -13,6 +13,7 @@ import MainWindow.MainLayout.MainLayout as MainLayout
 import MainWindow.Threading as QThreading
 import MainWindow.ProgressBar as ProgressBar
 import MainWindow.StackSuccessDialog as StackFinishedDialog
+import MainWindow.TimeRemainingHandler as TimeRemainingHandler
 
 import algorithm.API as algorithm_API
 
@@ -52,6 +53,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.LaplacianAlgorithm = algorithm_API.LaplacianPyramid(
             root_temp_directory, 6, 8
         )
+        self.TimeRemainingHandler = TimeRemainingHandler.TimeRemainingHandler()
 
         # Threadpool for multi-threading (prevent UI freezing)
         self.threadpool = qtc.QThreadPool()
@@ -201,28 +203,48 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         def status_update(msg):
             self.progress_widget.progress_label.setText(msg)
 
+        def finished_inter_task(result_list):
+            task_key, num_processed, num_to_process_total, time_taken = result_list
+            percentage_finished = num_processed / num_to_process_total * 100
+
+            # Compute and set new progressbar value
+            new_progressbar_value = (
+                self.TimeRemainingHandler.calculate_progressbar_value(
+                    task_key, percentage_finished
+                )
+            )
+            self.progress_widget.progressbar.setValue(new_progressbar_value)
+
+            # Set new statusbar text
+            self.progress_widget.progress_label.setText(
+                self.TimeRemainingHandler.calculate_time_remaining(
+                    task_key,
+                    1 / num_to_process_total * 100,
+                    100 - percentage_finished,
+                    time_taken,
+                )
+            )
+
         worker = QThreading.Worker(self.LaplacianAlgorithm.stack_images)
         worker.signals.finished.connect(self.finished_stack)
-        worker.signals.progress_update.connect(self.update_progressbar_value)
-        worker.signals.status_update.connect(status_update)
+        worker.signals.finished_inter_task.connect(finished_inter_task)
 
         # Execute
         self.threadpool.start(worker)
 
         self.progress_widget.setVisible(True)
 
-    # Update progressbar value to new number
-    def update_progressbar_value(self, number):
-        self.progress_widget.progressbar.setValue(number)
-
     # Handle stack finish
-    def finished_stack(self): # , data_dictionary
+    def finished_stack(self):  # , data_dictionary
         # Display stack info dialog
         StackFinishedDialog.Message()
 
         # Reset progressbar and add selectable stack result
         self.progress_widget.reset_and_hide()
         self.centralWidget().add_processed_image(self.LaplacianAlgorithm.output_image)
+
+        # Clear TimeRemaining cache
+        self.TimeRemainingHandler.clear_cache()
 
     """
         Overridden signals

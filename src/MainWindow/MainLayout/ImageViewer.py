@@ -116,7 +116,7 @@ class ImageViewer(qtw.QGraphicsView):
 
             # print(self.scale)
             # print(self.current_zoom_level)
-
+    # TODO: Auto-resize image to fit when window size changes
     def toggleDragMode(self):
         if self.dragMode() == qtw.QGraphicsView.ScrollHandDrag:
             self.setDragMode(qtw.QGraphicsView.NoDrag)

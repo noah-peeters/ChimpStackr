@@ -9,8 +9,7 @@ from numba.typed import List
 
 import algorithm.image_storage as image_storage
 import algorithm.pyramid as pyramid
-import algorithm.TimeRemainingHandler as TimeRemaining
-import ImageLoadingHandler 
+import ImageLoadingHandler
 
 
 @nb.njit(nb.float32[:, :, :](nb.float32[:, :, :], nb.int64, nb.int64), fastmath=True)
@@ -118,7 +117,6 @@ class Algorithm:
     def __init__(self):
         self.ImageStorage = image_storage.ImageStorageHandler()
         self.Pyramid = pyramid.Pyramid()
-        self.TimeRemaining = TimeRemaining.TimeRemainingHandler()
         self.ImageLoadingHandler = ImageLoadingHandler.ImageLoadingHandler()
 
     # ECC image alignment using pyramid approximation
@@ -189,9 +187,6 @@ class Algorithm:
         self, image_paths, root_dir, num_levels, signals, load_from_tempfile=False
     ):
         laplacian_pyramid_archive_names = []
-        self.TimeRemaining.clear_cache()
-        percentage_increment = 1 / len(image_paths) * 100
-        self.TimeRemaining.percentage_increment = percentage_increment
         for i, path in enumerate(image_paths):
             start_time = time.time()
 
@@ -210,19 +205,14 @@ class Algorithm:
             laplacian_pyramid_archive_names.append(tmp_file)
             del pyramid
 
-            # Send signals
-            percentage_finished = (i + 1) / len(image_paths) * 100
-            signals.status_update.emit(
-                self.TimeRemaining.calculate_time_remaining(
-                    "laplacian_generation",
-                    100 - (i + 1) * percentage_increment,
+            # Send progress signal
+            signals.finished_inter_task.emit(
+                [
+                    "laplacian_pyramid_generation",
+                    i + 1,
+                    len(image_paths),
                     time.time() - start_time,
-                )
-            )
-            signals.progress_update.emit(
-                self.TimeRemaining.calculate_progressbar_value(
-                    "laplacian_generation", percentage_finished
-                )
+                ]
             )
 
         return laplacian_pyramid_archive_names
@@ -232,7 +222,6 @@ class Algorithm:
         output_pyramid = List()
         for i, archive_name in enumerate(image_archive_names):
             start_time = time.time()
-            percentage_increment = 1 / len(image_archive_names) * 100
 
             if i == 0:
                 # Directly "copy" first image's pyramid into output
@@ -277,19 +266,14 @@ class Algorithm:
                 # Set updated pyramid
                 output_pyramid = new_pyr
 
-            # Send signals
-            percentage_finished = (i + 1) / len(image_archive_names) * 100
-            signals.status_update.emit(
-                self.TimeRemaining.calculate_time_remaining(
-                    "pyramid_focus_fusion",
-                    100 - (i + 1) * percentage_increment,
+            # Send progress signals
+            signals.finished_inter_task.emit(
+                [
+                    "laplacian_pyramid_focus_fusion",
+                    i + 1,
+                    len(image_archive_names),
                     time.time() - start_time,
-                )
-            )
-            signals.progress_update.emit(
-                self.TimeRemaining.calculate_progressbar_value(
-                    "pyramid_focus_fusion", percentage_finished
-                )
+                ]
             )
 
         return output_pyramid
