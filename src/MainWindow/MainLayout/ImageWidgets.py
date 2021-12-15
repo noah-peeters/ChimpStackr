@@ -4,6 +4,7 @@
 """
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
+import PySide6.QtGui as qtg
 
 # Widget for displaying loaded images
 class LoadedImagesWidget(qtw.QWidget):
@@ -33,6 +34,26 @@ class LoadedImagesWidget(qtw.QWidget):
 
         self.header_label.setText(self.default_header_text)
 
+    """
+        Overridden signals
+    """
+
+    # TODO: Implement method of removing selected images on rightclick
+    # Display image options on right click
+    def contextMenuEvent(self, event: qtg.QContextMenuEvent) -> None:
+        menu = qtw.QMenu()
+
+        reset_zoom_action = qtg.QAction("Reset zoom")
+        reset_zoom_action.setStatusTip("Reset zoom in between image selections.")
+        reset_zoom_action.setCheckable(True)
+        reset_zoom_action.setChecked(False)
+
+        menu.addAction(reset_zoom_action)
+        selected_action = menu.exec(event.globalPos())
+
+        # if selected_action == reset_zoom_action:
+        #     self.reset_zoom = reset_zoom_action.isChecked()
+
 
 # Widget for displaying processed/stacked images
 class ProcessedImagesWidget(qtw.QWidget):
@@ -50,8 +71,6 @@ class ProcessedImagesWidget(qtw.QWidget):
         self.setLayout(v_layout)
 
         self.setVisible(False)
-    
-
 
 
 # Widget bringing both QListWidgets together in a horizontal splitter layout
