@@ -14,6 +14,7 @@ import ImageLoadingHandler
 # TODO: Display current zoom factor (%)
 class ImageViewer(qtw.QGraphicsView):
     photoClicked = qtc.Signal(qtc.QPoint)
+    hasImage = False
 
     def __init__(self):
         super().__init__()
@@ -105,7 +106,8 @@ class ImageViewer(qtw.QGraphicsView):
             else:
                 self.current_zoom_level = 0
 
-            print(self.current_zoom_level)
+            print(self.scale)
+            # print(self.current_zoom_level)
 
     def toggleDragMode(self):
         if self.dragMode() == qtw.QGraphicsView.ScrollHandDrag:
