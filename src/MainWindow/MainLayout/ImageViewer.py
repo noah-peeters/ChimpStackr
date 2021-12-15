@@ -91,6 +91,12 @@ class ImageViewer(qtw.QGraphicsView):
         Overridden signals
     """
 
+    # Fit image on window resize
+    def resizeEvent(self, event: qtg.QResizeEvent) -> None:
+        self.fitInView()
+        return super().resizeEvent(event)
+
+    # Zoom in/out on mousewheel scroll
     def wheelEvent(self, event):
         if self.hasImage:
             if event.angleDelta().y() > 0:
@@ -116,18 +122,20 @@ class ImageViewer(qtw.QGraphicsView):
 
             # print(self.scale)
             # print(self.current_zoom_level)
-    # TODO: Auto-resize image to fit when window size changes
+
     def toggleDragMode(self):
         if self.dragMode() == qtw.QGraphicsView.ScrollHandDrag:
             self.setDragMode(qtw.QGraphicsView.NoDrag)
         elif not self._photo.pixmap().isNull():
             self.setDragMode(qtw.QGraphicsView.ScrollHandDrag)
 
+    # Move (zoomed) image around on left mouse drag
     def mousePressEvent(self, event):
         if self._photo.isUnderMouse():
             self.photoClicked.emit(self.mapToScene(event.pos()).toPoint())
         super().mousePressEvent(event)
 
+    # Display image viewer options on right click
     def contextMenuEvent(self, event: qtg.QContextMenuEvent) -> None:
         menu = qtw.QMenu()
 
