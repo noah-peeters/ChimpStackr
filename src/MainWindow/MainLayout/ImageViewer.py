@@ -15,13 +15,13 @@ import ImageLoadingHandler
 class ImageViewer(qtw.QGraphicsView):
     photoClicked = qtc.Signal(qtc.QPoint)
     hasImage = False
+    zoom_factor = 1.0
 
     def __init__(self):
         super().__init__()
 
         self.ImageLoading = ImageLoadingHandler.ImageLoadingHandler()
 
-        self.current_zoom_level = 0
         self.reset_zoom = True
         self._scene = qtw.QGraphicsScene(self)
         self._photo = qtw.QGraphicsPixmapItem()
@@ -53,7 +53,7 @@ class ImageViewer(qtw.QGraphicsView):
                     viewrect.height() / scenerect.height(),
                 )
                 self.scale(factor, factor)
-            self.current_zoom_level = 0
+            self.zoom_factor = 1
 
     # Change displayed image
     def update_displayed_image(self, selected_widget_item):
@@ -84,7 +84,7 @@ class ImageViewer(qtw.QGraphicsView):
 
         # Reset zoom if enabled
         if self.reset_zoom:
-            self.current_zoom_level = 0
+            self.zoom_factor = 1
             self.fitInView()
 
     """
@@ -100,28 +100,27 @@ class ImageViewer(qtw.QGraphicsView):
     def wheelEvent(self, event):
         if self.hasImage:
             if event.angleDelta().y() > 0:
-                factor = 1.25
-                self.current_zoom_level += 1
+                # Zoom in (25%)
+                if self.zoom_factor < 3:
+                    self.zoom_factor += 0.25
+                    self.scale(self.zoom_factor, self.zoom_factor)
             else:
-                factor = 0.8
-                self.current_zoom_level -= 1
-            if self.current_zoom_level > 0:
-                self.scale(factor, factor)
-            elif self.current_zoom_level == 0:
+                # Zoom out (25%)
+                if self.zoom_factor >= 1:
+                    self.zoom_factor -= 0.25
+
+                    factor = abs(1 - self.zoom_factor)
+                    if factor == 0:
+                        # Handle zero (1-1)
+                        factor = 1
+                    self.scale(factor, factor)
+
+            if self.zoom_factor <= 1:
                 self.fitInView()
-            else:
-                self.current_zoom_level = 0
+                self.zoom_factor = 1
 
-            # rect = qtc.QRectF(self._photo.pixmap().rect())
-            # viewrect = self.viewport().rect()
-            # scenerect = self.transform().mapRect(rect)
-            # print(
-            #     scenerect.width() / viewrect.width(),
-            #     scenerect.height() / viewrect.height(),
-            # )
-
-            # print(self.scale)
-            # print(self.current_zoom_level)
+            print(self.zoom_factor)
+            # print(self.zoom_factor * 100 - 100)
 
     def toggleDragMode(self):
         if self.dragMode() == qtw.QGraphicsView.ScrollHandDrag:
