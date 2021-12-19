@@ -1,3 +1,4 @@
+# Source: https://data-dive.com/multi-os-deployment-in-cloud-using-pyinstaller-and-github-actions
 name: Build
 
 on:
@@ -39,15 +40,15 @@ jobs:
           - os: macos-latest
             TARGET: macos
             CMD_BUILD: >
-                pyinstaller -F -w -n clipster -i resources/clipster.icns cli.py &&
+                pyinstaller -F -w -n ChimpStackr src/run.py &&
                 cd dist/ &&
-                zip -r9 clipster clipster.app/
-            OUT_FILE_NAME: clipster.zip
+                zip -r9 ChimpStackr ChimpStackr.app/
+            OUT_FILE_NAME: ChimpStackr.zip
             ASSET_MIME: application/zip
           - os: windows-latest
             TARGET: windows
-            CMD_BUILD: pyinstaller -F -w -n clipster -i resources/clipster.ico cli.py
-            OUT_FILE_NAME: clipster.exe
+            CMD_BUILD: pyinstaller -F -w -n ChimpStackr src/run.py
+            OUT_FILE_NAME: ChimpStackr.exe
             ASSET_MIME: application/vnd.microsoft.portable-executable
     steps:
     - uses: actions/checkout@v1
