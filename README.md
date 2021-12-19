@@ -1,4 +1,5 @@
 # PythonFocusStackingGui
+Open-source multi-platform program for focus stacking many images. This project aims to be a free alternative to commercial focus stacking software.
 
 # Source code instructions
 * Install Anaconda: https://docs.anaconda.com/anaconda/install/
