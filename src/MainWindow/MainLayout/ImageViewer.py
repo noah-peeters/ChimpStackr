@@ -121,8 +121,6 @@ class ImageViewer(qtw.QGraphicsView):
                 msecShowTime=750,
             )
 
-            print(self.zoom_factor * 100 - 100)
-
     def toggleDragMode(self):
         if self.dragMode() == qtw.QGraphicsView.ScrollHandDrag:
             self.setDragMode(qtw.QGraphicsView.NoDrag)
