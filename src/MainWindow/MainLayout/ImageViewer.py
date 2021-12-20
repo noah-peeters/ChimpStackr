@@ -115,11 +115,10 @@ class ImageViewer(qtw.QGraphicsView):
                     self.scale(factor, factor)
                 else:
                     self.fitInView()
-            # TODO: Make tooltip follow mouse
             self.zoom_percentage_tooltip.showText(
                 qtg.QCursor.pos(),
                 str((self.zoom_factor - 1) * 100) + "%",
-                msecShowTime=1000,
+                msecShowTime=750,
             )
 
             print(self.zoom_factor * 100 - 100)
