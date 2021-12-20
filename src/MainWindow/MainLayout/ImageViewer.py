@@ -17,18 +17,21 @@ class ImageViewer(qtw.QGraphicsView):
     hasImage = False
     zoom_factor = 1
     zoom_increment = 0.25
+    reset_zoom = True
 
     def __init__(self):
         super().__init__()
 
+        # Tooltip displaying current zoom percentage
+        self.zoom_percentage_tooltip = qtw.QToolTip()
+
         self.ImageLoading = ImageLoadingHandler.ImageLoadingHandler()
 
-        self.reset_zoom = True
+        # Scene setup
         self._scene = qtw.QGraphicsScene(self)
         self._photo = qtw.QGraphicsPixmapItem()
         self._scene.addItem(self._photo)
 
-        # Scene setup
         self.setScene(self._scene)
         self.setTransformationAnchor(qtw.QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(qtw.QGraphicsView.AnchorUnderMouse)
@@ -112,7 +115,13 @@ class ImageViewer(qtw.QGraphicsView):
                     self.scale(factor, factor)
                 else:
                     self.fitInView()
-            
+            # TODO: Make tooltip follow mouse
+            self.zoom_percentage_tooltip.showText(
+                qtg.QCursor.pos(),
+                str((self.zoom_factor - 1) * 100) + "%",
+                msecShowTime=1000,
+            )
+
             print(self.zoom_factor * 100 - 100)
 
     def toggleDragMode(self):
