@@ -16,6 +16,7 @@ class ImageViewer(qtw.QGraphicsView):
     photoClicked = qtc.Signal(qtc.QPoint)
     hasImage = False
     zoom_factor = 1
+    zoom_increment = 0.25
 
     def __init__(self):
         super().__init__()
@@ -101,13 +102,13 @@ class ImageViewer(qtw.QGraphicsView):
             if event.angleDelta().y() > 0:
                 # Zoom in (25%)
                 if self.zoom_factor < 3:
-                    self.zoom_factor += 0.25
+                    self.zoom_factor += self.zoom_increment
                     self.scale(self.zoom_factor, self.zoom_factor)
             else:
                 # Zoom out (25%)
                 if self.zoom_factor > 1:
-                    self.zoom_factor -= 0.25
-                    factor = 1 / (self.zoom_factor + 0.25)
+                    self.zoom_factor -= self.zoom_increment
+                    factor = 1 / (self.zoom_factor + self.zoom_increment)
                     self.scale(factor, factor)
                 else:
                     self.fitInView()
