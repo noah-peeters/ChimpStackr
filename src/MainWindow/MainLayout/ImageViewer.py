@@ -15,7 +15,7 @@ import ImageLoadingHandler
 class ImageViewer(qtw.QGraphicsView):
     photoClicked = qtc.Signal(qtc.QPoint)
     hasImage = False
-    zoom_factor = 1.0
+    zoom_factor = 1
 
     def __init__(self):
         super().__init__()
@@ -53,7 +53,7 @@ class ImageViewer(qtw.QGraphicsView):
                     viewrect.height() / scenerect.height(),
                 )
                 self.scale(factor, factor)
-            self.zoom_factor = 1
+                self.zoom_factor = 1
 
     # Change displayed image
     def update_displayed_image(self, selected_widget_item):
@@ -84,7 +84,6 @@ class ImageViewer(qtw.QGraphicsView):
 
         # Reset zoom if enabled
         if self.reset_zoom:
-            self.zoom_factor = 1
             self.fitInView()
 
     """
@@ -106,21 +105,14 @@ class ImageViewer(qtw.QGraphicsView):
                     self.scale(self.zoom_factor, self.zoom_factor)
             else:
                 # Zoom out (25%)
-                if self.zoom_factor >= 1:
+                if self.zoom_factor > 1:
                     self.zoom_factor -= 0.25
-
-                    factor = abs(1 - self.zoom_factor)
-                    if factor == 0:
-                        # Handle zero (1-1)
-                        factor = 1
+                    factor = 1 / (self.zoom_factor + 0.25)
                     self.scale(factor, factor)
-
-            if self.zoom_factor <= 1:
-                self.fitInView()
-                self.zoom_factor = 1
-
-            print(self.zoom_factor)
-            # print(self.zoom_factor * 100 - 100)
+                else:
+                    self.fitInView()
+            
+            print(self.zoom_factor * 100 - 100)
 
     def toggleDragMode(self):
         if self.dragMode() == qtw.QGraphicsView.ScrollHandDrag:
