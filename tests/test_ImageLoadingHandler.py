@@ -1,6 +1,7 @@
 """
 Test loading of RAW and jpg images.
 """
+# TODO: Add tests for algoritm scripts
 
 # Hack to import modules
 # src: https://codeolives.com/2020/01/10/python-reference-module-in-parent-directory/
