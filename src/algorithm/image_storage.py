@@ -8,7 +8,7 @@ import os, tempfile
 import numpy as np
 from numba.typed import List
 
-import utilities
+import src.utilities as utilities
 
 
 class ImageStorageHandler:

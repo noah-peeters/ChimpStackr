@@ -1,7 +1,7 @@
 """
 Test multiple functions of algorithm API.
 """
-# Hack to import modules
+# Hack to import modules from src
 # src: https://codeolives.com/2020/01/10/python-reference-module-in-parent-directory/
 import os, sys
 
