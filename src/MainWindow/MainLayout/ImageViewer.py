@@ -8,7 +8,7 @@ import PySide6.QtWidgets as qtw
 
 import cv2
 
-import ImageLoadingHandler
+import src.ImageLoadingHandler
 
 
 class ImageViewer(qtw.QGraphicsView):

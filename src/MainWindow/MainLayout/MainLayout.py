@@ -7,9 +7,9 @@ import cv2
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 
-import MainWindow.MainLayout.ImageWidgets as ImageWidgets
-import MainWindow.MainLayout.ImageViewer as ImageViewer
-from utilities import int_string_sorting
+import src.MainWindow.MainLayout.ImageWidgets as ImageWidgets
+import src.MainWindow.MainLayout.ImageViewer as ImageViewer
+from src.utilities import int_string_sorting
 
 
 class CenterWidget(qtw.QWidget):

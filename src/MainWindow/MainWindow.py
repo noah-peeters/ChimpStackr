@@ -8,14 +8,14 @@ import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 import qt_material
 
-import MainWindow.QActions as qt_actions_setup
-import MainWindow.MainLayout.MainLayout as MainLayout
-import MainWindow.Threading as QThreading
-import MainWindow.ProgressBar as ProgressBar
-import MainWindow.StackSuccessDialog as StackFinishedDialog
-import MainWindow.TimeRemainingHandler as TimeRemainingHandler
+import src.MainWindow.QActions as qt_actions_setup
+import src.MainWindow.MainLayout.MainLayout as MainLayout
+import src.MainWindow.Threading as QThreading
+import src.MainWindow.ProgressBar as ProgressBar
+import src.MainWindow.StackSuccessDialog as StackFinishedDialog
+import src.MainWindow.TimeRemainingHandler as TimeRemainingHandler
 
-import algorithm.API as algorithm_API
+import src.algorithm.API as algorithm_API
 
 # TODO: Make UI more expressive after long operation finished. Show success/error messages
 

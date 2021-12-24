@@ -6,11 +6,10 @@ import PySide6.QtWidgets as qtw
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
-print(parentdir)
 sys.path.append(parentdir)
 
 
-from MainWindow.MainWindow import Window
+from src.MainWindow.MainWindow import Window
 
 # Directory for storing tempfiles. Automatically deletes on program exit.
 ROOT_TEMP_DIRECTORY = tempfile.TemporaryDirectory(prefix="FocusStacking_")

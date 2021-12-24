@@ -7,9 +7,9 @@ import numpy as np
 import numba as nb
 from numba.typed import List
 
-import algorithm.image_storage as image_storage
-import algorithm.pyramid as pyramid
-import ImageLoadingHandler
+import src.algorithm.image_storage as image_storage
+import src.algorithm.pyramid as pyramid
+import src.ImageLoadingHandler as ImageLoadingHandler
 
 
 @nb.njit(nb.float32[:, :, :](nb.float32[:, :, :], nb.int64, nb.int64), fastmath=True)

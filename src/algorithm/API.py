@@ -3,10 +3,10 @@
 """
 import os
 
-import utilities
-import algorithm.pyramid as pyramid
-import algorithm.post_processing as post_processing
-import algorithm.algorithm as algorithm
+import src.utilities as utilities
+import src.algorithm.pyramid as pyramid
+import src.algorithm.post_processing as post_processing
+import src.algorithm.algorithm as algorithm
 
 
 class LaplacianPyramid:
