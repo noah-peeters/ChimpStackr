@@ -5,6 +5,7 @@ Test multiple functions of algorithm API.
 # src: https://codeolives.com/2020/01/10/python-reference-module-in-parent-directory/
 import os, sys, tempfile
 import numpy as np
+import PySide6.QtCore as qtc
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
@@ -27,8 +28,13 @@ def test_image_paths_update():
 
 # Test stacking images
 def test_image_stacking():
-    QThreading.Worker(laplacian_pyramid_algorithm.stack_images)
+    worker = QThreading.Worker(laplacian_pyramid_algorithm.stack_images)
+    threadpool = qtc.QThreadPool()
 
-    assert type(laplacian_pyramid_algorithm.output_image) == np.ndarray
-    assert laplacian_pyramid_algorithm.output_image.shape == (4000, 6000, 3)
-    assert laplacian_pyramid_algorithm.output_image.dtype == np.uint8
+    def finished_stack():
+        assert type(laplacian_pyramid_algorithm.output_image) == np.ndarray
+        assert laplacian_pyramid_algorithm.output_image.shape == (4000, 6000, 3)
+        assert laplacian_pyramid_algorithm.output_image.dtype == np.uint8
+
+    worker.signals.finished.connect(finished_stack)
+    threadpool.start(worker)
