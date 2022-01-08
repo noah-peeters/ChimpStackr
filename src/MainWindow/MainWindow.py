@@ -231,7 +231,6 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
 
         # Execute
         self.threadpool.start(worker)
-
         self.progress_widget.setVisible(True)
 
     # Handle stack finish
