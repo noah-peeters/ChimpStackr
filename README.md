@@ -1,5 +1,5 @@
 # PythonFocusStackingGui
-![GitHub all releases](https://img.shields.io/github/downloads/noah-peeters/PythonFocusStackingGui/total)
+![GitHub all releases](https://img.shields.io/github/downloads/noah-peeters/PythonFocusStackingGui/total) ![GitHub repo size](https://img.shields.io/github/repo-size/noah-peeters/PythonFocusStackingGui)
 
 Open-source multi-platform program for focus stacking many images. This project aims to be a free alternative to commercial focus stacking software.
 
