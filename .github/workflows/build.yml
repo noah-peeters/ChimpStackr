@@ -7,7 +7,7 @@
 # git push
 # git push origin --tags
 
-name: Build
+name: Build releases
 
 on:
   push:
