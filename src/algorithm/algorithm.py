@@ -12,23 +12,37 @@ import src.algorithm.pyramid as pyramid
 import src.ImageLoadingHandler as ImageLoadingHandler
 
 
-@nb.njit(nb.float32[:, :, :](nb.float32[:, :, :], nb.int64, nb.int64), fastmath=True)
-def pad_array(array, y_pad, x_pad):
-    s = array.shape
-    new_array = np.zeros(
-        (s[0] + y_pad, s[1] + x_pad, array.shape[2]), dtype=array.dtype
-    )
-    # Copy old values into new (larger array)
-    new_array[0 : s[0], 0 : s[1]] = array
-    return new_array
+# Pad an array to be the kernel size (square). Only if needed
+@nb.njit(
+    nb.float64[:, :](nb.float64[:, :], nb.int64),
+    fastmath=True,
+)
+def pad_array(array, kernel_size):
+    y_shape = array.shape[0]
+    x_shape = array.shape[1]
+
+    y_pad = kernel_size - y_shape
+    x_pad = kernel_size - x_shape
+    if y_pad > 0 or x_pad > 0:
+        # Pad array (copy values into new; larger array)
+        padded_array = np.zeros((y_shape + y_pad, x_shape + x_pad), dtype=array.dtype)
+        padded_array[0:y_shape, 0:x_shape] = array
+        return padded_array
+    else:
+        # Don't do anything
+        return array
 
 
 # Get deviation of a (grayscale image) matrix
-@nb.njit(nb.float64(nb.float64[:, :]), fastmath=True)
+@nb.njit(
+    nb.float64(nb.float64[:, :]),
+    fastmath=True,
+)
 def get_deviation(matrix):
-    summed_deviation = 0
+    summed_deviation = float(0)
     average_value = np.mean(matrix)
     kernel_area = matrix.shape[0] * matrix.shape[1]
+
     for y in range(matrix.shape[0]):
         for x in range(matrix.shape[1]):
             summed_deviation += (matrix[y, x] - average_value) ** 2 / kernel_area
@@ -39,9 +53,58 @@ def get_deviation(matrix):
 @nb.njit(
     nb.uint8[:, :](nb.float32[:, :, :], nb.float32[:, :, :], nb.int64),
     parallel=True,
-    fastmath=True,
 )
 def compute_focusmap(pyr_level1, pyr_level2, kernel_size):
+    y_range = pyr_level1.shape[0]
+    x_range = pyr_level1.shape[1]
+
+    # 2D focusmap (dtype=bool)
+    # 0 => pixel of pyr1
+    # 1 => pixel of pyr2
+    focusmap = np.empty((y_range, x_range), dtype=np.uint8)
+
+    # Loop through pixels of this pyramid level
+    for y in nb.prange(y_range):  # Most images are wider (more values on x-axis)
+        for x in nb.prange(x_range):
+            highest_image_index = 0
+            highest_value = float(0)
+            for image_index in nb.prange(2):  # Loop through images
+                current_pyramid = pyr_level1
+                if image_index != 0:
+                    current_pyramid = pyr_level2
+
+                # Get small patch (kernel_size) around this pixel
+                k = int(kernel_size / 2)
+                patch = current_pyramid[y - k : y + k, x - k : x + k]
+
+                # Convert BGR patch to grayscale
+                grayscale_patch = (
+                    0.2989 * patch[:, :, 2]
+                    + 0.5870 * patch[:, :, 1]
+                    + 0.1140 * patch[:, :, 0]
+                )
+
+                # Padd array with zeros if needed (edges of image)
+                padded_patch = pad_array(grayscale_patch, kernel_size)
+
+                # Get entropy of kernel
+                # deviation = entropy(padded_patch, disk(10))
+                # print(kernel_entropy)
+
+                # Get deviation of kernel
+                deviation = get_deviation(padded_patch)
+                if deviation > highest_value:
+                    highest_value = deviation
+                    highest_image_index = image_index
+
+            value_to_insert = 0
+            if highest_image_index != 0:
+                value_to_insert = 1
+
+            # Write most in-focus pixel to output
+            focusmap[y, x] = value_to_insert
+
+    return focusmap
     y_range = pyr_level1.shape[0]
     x_range = pyr_level1.shape[1]
 
