@@ -14,10 +14,10 @@
 """
 import time, statistics
 
-# TODO: Really large value in second phase of staking process??
+# TODO: Really large value in second phase of stacking process??
 time_spent_percentages = {
-    "laplacian_pyramid_generation": 45,
-    "laplacian_pyramid_focus_fusion": 55,
+    "laplacian_pyramid_generation": 55,
+    "laplacian_pyramid_focus_fusion": 45,
 }
 
 
@@ -48,10 +48,7 @@ class TimeRemainingHandler:
                 time_spent_percentages["laplacian_pyramid_focus_fusion"]
                 / time_spent_percentages["laplacian_pyramid_generation"]
             )
-            # Multiply with needed percentage
-            time_left *= multiplier ** -1
-            # Add percentage of other task
-            time_left += 100 / percentage_increment * mean_time_taken * multiplier
+            time_left = time_left + mean_time_taken * multiplier
 
         formatted = time.strftime("%H:%M:%S", time.gmtime(time_left))
         return "Time left until program finish: " + formatted

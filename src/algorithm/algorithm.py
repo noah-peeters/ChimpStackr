@@ -235,7 +235,7 @@ class Algorithm:
                     archive_name
                 )
 
-                # Upscale last focusmap (faster then computation)
+                # Upscale last/largest focusmap (faster than computation)
                 threshold_index = len(new_laplacian_pyramid) - 1
                 new_pyr = List()
                 current_focusmap = None

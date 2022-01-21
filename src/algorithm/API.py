@@ -104,26 +104,3 @@ class LaplacianPyramid:
         self.output_image = self.PostProcessing.apply_brightness_contrast(
             fused_image, 8, 8
         )
-
-
-# Test algorithm
-if __name__ == "__main__":
-    import glob, cv2, time
-    import numba.cuda as cu
-
-    cu.detect()
-    print(cu.is_available())
-
-    start_time = time.time()
-
-    algo = LaplacianPyramid(fusion_kernel_size=6, pyramid_num_levels=9)
-
-    algo.update_image_paths(glob.glob("stack_images/*.jpg"))
-
-    print("Start stacking images...")
-    algo.align_and_stack_images()
-
-    out = algo.output_image
-    cv2.imwrite("output_images/stack_output.jpg", out)
-
-    print("--- Program execution took %s seconds ---" % (time.time() - start_time))
