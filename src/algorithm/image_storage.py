@@ -27,12 +27,13 @@ class ImageStorageHandler:
         # Write to uncompressed archive
         np.savez(tmp_file, **dictionary)
 
+        # Ensure write to disk
         os.close(file_handle)
         return tmp_file
 
     # Load laplacian pyramid from archive on disk
     def load_laplacian_pyramid(self, image_archive_filename):
-        archive = np.load(image_archive_filename, mmap_mode="r")
+        archive = np.load(image_archive_filename, allow_pickle=False)
 
         # Get laplacian pyramid (if there)
         laplacian_pyr_keys = sorted(archive.files, key=utilities.int_string_sorting)
