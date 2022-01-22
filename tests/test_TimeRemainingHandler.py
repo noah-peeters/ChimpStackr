@@ -19,17 +19,17 @@ def test_values():
     # Only one needed (no cache kept)
     assert (
         time_handler.calculate_progressbar_value("laplacian_pyramid_generation", 73)
-        == 32.85
+        == 40.15
     )
 
     # Multiple checks needed (b/c of cache)
     assert (
         time_handler.calculate_time_remaining("laplacian_pyramid_generation", 10, 80, 5)
-        == "Time left until program finish: 00:01:33"
+        == "Time left until program finish: 00:01:20"
     )
     assert (
         time_handler.calculate_time_remaining("laplacian_pyramid_generation", 5, 70, 2)
-        == "Time left until program finish: 00:02:05"
+        == "Time left until program finish: 00:01:46"
     )
 
     time_handler.clear_cache()
