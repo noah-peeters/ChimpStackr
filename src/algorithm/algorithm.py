@@ -8,7 +8,7 @@ import numba as nb
 from numba.typed import List
 
 import src.algorithm.image_storage as image_storage
-import src.algorithm.pyramid as pyramid
+import src.algorithm.pyramid as pyramid_algorithm
 import src.ImageLoadingHandler as ImageLoadingHandler
 
 
@@ -180,7 +180,6 @@ def fuse_pyramid_levels_using_focusmap(pyr_level1, pyr_level2, focusmap):
 class Algorithm:
     def __init__(self):
         self.ImageStorage = image_storage.ImageStorageHandler()
-        self.Pyramid = pyramid.Pyramid()
         self.ImageLoadingHandler = ImageLoadingHandler.ImageLoadingHandler()
 
     # ECC image alignment using pyramid approximation
@@ -247,21 +246,15 @@ class Algorithm:
         return tmp_file
 
     # Generate laplacian pyramids for every image (if not already created) and write to disk archive
-    def generate_laplacian_pyramids(
-        self, image_paths, root_dir, num_levels, signals, load_from_tempfile=False
-    ):
+    def generate_laplacian_pyramids(self, image_paths, root_dir, num_levels, signals):
         laplacian_pyramid_archive_names = []
         for i, path in enumerate(image_paths):
             start_time = time.time()
 
-            if not load_from_tempfile:
-                # Load from src image
-                image = self.ImageLoadingHandler.read_image_from_path(path)
-            else:
-                # Load from tempfile (aligned image)
-                image = np.load(path, allow_pickle=False)
+            # Load from src image
+            image = self.ImageLoadingHandler.read_image_from_path(path)
 
-            pyramid = self.Pyramid.laplacian_pyramid(image, num_levels)
+            pyramid = pyramid_algorithm.laplacian_pyramid(image, num_levels)
 
             tmp_file = self.ImageStorage.write_laplacian_pyramid_to_disk(
                 pyramid, root_dir
@@ -313,6 +306,7 @@ class Algorithm:
                             kernel_size,
                         )
                     else:
+                        # TODO: See if upscale really provides any benefit
                         # Upscale previous mask (faster; less accurate)
                         s = new_laplacian_pyramid[pyramid_level].shape
                         current_focusmap = cv2.resize(

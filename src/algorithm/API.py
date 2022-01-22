@@ -4,7 +4,7 @@
 import os
 
 import src.utilities as utilities
-import src.algorithm.pyramid as pyramid
+import src.algorithm.pyramid as pyramid_algorithm
 import src.algorithm.post_processing as post_processing
 import src.algorithm.algorithm as algorithm
 
@@ -19,7 +19,6 @@ class LaplacianPyramid:
         self.root_temp_directory = root_temp_directory
 
         # Load classes
-        self.Pyramid = pyramid.Pyramid()
         self.PostProcessing = post_processing.PostProcessing()
         self.Algorithm = algorithm.Algorithm()
 
@@ -64,7 +63,6 @@ class LaplacianPyramid:
                 aligned_images_tmp_paths,
                 self.root_temp_directory,
                 self.pyramid_num_levels,
-                True,
             )
         )
 
@@ -73,7 +71,7 @@ class LaplacianPyramid:
         )
 
         # Reconstruct image from Laplacian pyramid
-        fused_image = self.Pyramid.reconstruct(stacked_pyramid)
+        fused_image = pyramid_algorithm.reconstruct(stacked_pyramid)
 
         self.output_image = self.PostProcessing.apply_brightness_contrast(
             fused_image, 8, 8
@@ -99,7 +97,7 @@ class LaplacianPyramid:
         )
 
         # Reconstruct image from Laplacian pyramid
-        fused_image = self.Pyramid.reconstruct(stacked_pyramid)
+        fused_image = pyramid_algorithm.reconstruct(stacked_pyramid)
 
         self.output_image = self.PostProcessing.apply_brightness_contrast(
             fused_image, 8, 8
