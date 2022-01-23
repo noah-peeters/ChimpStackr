@@ -5,15 +5,14 @@
 
 import cv2
 import numpy as np
-from numba.typed import List
 
 # Calculate Gaussian pyramid
 def gaussian_pyramid(img, num_levels):
     lower = img.copy()
-    gaussian_pyr = List()
+    gaussian_pyr = []
     gaussian_pyr.append(lower.astype(np.float32))  # Use same dtype
     # Compute all required pyramid levels
-    for i in range(num_levels):
+    for _ in range(num_levels):
         lower = cv2.pyrDown(lower)
         gaussian_pyr.append(lower.astype(np.float32))  # convert_to_memmap
     return gaussian_pyr
@@ -26,7 +25,7 @@ def laplacian_pyramid(img, num_levels):
 
     laplacian_top = gaussian_pyr[-1]
 
-    laplacian_pyr = List()
+    laplacian_pyr = []
     laplacian_pyr.append(laplacian_top)
     # Loop through pyramid levels from smallest to largest shape
     for i in range(num_levels, 0, -1):
