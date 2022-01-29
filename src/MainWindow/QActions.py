@@ -4,8 +4,18 @@
 import PySide6.QtGui as qtg
 import PySide6.QtWidgets as qtw
 
-# Setup actions for parent
+
 def setup_actions(parent):
+    # Load images action; user selects images from a QFileDialog
+    def load_images_from_file():
+        parent.statusBar().showMessage(
+            "Loading selected images...", parent.statusbar_msg_display_time
+        )
+        new_loaded_images, _ = qtw.QFileDialog.getOpenFileNames(
+            parent, "Select images to load.", parent.current_image_directory
+        )
+        parent.set_new_loaded_image_files(new_loaded_images)
+
     menubar = parent.menuBar()
 
     """ File menu/toolbar """
@@ -14,7 +24,7 @@ def setup_actions(parent):
     load_images = qtg.QAction("&Load images", parent)
     load_images.setShortcut("Ctrl+D")
     load_images.setStatusTip("Load images from disk.")
-    load_images.triggered.connect(parent.load_images_from_file)
+    load_images.triggered.connect(load_images_from_file)
     file_menu.addAction(load_images)
 
     clear_images = qtg.QAction("&Clear images", parent)
@@ -68,4 +78,3 @@ def setup_actions(parent):
     qt.setStatusTip("Information on Qt, the UI framework.")
     qt.triggered.connect(qtw.QApplication.aboutQt)
     help.addAction(qt)
-

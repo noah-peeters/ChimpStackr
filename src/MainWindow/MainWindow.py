@@ -129,21 +129,11 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             # No images were originally loaded
             return True
 
-    # Load images from a file on disk
-    def load_images_from_file(self):
-        self.statusBar().showMessage(
-            "Loading selected images...", self.statusbar_msg_display_time
-        )
-        new_loaded_images, _ = qtw.QFileDialog.getOpenFileNames(
-            self, "Select images to load.", self.current_image_directory
-        )
-
+    # Update loaded image files
+    def set_new_loaded_image_files(self, new_loaded_images):
         if len(new_loaded_images) > 0:
             self.current_image_directory = os.path.dirname(new_loaded_images[0])
-
-            # Clear previous images (if there)
             clear_success = self.clear_all_images()
-
             # TODO: Check if valid (and same??) format; discard unsupported formats + show warning
             if clear_success == True:
                 # Set new loaded images
@@ -199,9 +189,6 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.statusBar().showMessage(
             "Started stacking images...", self.statusbar_msg_display_time
         )
-
-        def status_update(msg):
-            self.progress_widget.progress_label.setText(msg)
 
         def finished_inter_task(result_list):
             task_key, num_processed, num_to_process_total, time_taken = result_list

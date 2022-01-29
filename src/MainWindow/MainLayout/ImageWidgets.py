@@ -6,20 +6,51 @@ import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 import PySide6.QtGui as qtg
 
+
+class LoadedImagesList(qtg.QListWidget):
+    def __init__(self):
+        super().__init__()
+        self.setAcceptDrops(True)
+        # self.list.setDragDropMode(qtw.QAbstractItemView.DragDrop)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls:
+            event.accept()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls:
+            event.setDropAction(qtc.Qt.CopyAction)
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls:
+            event.setDropAction(qtc.Qt.CopyAction)
+            event.accept()
+            images = []
+            for url in event.mimeData().urls():
+                images.append(str(url.toLocalFile()))
+            print(images)
+        else:
+            event.ignore()
+
+
 # Widget for displaying loaded images
 class LoadedImagesWidget(qtw.QWidget):
+    default_header_text = "Source images"
     default_loaded_images_items = [
         "Loaded images will appear here.",
-        "Please load them in from the 'file' menu.",
+        "Please load them in from the 'file' menu,",
+        "or drag and drop them here.",
     ]
-    default_header_text = "Source images"
 
     def __init__(self):
         super().__init__()
         self.header_label = qtw.QLabel(self.default_header_text)
-
-        self.list = qtw.QListWidget()
-        self.list.setSelectionMode(qtw.QAbstractItemView.ExtendedSelection)
+        self.list = LoadedImagesList()
         self.list.addItems(self.default_loaded_images_items)
 
         v_layout = qtw.QVBoxLayout()
@@ -40,19 +71,19 @@ class LoadedImagesWidget(qtw.QWidget):
 
     # TODO: Implement method of removing selected images on rightclick
     # Display image options on right click
-    def contextMenuEvent(self, event: qtg.QContextMenuEvent) -> None:
-        menu = qtw.QMenu()
+    # def contextMenuEvent(self, event: qtg.QContextMenuEvent) -> None:
+    #     menu = qtw.QMenu()
 
-        reset_zoom_action = qtg.QAction("Reset zoom")
-        reset_zoom_action.setStatusTip("Reset zoom in between image selections.")
-        reset_zoom_action.setCheckable(True)
-        reset_zoom_action.setChecked(False)
+    #     reset_zoom_action = qtg.QAction("Reset zoom")
+    #     reset_zoom_action.setStatusTip("Reset zoom in between image selections.")
+    #     reset_zoom_action.setCheckable(True)
+    #     reset_zoom_action.setChecked(False)
 
-        menu.addAction(reset_zoom_action)
-        selected_action = menu.exec(event.globalPos())
+    #     menu.addAction(reset_zoom_action)
+    #     selected_action = menu.exec(event.globalPos())
 
-        # if selected_action == reset_zoom_action:
-        #     self.reset_zoom = reset_zoom_action.isChecked()
+    #     if selected_action == reset_zoom_action:
+    #         self.reset_zoom = reset_zoom_action.isChecked()
 
 
 # Widget for displaying processed/stacked images

@@ -44,20 +44,20 @@ class CenterWidget(qtw.QWidget):
         layout.addWidget(v_splitter)
         self.setLayout(layout)
 
-    # Called from parent MainWindow. Process image path names and display new loaded images inside list widget.
-    # QListWidget data is set to the full image path for quick retrieval later.
+    # Update currently loaded images + relevant UI
     def set_loaded_images(self, new_image_files):
-        self.ImageWidgets.loaded_images_widget.reset_to_default()
-        # Clear currently displaying image
-        self.image_display.update_displayed_image(None)
-        if len(new_image_files) <= 0:
-            # No images selected, use default
-            return
-
-        # New images selected: update list and header text
+        # Update header text
         self.ImageWidgets.loaded_images_widget.header_label.setText(
             "Source images (" + str(len(new_image_files)) + ")"
         )
+
+        # Clear currently displaying image
+        self.ImageWidgets.loaded_images_widget.reset_to_default()
+        self.image_display.update_displayed_image(None)
+        
+        if len(new_image_files) <= 0:
+            # No images selected, use default
+            return
 
         # Set new files
         self.ImageWidgets.loaded_images_widget.list.clear()
