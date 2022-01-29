@@ -10,15 +10,14 @@ import PySide6.QtWidgets as qtw
 import src.MainWindow.MainLayout.ImageWidgets as ImageWidgets
 import src.MainWindow.MainLayout.ImageViewer as ImageViewer
 from src.utilities import int_string_sorting
+import src.settings as settings
 
 
 class CenterWidget(qtw.QWidget):
-    def __init__(self, root_temp_directory):
+    def __init__(self):
         super().__init__()
-
-        self.root_temp_directory = root_temp_directory
+        self.root_temp_directory = settings.globalVars["RootTempDir"]
         self.ImageWidgets = ImageWidgets.ImageWidgets()
-
         self.image_display = ImageViewer.ImageViewer()
 
         # Connect to "selected item change" signals
@@ -46,27 +45,27 @@ class CenterWidget(qtw.QWidget):
 
     # Update currently loaded images + relevant UI
     def set_loaded_images(self, new_image_files):
-        # Update header text
-        self.ImageWidgets.loaded_images_widget.header_label.setText(
-            "Source images (" + str(len(new_image_files)) + ")"
-        )
-
         # Clear currently displaying image
         self.ImageWidgets.loaded_images_widget.reset_to_default()
         self.image_display.update_displayed_image(None)
-        
+
         if len(new_image_files) <= 0:
             # No images selected, use default
             return
 
+        # Update header text
+        settings.globalVars["LoadedImagesWidget"].headerText.setText(
+            "Source images (" + str(len(new_image_files)) + ")"
+        )
+
         # Set new files
-        self.ImageWidgets.loaded_images_widget.list.clear()
+        settings.globalVars["LoadedImagesWidget"].list.clear()
         for path in sorted(new_image_files, key=int_string_sorting):
             name = os.path.basename(path)
             item = qtw.QListWidgetItem()
             item.setData(qtc.Qt.UserRole, path)  # Set data to full image path
             item.setText(name)  # Set text to image name
-            self.ImageWidgets.loaded_images_widget.list.addItem(item)
+            settings.globalVars["LoadedImagesWidget"].list.addItem(item)
 
     # Called from parent MainWindow. Display generated name inside ProcessedImagesWidget
     def add_processed_image(self, new_image_array):
@@ -76,6 +75,7 @@ class CenterWidget(qtw.QWidget):
         else:
             self.ImageWidgets.processed_images_widget.setVisible(True)
             # Add image to list & store data file
+            # TODO: Why is tempfile stored in this folder??
             file_handle, tmp_file = tempfile.mkstemp(
                 suffix=".jpg", dir=self.root_temp_directory.name
             )
@@ -86,4 +86,4 @@ class CenterWidget(qtw.QWidget):
             cv2.imwrite(tmp_file, new_image_array)
 
             os.close(file_handle)
-            self.ImageWidgets.processed_images_widget.list.addItem(item)
+            settings.globalVars["ProcessedImagesWidget"].list.addItem(item)

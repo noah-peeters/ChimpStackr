@@ -4,14 +4,14 @@
 """
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
-import PySide6.QtGui as qtg
+
+import src.settings as settings
 
 
-class LoadedImagesList(qtg.QListWidget):
+class LoadedImagesList(qtw.QListWidget):
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
-        # self.list.setDragDropMode(qtw.QAbstractItemView.DragDrop)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls:
@@ -26,14 +26,17 @@ class LoadedImagesList(qtg.QListWidget):
         else:
             event.ignore()
 
+    # Set loaded images on drag
     def dropEvent(self, event):
         if event.mimeData().hasUrls:
             event.setDropAction(qtc.Qt.CopyAction)
             event.accept()
-            images = []
+            image_paths = []
             for url in event.mimeData().urls():
-                images.append(str(url.toLocalFile()))
-            print(images)
+                image_paths.append(str(url.toLocalFile()))
+
+            settings.globalVars["MainWindow"].set_new_loaded_image_files(image_paths)
+
         else:
             event.ignore()
 
@@ -42,19 +45,20 @@ class LoadedImagesList(qtg.QListWidget):
 class LoadedImagesWidget(qtw.QWidget):
     default_header_text = "Source images"
     default_loaded_images_items = [
-        "Loaded images will appear here.",
-        "Please load them in from the 'file' menu,",
-        "or drag and drop them here.",
+        "Load images from the 'file' menu,",
+        "or drop them here.",
     ]
 
     def __init__(self):
         super().__init__()
-        self.header_label = qtw.QLabel(self.default_header_text)
+        settings.globalVars["LoadedImagesWidget"] = self
+
+        self.headerText = qtw.QLabel(self.default_header_text)
         self.list = LoadedImagesList()
         self.list.addItems(self.default_loaded_images_items)
 
         v_layout = qtw.QVBoxLayout()
-        v_layout.addWidget(self.header_label)
+        v_layout.addWidget(self.headerText)
         v_layout.addWidget(self.list)
         self.setLayout(v_layout)
 
@@ -62,8 +66,11 @@ class LoadedImagesWidget(qtw.QWidget):
     def reset_to_default(self):
         self.list.clear()
         self.list.addItems(self.default_loaded_images_items)
+        self.headerText.setText(self.default_header_text)
 
-        self.header_label.setText(self.default_header_text)
+    # Needed to prevent calling from other thread 
+    def setHeaderText(self, msg):
+        self.headerText.setText(msg)
 
     """
         Overridden signals
@@ -90,14 +97,14 @@ class LoadedImagesWidget(qtw.QWidget):
 class ProcessedImagesWidget(qtw.QWidget):
     def __init__(self):
         super().__init__()
+        settings.globalVars["ProcessedImagesWidget"] = self
 
-        self.header_label = qtw.QLabel("Output image(s)")
-
+        self.headerText = qtw.QLabel("Output image(s)")
         self.list = qtw.QListWidget()
         self.list.setSelectionMode(qtw.QAbstractItemView.ExtendedSelection)
 
         v_layout = qtw.QVBoxLayout()
-        v_layout.addWidget(self.header_label)
+        v_layout.addWidget(self.headerText)
         v_layout.addWidget(self.list)
         self.setLayout(v_layout)
 

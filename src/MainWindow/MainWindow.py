@@ -8,6 +8,7 @@ import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 import qt_material
 
+import src.settings as settings
 import src.MainWindow.QActions as qt_actions_setup
 import src.MainWindow.MainLayout.MainLayout as MainLayout
 import src.MainWindow.Threading as QThreading
@@ -25,8 +26,11 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     # Reference dir for image loading/export
     current_image_directory = os.path.expanduser("~")
 
-    def __init__(self, root_temp_directory):
+    def __init__(self):
         super().__init__()
+
+        settings.globalVars["MainWindow"] = self
+        settings.globalVars["LoadedImagePaths"] = []
 
         self.statusbar_msg_display_time = 2000  # Time in ms
         self.setWindowTitle("ChimpStackr")
@@ -35,9 +39,9 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.setMinimumSize(int(geometry.width() * 0.6), int(geometry.height() * 0.6))
 
         # Setup actions
-        qt_actions_setup.setup_actions(self)
+        qt_actions_setup.setup_actions()
         # Set center widget
-        self.setCentralWidget(MainLayout.CenterWidget(root_temp_directory))
+        self.setCentralWidget(MainLayout.CenterWidget())
 
         # Permanent progressbar inside statusbar
         self.progress_widget = ProgressBar.ProgressBar()
@@ -51,7 +55,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         # Setup algorithm API
         # TODO: Allow user to change program settings
         self.LaplacianAlgorithm = algorithm_API.LaplacianPyramid(
-            root_temp_directory, 6, 8
+            settings.globalVars["RootTempDir"], 6, 8
         )
         self.TimeRemainingHandler = TimeRemainingHandler.TimeRemainingHandler()
 
@@ -111,20 +115,21 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                 self,
                 "Clear images?",
                 "Are you sure you want to clear all loaded images? Output image(s) will be cleared to!",
-                qtw.QMessageBox.Yes,
-                qtw.QMessageBox.No,
+                qtw.QMessageBox.Cancel,
+                qtw.QMessageBox.Ok
             )
-            if reply == qtw.QMessageBox.Yes:
+            if reply == qtw.QMessageBox.Ok:
                 self.statusBar().showMessage(
-                    "Clearing all loaded images...", self.statusbar_msg_display_time
+                    "Clearing images...", self.statusbar_msg_display_time
                 )
                 # Clear loaded and processed images from list
-                self.loaded_image_names = []
-                self.centralWidget().set_loaded_images([])
+                settings.globalVars["LoadedImagePaths"] = []
+                self.centralWidget().set_loaded_images(settings.globalVars["LoadedImagePaths"])
+                self.LaplacianAlgorithm.update_image_paths(settings.globalVars["LoadedImagePaths"])
                 self.centralWidget().add_processed_image(None)
-                self.LaplacianAlgorithm.update_image_paths([])
-                # Successfully removed images
                 return True
+            else:
+                return False
         else:
             # No images were originally loaded
             return True
@@ -132,14 +137,17 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     # Update loaded image files
     def set_new_loaded_image_files(self, new_loaded_images):
         if len(new_loaded_images) > 0:
-            self.current_image_directory = os.path.dirname(new_loaded_images[0])
-            clear_success = self.clear_all_images()
+            if self.clear_all_images() == False:
+                return
+
             # TODO: Check if valid (and same??) format; discard unsupported formats + show warning
-            if clear_success == True:
-                # Set new loaded images
-                self.loaded_image_names = new_loaded_images
-                self.centralWidget().set_loaded_images(self.loaded_image_names)
-                self.LaplacianAlgorithm.update_image_paths(self.loaded_image_names)
+            self.statusBar().showMessage(
+                "Loading images...", self.statusbar_msg_display_time
+            )
+            self.current_image_directory = os.path.dirname(new_loaded_images[0])
+            self.centralWidget().set_loaded_images(new_loaded_images)
+            self.LaplacianAlgorithm.update_image_paths(new_loaded_images)
+            settings.globalVars["LoadedImagePaths"] = new_loaded_images
 
     # Shutdown all currently running processes, cleanup and close window
     def shutdown_application(self):
@@ -160,7 +168,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
 
     # TODO: re-implement (with QThread + timing percentages)
     def align_and_stack_loaded_images(self):
-        if len(self.loaded_image_names) == 0:
+        if len(settings.globalVars["LoadedImagePaths"]) == 0:
             # Display Error message
             msg = qtw.QMessageBox(self)
             msg.setStandardButtons(qtw.QMessageBox.Ok)
@@ -176,7 +184,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.LaplacianAlgorithm.align_and_stack_images()
 
     def stack_loaded_images(self):
-        if len(self.loaded_image_names) == 0:
+        if len(settings.globalVars["LoadedImagePaths"]) == 0:
             # Display Error message
             msg = qtw.QMessageBox(self)
             msg.setStandardButtons(qtw.QMessageBox.Ok)

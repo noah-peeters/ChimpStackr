@@ -9,13 +9,16 @@ parentdir = os.path.dirname(currentdir)
 sys.path.append(parentdir)
 
 from src.MainWindow.MainWindow import Window
+import src.settings as settings
 
 # Directory for storing tempfiles. Automatically deletes on program exit.
 ROOT_TEMP_DIRECTORY = tempfile.TemporaryDirectory(prefix="FocusStacking_")
+settings.init()
+settings.globalVars["RootTempDir"] = ROOT_TEMP_DIRECTORY
 
 if __name__ == "__main__":
     app = qtw.QApplication(sys.argv)
-    window = Window(ROOT_TEMP_DIRECTORY)
+    window = Window()
 
     window.show()
     sys.exit(app.exec())
