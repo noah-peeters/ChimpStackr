@@ -1,0 +1,16 @@
+app-id: org.flatpak.chimpstackr
+runtime: org.freedesktop.Platform
+runtime-version: '21.08'
+sdk: org.freedesktop.Sdk
+command: run.py
+modules:
+  - name: chimpstackr-install
+    buildsystem: simple
+    build-commands:
+      - python3 setup.py install --prefix=/app
+      - cp -r src/* /app/src/
+    sources:
+      - type: dir
+        path: "."
+      - type: dir
+        path: src/

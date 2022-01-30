@@ -19,16 +19,17 @@ parts:
     requirements: ['requirements.txt']
     source: .
     build-packages:
-      - libtbb-dev
       - libxkbfile-dev
+      - libtbb-dev
     stage-packages:
       - libxkbcommon0
       - libgtk-3-0
       - libxkbfile1
       - gstreamer1.0-gl
+      - libtbb2
 
 apps:
-  python-stacking-gui:
+  chimpstackr:
     command: bin/python  $SNAP/bin/run.py
     extensions: [kde-neon]
     plugs:
