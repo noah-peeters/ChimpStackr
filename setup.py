@@ -3,7 +3,6 @@ import setuptools, glob
 setuptools.setup(
     name="python-stacking-gui",
     packages=setuptools.find_packages(),
-    scripts=glob.glob("src/run.py"),
 )
 
 # import glob, os, setuptools
