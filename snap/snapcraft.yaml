@@ -16,7 +16,7 @@ architectures:
 apps:
   python-stacking-gui:
     #command: desktop-launch  $SNAP/bin/python-stacking-gui
-    command: bin/run.py
+    command: python bin/run.py
     extensions: [kde-neon]
     plugs:
       - browser-support
