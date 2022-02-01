@@ -14,9 +14,7 @@ architectures:
 
 apps:
   chimpstackr:
-    #command: chimpstackr # desktop-launch $SNAP/bin/chimpstackr
-    command: bin/python3 $SNAP/lib/python3.8/site-packages/src/run.py
-    #command: bin/python  $SNAP/bin/run.py
+    command: bin/python3 $SNAP/src/run.py
     extensions: 
       - kde-neon
     plugs:
@@ -24,10 +22,15 @@ apps:
       - removable-media
 
 parts:
+  # TODO: Only copy "src" dir??
+  copy-source-code:
+    plugin: dump
+    source: .
   chimpstackr:
     plugin: python
-    source: .
-    requirements: ['requirements.txt']
+    source: ./src
+    requirements:
+      - /root/project/requirements.txt
     build-packages:
       - libxkbfile-dev
       - libtbb-dev
