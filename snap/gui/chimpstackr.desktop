@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=ChimpStackr
+GenericName=Focus stacking
+Comment=Easily focus stack images
+Exec=chimpstackr
+Terminal=false
+Type=Application
+Categories=Development;
+StartupNotify=true
