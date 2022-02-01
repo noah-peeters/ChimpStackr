@@ -1,7 +1,7 @@
 import setuptools, glob
 
 setuptools.setup(
-    name="python-stacking-gui",
+    name="chimpstackr",
     packages=setuptools.find_packages(),
 )
 
