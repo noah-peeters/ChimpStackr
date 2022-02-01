@@ -30,9 +30,8 @@ parts:
     source: .
   chimpstackr:
     plugin: python
-    source: ./src
-    requirements:
-      - /root/project/requirements.txt
+    source: .
+    requirements: ['requirements.txt']
     build-packages:
       - libxkbfile-dev
       - libtbb-dev
