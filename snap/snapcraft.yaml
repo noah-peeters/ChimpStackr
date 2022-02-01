@@ -8,7 +8,7 @@ description: |
   that aims to be a replacement for commercial programs.
 
 base: core20
-grade: devel # 'stable' to release into candidate/stable channels
+grade: candidate # 'stable' to release into candidate/stable channels
 confinement: strict
 
 architectures:
