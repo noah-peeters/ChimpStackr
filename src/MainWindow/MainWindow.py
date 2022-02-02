@@ -32,13 +32,6 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         settings.globalVars["MainWindow"] = self
         settings.globalVars["LoadedImagePaths"] = []
 
-        # Generate supported export formats (for image export)
-        self.supportedExportFormats = "("
-        for i, v in enumerate(settings.globalVars["SupportedExportFormats"]):
-            if i != 0:
-                self.supportedExportFormats += " "
-            self.supportedExportFormats += "*." + v + ","
-
         self.statusbar_msg_display_time = 2000  # (ms)
 
         self.setWindowTitle("ChimpStackr")
@@ -73,22 +66,22 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     # Export output image to file on disk
     def export_output_image(self):
         if self.LaplacianAlgorithm.output_image is not None:
-            file_path, _ = qtw.QFileDialog.getSaveFileName(
+            outputFilePath, _ = qtw.QFileDialog.getSaveFileName(
                 self,
                 "Export stacked image",
                 self.current_image_directory,
-                "Images files " + self.supportedExportFormats,
+                "JPEG (*.jpg *.jpeg);; JPEG 2000 (*.jp2);; PNG (*.png);; TIFF (*.tiff *.tif)",
             )
-            if file_path:
-                file_path = os.path.abspath(file_path)
-                self.current_image_directory = os.path.dirname(file_path)
+            if outputFilePath:
+                outputFilePath = os.path.abspath(outputFilePath)
+                self.current_image_directory = os.path.dirname(outputFilePath)
 
                 self.statusBar().showMessage(
                     "Exporting output image...", self.statusbar_msg_display_time
                 )
 
                 try:
-                    cv2.imwrite(file_path, self.LaplacianAlgorithm.output_image)
+                    cv2.imwrite(outputFilePath, self.LaplacianAlgorithm.output_image)
                 except Exception as e:
                     # Display Error message
                     msg = qtw.QMessageBox(self)
@@ -106,8 +99,13 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                     msg.setStandardButtons(qtw.QMessageBox.Ok)
                     msg.setIcon(qtw.QMessageBox.Information)
                     msg.setWindowTitle("Export success")
-                    msg.setText("Successfully exported output image.")
-                    msg.setInformativeText("File location:\n" + file_path)
+                    msg.setText(
+                        "Successfully exported output image.\n"
+                        + "File size is: "
+                        + str(round(os.path.getsize(outputFilePath) / 1024 / 1024, 2))
+                        + "MB.\n"
+                    )
+                    msg.setInformativeText("File location:\n" + outputFilePath)
                     msg.show()
         else:
             # Display Error message

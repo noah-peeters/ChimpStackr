@@ -21,7 +21,7 @@ class ImageLoadingHandler:
         # Get extension without dot at beginning
         _, extension = os.path.splitext(path)
         extension = extension[1:]
-        if str.lower(extension) in settings.globalVars["SupportedExportFormats"]:
+        if str.lower(extension) in settings.globalVars["SupportedReadFormats"]:
             # Regular imread
             return cv2.imread(path)
         elif str.upper(extension) in settings.globalVars["SupportedRAWFormats"]:
