@@ -13,7 +13,9 @@ sys.path.append(parentdir)
 import numpy as np
 
 from src.ImageLoadingHandler import ImageLoadingHandler
+import src.settings as settings
 
+settings.init()
 loader = ImageLoadingHandler()
 
 
