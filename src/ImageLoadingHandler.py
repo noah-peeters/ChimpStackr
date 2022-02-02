@@ -22,8 +22,8 @@ class ImageLoadingHandler:
         _, extension = os.path.splitext(path)
         extension = extension[1:]
         if str.lower(extension) in settings.globalVars["SupportedReadFormats"]:
-            # Regular imread
-            return cv2.imread(path)
+            # Regular imread (-1 loads the image with "as is")
+            return cv2.imread(path, -1)
         elif str.upper(extension) in settings.globalVars["SupportedRAWFormats"]:
             # Read RAW image
             raw = rawpy.imread(path)
