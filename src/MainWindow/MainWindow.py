@@ -15,6 +15,7 @@ import src.MainWindow.Threading as QThreading
 import src.MainWindow.ProgressBar as ProgressBar
 import src.MainWindow.StackSuccessDialog as StackFinishedDialog
 import src.MainWindow.TimeRemainingHandler as TimeRemainingHandler
+import src.MainWindow.ImageSavingDialog as ImageSavingDialog
 
 import src.algorithm.API as algorithm_API
 
@@ -66,7 +67,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     # Export output image to file on disk
     def export_output_image(self):
         if self.LaplacianAlgorithm.output_image is not None:
-            outputFilePath, _ = qtw.QFileDialog.getSaveFileName(
+            outputFilePath, usedFilter = qtw.QFileDialog.getSaveFileName(
                 self,
                 "Export stacked image",
                 self.current_image_directory,
@@ -80,33 +81,21 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                     "Exporting output image...", self.statusbar_msg_display_time
                 )
 
-                try:
-                    cv2.imwrite(outputFilePath, self.LaplacianAlgorithm.output_image)
-                except Exception as e:
-                    # Display Error message
-                    msg = qtw.QMessageBox(self)
-                    msg.setStandardButtons(qtw.QMessageBox.Ok)
-                    msg.setIcon(qtw.QMessageBox.Critical)
-                    msg.setWindowTitle("Export failed")
-                    msg.setText(
-                        "Failed to export!\nHave you used a supported file extension?\n"
-                    )
-                    msg.setInformativeText("Error:\n" + str(e))
-                    msg.show()
-                else:
-                    # Display success message
-                    msg = qtw.QMessageBox(self)
-                    msg.setStandardButtons(qtw.QMessageBox.Ok)
-                    msg.setIcon(qtw.QMessageBox.Information)
-                    msg.setWindowTitle("Export success")
-                    msg.setText(
-                        "Successfully exported output image.\n"
-                        + "File size is: "
-                        + str(round(os.path.getsize(outputFilePath) / 1024 / 1024, 2))
-                        + "MB.\n"
-                    )
-                    msg.setInformativeText("File location:\n" + outputFilePath)
-                    msg.show()
+                # Get used image type from filter
+                imgType = None
+                if usedFilter == "JPEG (*.jpg *.jpeg)":
+                    imgType = "jpg"
+                elif usedFilter == "JPEG 2000 (*.jp2)":
+                    imgType = "jpg2000"
+                elif usedFilter == "PNG (*.png)":
+                    imgType = "png"
+                elif usedFilter == "TIFF (*.tiff *.tif)":
+                    imgType = "tiff"
+
+                ImageSavingDialog.createDialog(
+                    self.LaplacianAlgorithm.output_image, imgType, outputFilePath
+                )
+
         else:
             # Display Error message
             msg = qtw.QMessageBox(self)
