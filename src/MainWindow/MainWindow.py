@@ -66,7 +66,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     def export_output_image(self):
         if self.LaplacianAlgorithm.output_image is not None:
             file_path, _ = qtw.QFileDialog.getSaveFileName(
-                self, "Export stacked image", self.current_image_directory
+                self, "Export stacked image", self.current_image_directory, "Images (*.jpg, *.png)"
             )
             if file_path:
                 file_path = os.path.abspath(file_path)

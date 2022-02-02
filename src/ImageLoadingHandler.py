@@ -9,71 +9,7 @@ import rawpy
 import cv2
 import imageio
 
-# All RAW formats; src: https://fileinfo.com/filetypes/camera_raw
-supported_rawpy_formats = [
-    "RWZ",
-    "RW2",
-    "CR2",
-    "DNG",
-    "ERF",
-    "NRW",
-    "RAF",
-    "ARW",
-    "NEF",
-    "K25",
-    "DNG",
-    "SRF",
-    "EIP",
-    "DCR",
-    "RAW",
-    "CRW",
-    "3FR",
-    "BAY",
-    "MEF",
-    "CS1",
-    "KDC",
-    "ORF",
-    "ARI",
-    "SR2",
-    "MOS",
-    "MFW",
-    "CR3",
-    "FFF",
-    "SRW",
-    "J6I",
-    "X3F",
-    "KC2",
-    "RWL",
-    "MRW",
-    "PEF",
-    "IIQ",
-    "CXI",
-    "MDC",
-]
-# Open-cv imread supported formats; src: https://docs.opencv.org/4.x/d4/da8/group__imgcodecs.html#ga288b8b3da0892bd651fce07b3bbd3a56
-supported_opencv_formats = [
-    "bmp",
-    "dib",
-    "jpeg",
-    "jpg",
-    "jpe",
-    "jp2",
-    "png",
-    "webp",
-    "pbm",
-    "pgm",
-    "ppm",
-    "pxm",
-    "pnm",
-    "pfm",
-    "sr",
-    "ras",
-    "tiff",
-    "tif",
-    "exr",
-    "hdr",
-    "pic",
-]
+import src.settings as settings
 
 
 class ImageLoadingHandler:
@@ -85,10 +21,10 @@ class ImageLoadingHandler:
         # Get extension without dot at beginning
         _, extension = os.path.splitext(path)
         extension = extension[1:]
-        if str.lower(extension) in supported_opencv_formats:
+        if str.lower(extension) in settings.globalVars["SupportedExportFormats"]:
             # Regular imread
             return cv2.imread(path)
-        elif str.upper(extension) in supported_rawpy_formats:
+        elif str.upper(extension) in settings.globalVars["SupportedRAWFormats"]:
             # Read RAW image
             raw = rawpy.imread(path)
 
@@ -111,11 +47,10 @@ class ImageLoadingHandler:
 
             raw.close()
             return processed
-    
+
     # Get RAW image view from path (uses copy() to allow usage after closing raw file)
     def get_raw_view(self, path):
         raw = rawpy.imread(path)
         image = raw.raw_image_visible.copy()
         raw.close()
         return image
-
