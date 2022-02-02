@@ -8,7 +8,7 @@ description: |
   Focus stacking is often a necessity when working with high-magnification pictures.
 
 base: core20
-grade: candidate # "candidate" for release or "devel" when debugging
+grade: stable # "stable" for release or "devel" when debugging
 confinement: strict
 
 architectures:
