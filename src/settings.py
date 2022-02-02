@@ -9,13 +9,13 @@ def init():
     # Opencv imread/imwrite supported formats;
     # src: https://docs.opencv.org/4.x/d4/da8/group__imgcodecs.html#ga288b8b3da0892bd651fce07b3bbd3a56
     globalVars["SupportedExportFormats"] = [
-        "bmp",
-        "dib",
-        "jpeg",
         "jpg",
+        "jpeg",
         "jpe",
         "jp2",
         "png",
+        "bmp",
+        "dib",
         "webp",
         "pbm",
         "pgm",

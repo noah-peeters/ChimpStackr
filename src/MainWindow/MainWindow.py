@@ -32,7 +32,15 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         settings.globalVars["MainWindow"] = self
         settings.globalVars["LoadedImagePaths"] = []
 
-        self.statusbar_msg_display_time = 2000  # Time in ms
+        # Generate supported export formats (for image export)
+        self.supportedExportFormats = "("
+        for i, v in enumerate(settings.globalVars["SupportedExportFormats"]):
+            if i != 0:
+                self.supportedExportFormats += " "
+            self.supportedExportFormats += "*." + v + ","
+
+        self.statusbar_msg_display_time = 2000  # (ms)
+
         self.setWindowTitle("ChimpStackr")
         # Set min. window size based on pixel size
         geometry = self.screen().availableGeometry()
@@ -66,7 +74,10 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     def export_output_image(self):
         if self.LaplacianAlgorithm.output_image is not None:
             file_path, _ = qtw.QFileDialog.getSaveFileName(
-                self, "Export stacked image", self.current_image_directory, "Images (*.jpg, *.png)"
+                self,
+                "Export stacked image",
+                self.current_image_directory,
+                "Images files " + self.supportedExportFormats,
             )
             if file_path:
                 file_path = os.path.abspath(file_path)
@@ -116,7 +127,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                 "Clear images?",
                 "Are you sure you want to clear all loaded images? Output image(s) will be cleared to!",
                 qtw.QMessageBox.Cancel,
-                qtw.QMessageBox.Ok
+                qtw.QMessageBox.Ok,
             )
             if reply == qtw.QMessageBox.Ok:
                 self.statusBar().showMessage(
@@ -124,8 +135,12 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                 )
                 # Clear loaded and processed images from list
                 settings.globalVars["LoadedImagePaths"] = []
-                self.centralWidget().set_loaded_images(settings.globalVars["LoadedImagePaths"])
-                self.LaplacianAlgorithm.update_image_paths(settings.globalVars["LoadedImagePaths"])
+                self.centralWidget().set_loaded_images(
+                    settings.globalVars["LoadedImagePaths"]
+                )
+                self.LaplacianAlgorithm.update_image_paths(
+                    settings.globalVars["LoadedImagePaths"]
+                )
                 self.centralWidget().add_processed_image(None)
                 return True
             else:
