@@ -12,7 +12,6 @@ class SelectQualityDialog(qtw.QDialog):
 
     def __init__(self, imType):
         super().__init__()
-        
         self.setWindowTitle("Export image as " + imType)
 
         self.slider = qtw.QSlider(qtc.Qt.Orientation.Horizontal)
