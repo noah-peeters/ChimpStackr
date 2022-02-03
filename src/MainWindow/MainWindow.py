@@ -134,13 +134,14 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             # No images were originally loaded
             return True
 
+    # TODO: Dragging a folder gives an error; use contents of folder (if valid images)
     # Update loaded image files
     def set_new_loaded_image_files(self, new_loaded_images):
         if len(new_loaded_images) > 0:
             if self.clear_all_images() == False:
                 return
 
-            # TODO: Check if valid (and same??) format; discard unsupported formats + show warning
+            # TODO: Check if valid (and same??) format; discard unsupported formats + show warning saying what images were discarded
             self.statusBar().showMessage(
                 "Loading images...", self.statusbar_msg_display_time
             )
@@ -231,7 +232,8 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     # Handle stack finish
     def finished_stack(self):  # , data_dictionary
         # Display stack info dialog
-        StackFinishedDialog.Message()
+        # TODO: Properly implement
+        #StackFinishedDialog.Message()
 
         # Reset progressbar and add selectable stack result
         self.progress_widget.reset_and_hide()

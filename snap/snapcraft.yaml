@@ -1,7 +1,7 @@
 # Useful resource: https://medium.com/@abulka/getting-python-and-wxpython-apps-into-the-ubuntu-app-store-ccca7ae537a3
 
 name: chimpstackr
-version: v0.0.07 #git
+version: git
 summary: Focus stacking software
 description: |
   ChimpStackr is a program that can be used for focus stacking many images.

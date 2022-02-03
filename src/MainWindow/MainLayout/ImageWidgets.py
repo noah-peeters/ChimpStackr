@@ -26,7 +26,7 @@ class LoadedImagesList(qtw.QListWidget):
         else:
             event.ignore()
 
-    # Set loaded images on drag
+    # Try setting loaded images on drag
     def dropEvent(self, event):
         if event.mimeData().hasUrls:
             event.setDropAction(qtc.Qt.CopyAction)

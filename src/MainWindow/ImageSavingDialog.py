@@ -12,25 +12,26 @@ class SelectQualityDialog(qtw.QDialog):
 
     def __init__(self, imType):
         super().__init__()
-        # Success msg
+        
         self.setWindowTitle("Export image as " + imType)
 
         self.slider = qtw.QSlider(qtc.Qt.Orientation.Horizontal)
         self.slider.setSingleStep(1)
+        self.slider.valueChanged.connect(self.value_changed)
+
+        self.spinBox = qtw.QSpinBox()
+        self.spinBox.valueChanged.connect(self.value_changed)
 
         horizontalLayout = qtw.QHBoxLayout()
         if imType == "JPG":
-            horizontalLayout.addWidget(qtw.QLabel("Quality"))
-            # TODO: Display value next to slider + allow keyboard input like gimp??
-            self.slider.setMinimum(0)
-            self.slider.setMaximum(100)
-            self.slider.setValue(95)
+            horizontalLayout.addWidget(qtw.QLabel("Quality level:"))
+            self.setup_slider(0, 100, 95)
         elif imType == "PNG":
-            horizontalLayout.addWidget(qtw.QLabel("Compression level"))
-            self.slider.setMinimum(9)
-            self.slider.setMaximum(0)
-            self.slider.setValue(4)
+            horizontalLayout.addWidget(qtw.QLabel("Compression level:"))
+            self.setup_slider(0, 9, 4)
+
         horizontalLayout.addWidget(self.slider)
+        horizontalLayout.addWidget(self.spinBox)
 
         verticalLayout = qtw.QVBoxLayout()
         verticalLayout.addLayout(horizontalLayout)
@@ -40,14 +41,31 @@ class SelectQualityDialog(qtw.QDialog):
         buttonBox.addButton("Apply", qtw.QDialogButtonBox.AcceptRole)
         verticalLayout.addWidget(buttonBox)
         buttonBox.rejected.connect(self.close)
-        buttonBox.accepted.connect(self.applied_settings)
+        buttonBox.accepted.connect(self.apply_settings)
 
         self.setLayout(verticalLayout)
 
-    def applied_settings(self):
-        print("SET QUALITY" + str(self.slider.value()))
+    # Shorthand for QSlider/QSpinBox setup
+    def setup_slider(self, low, high, val):
+        self.slider.setMinimum(low)
+        self.slider.setMaximum(high)
+        self.slider.setValue(val)
+
+        self.spinBox.setMinimum(low)
+        self.spinBox.setMaximum(high)
+        self.spinBox.setValue(val)
+
+    # Apply current settings and close dialog
+    def apply_settings(self):
         self.selectedQuality = self.slider.value()
         self.close()
+
+    # Value of slider or spinbox changed; update them both
+    def value_changed(self, newValue):
+        if self.slider.value() != newValue:
+            self.slider.setValue(newValue)
+        elif self.spinBox.value() != newValue:
+            self.spinBox.setValue(newValue)
 
 
 # Result dialog on image saved
