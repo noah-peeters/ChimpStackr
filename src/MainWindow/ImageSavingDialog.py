@@ -85,7 +85,6 @@ class ResultDialog(qtw.QMessageBox):
             self.setStandardButtons(qtw.QMessageBox.Ok)
             self.setIcon(qtw.QMessageBox.Information)
             self.setWindowTitle("Export success")
-            # TODO: Display selected quality (if there)
             self.setText(
                 "Successfully exported output image.\n"
                 + "File size is: "
