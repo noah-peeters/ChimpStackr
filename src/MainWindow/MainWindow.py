@@ -84,11 +84,11 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                 # Get used image type from filter
                 imgType = None
                 if usedFilter == "JPEG (*.jpg *.jpeg)":
-                    imgType = "jpg"
+                    imgType = "JPG"
                 elif usedFilter == "PNG (*.png)":
-                    imgType = "png"
+                    imgType = "PNG"
                 elif usedFilter == "TIFF (*.tiff *.tif)":
-                    imgType = "tiff"
+                    imgType = "TIFF"
 
                 ImageSavingDialog.createDialog(
                     self.LaplacianAlgorithm.output_image, imgType, outputFilePath
