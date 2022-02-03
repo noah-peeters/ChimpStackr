@@ -71,7 +71,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                 self,
                 "Export stacked image",
                 self.current_image_directory,
-                "JPEG (*.jpg *.jpeg);; JPEG 2000 (*.jp2);; PNG (*.png);; TIFF (*.tiff *.tif)",
+                "JPEG (*.jpg *.jpeg);; PNG (*.png);; TIFF (*.tiff *.tif)",
             )
             if outputFilePath:
                 outputFilePath = os.path.abspath(outputFilePath)
@@ -85,8 +85,6 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
                 imgType = None
                 if usedFilter == "JPEG (*.jpg *.jpeg)":
                     imgType = "jpg"
-                elif usedFilter == "JPEG 2000 (*.jp2)":
-                    imgType = "jpg2000"
                 elif usedFilter == "PNG (*.png)":
                     imgType = "png"
                 elif usedFilter == "TIFF (*.tiff *.tif)":

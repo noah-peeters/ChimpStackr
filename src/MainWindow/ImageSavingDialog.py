@@ -1,6 +1,7 @@
 import os
 
 import cv2
+import numpy as np
 import PySide6.QtWidgets as qtw
 
 # Display result saved image
@@ -32,15 +33,24 @@ class ResultDialog(qtw.QMessageBox):
 def createDialog(imageArray, imgType, chosenPath):
     imgPath = None
     errorStackTrace = None
+
+    # Convert float32 to uint8
+    print(imageArray.dtype)  # float32
+    imageArray = np.around(imageArray)
+    imageArray[imageArray > 255] = 255
+    imageArray[imageArray < 0] = 0
+    imageArray = imageArray.astype(np.uint8)
     # TODO: Allow user to change compression settings (for jpg and png)
     if imgType == "jpg":
         try:
+            # 0-100 quality
             cv2.imwrite(chosenPath, imageArray, [cv2.IMWRITE_JPEG_QUALITY, 100])
             imgPath = chosenPath
         except Exception as e:
             errorStackTrace = e
     elif imgType == "png":
         try:
+            # 9-0 compression
             cv2.imwrite(chosenPath, imageArray, [cv2.IMWRITE_PNG_COMPRESSION, 0])
             imgPath = chosenPath
         except Exception as e:
