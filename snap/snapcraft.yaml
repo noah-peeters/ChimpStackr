@@ -1,5 +1,4 @@
 # Useful resource: https://medium.com/@abulka/getting-python-and-wxpython-apps-into-the-ubuntu-app-store-ccca7ae537a3
-
 name: chimpstackr
 version: git
 summary: Focus stacking software
@@ -30,7 +29,6 @@ parts:
     organize:
       "*": src/
     
-  
   chimpstackr:
     plugin: python
     source: .
@@ -44,5 +42,4 @@ parts:
       - libxkbfile1
       - gstreamer1.0-gl
       - libtbb2
-      - appmenu-gtk3-module
     after: [copy-source-code]
