@@ -28,7 +28,6 @@ parts:
     source: ./src
     organize:
       "*": src/
-    
   chimpstackr:
     plugin: python
     source: .
