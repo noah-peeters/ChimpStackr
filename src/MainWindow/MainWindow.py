@@ -3,7 +3,6 @@
     It is the "root display".
 """
 import os
-import cv2
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 import qt_material
@@ -151,6 +150,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
             settings.globalVars["LoadedImagePaths"] = new_loaded_images
 
     # Shutdown all currently running processes, cleanup and close window
+    # TODO: Shutdown currently running processes
     def shutdown_application(self):
         self.close()
 
