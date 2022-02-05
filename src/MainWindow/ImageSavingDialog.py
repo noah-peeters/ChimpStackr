@@ -1,3 +1,6 @@
+"""
+Create dialog(s) for changing image export settings; and success/error message.
+"""
 import os
 
 import cv2
