@@ -12,7 +12,7 @@ Focus stacking is often a necessity when working with high-magnification picture
 ## Installation
 Installation instructions per supported platform.
 ### Windows
-* Download the latest release, and run the ".exe" file
+* Download the latest release from GitHub, and run the ".exe" file
 ### Linux
 * Snapcraft: https://snapcraft.io/chimpstackr
 
