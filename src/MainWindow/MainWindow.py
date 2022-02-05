@@ -12,9 +12,11 @@ import src.MainWindow.QActions as qt_actions_setup
 import src.MainWindow.MainLayout.MainLayout as MainLayout
 import src.MainWindow.Threading as QThreading
 import src.MainWindow.ProgressBar as ProgressBar
+
 # import src.MainWindow.StackSuccessDialog as StackFinishedDialog
 import src.MainWindow.TimeRemainingHandler as TimeRemainingHandler
 import src.MainWindow.ImageSavingDialog as ImageSavingDialog
+import src.MainWindow.SettingsWidget as SettingsWidget
 
 import src.algorithm.API as algorithm_API
 
@@ -37,6 +39,8 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.setWindowTitle("ChimpStackr")
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(int(geometry.width() * 0.6), int(geometry.height() * 0.6))
+
+        self.SettingsWidget = SettingsWidget.SettingsWidget()
 
         # Setup actions
         qt_actions_setup.setup_actions()
@@ -232,7 +236,7 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
     def finished_stack(self):  # , data_dictionary
         # Display stack info dialog
         # TODO: Properly implement
-        #StackFinishedDialog.Message()
+        # StackFinishedDialog.Message()
 
         # Reset progressbar and add selectable stack result
         self.progress_widget.reset_and_hide()

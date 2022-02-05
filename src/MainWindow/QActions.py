@@ -71,6 +71,14 @@ def setup_actions():
     stack.triggered.connect(mainWindow.stack_loaded_images)
     processing_menu.addAction(stack)
 
+    """ Edit menu """
+    edit = menubar.addMenu("&Edit")
+
+    edit_settings = qtg.QAction("&Settings", mainWindow)
+    edit_settings.setStatusTip("Edit application settings.")
+    edit_settings.triggered.connect(mainWindow.SettingsWidget.show)
+    edit.addAction(edit_settings)
+
     """ Help menu """
     help = menubar.addMenu("&Help")
 
