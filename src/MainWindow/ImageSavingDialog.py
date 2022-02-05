@@ -105,7 +105,6 @@ def createDialog(imageArray, imType, chosenPath):
     if imType == None:
         return
 
-    # TODO: Allow user to change compression settings (for jpg and png)
     compressionFactor = None
     if imType == "JPG" or imType == "PNG":
         qualityDialog = SelectQualityDialog(imType)

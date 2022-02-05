@@ -12,7 +12,7 @@ import src.MainWindow.QActions as qt_actions_setup
 import src.MainWindow.MainLayout.MainLayout as MainLayout
 import src.MainWindow.Threading as QThreading
 import src.MainWindow.ProgressBar as ProgressBar
-import src.MainWindow.StackSuccessDialog as StackFinishedDialog
+# import src.MainWindow.StackSuccessDialog as StackFinishedDialog
 import src.MainWindow.TimeRemainingHandler as TimeRemainingHandler
 import src.MainWindow.ImageSavingDialog as ImageSavingDialog
 
