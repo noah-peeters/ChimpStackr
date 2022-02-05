@@ -1,4 +1,5 @@
 import os, sys, tempfile
+import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 
 # Hack to allow imports from src/ example: "src.algorithm.API"
@@ -19,7 +20,7 @@ if __name__ == "__main__":
     app = qtw.QApplication(sys.argv)
     window = Window()
 
-    window.show()
+    window.showMaximized()
     sys.exit(app.exec())
 
 ROOT_TEMP_DIRECTORY.cleanup()

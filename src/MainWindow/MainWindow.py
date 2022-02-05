@@ -37,7 +37,6 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.setWindowTitle("ChimpStackr")
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(int(geometry.width() * 0.6), int(geometry.height() * 0.6))
-        self.resize(geometry.width(),geometry.height())
 
         # Setup actions
         qt_actions_setup.setup_actions()
