@@ -36,9 +36,9 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.statusbar_msg_display_time = 2000  # (ms)
 
         self.setWindowTitle("ChimpStackr")
-        # Set min. window size based on pixel size
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(int(geometry.width() * 0.6), int(geometry.height() * 0.6))
+        self.resize(geometry.width(),geometry.height())
 
         # Setup actions
         qt_actions_setup.setup_actions()
