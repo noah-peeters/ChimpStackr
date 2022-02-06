@@ -10,7 +10,7 @@ import src.settings as settings
 # Settings under "View" tab
 class ViewWidget(qtw.QWidget):
     default_settings = {
-        "theme": "dark_blue",
+        "theme": 2,
     }
     themes_map_dict = {
         "dark_amber": 1,
@@ -50,17 +50,20 @@ class ViewWidget(qtw.QWidget):
         self.setLayout(v_layout)
 
         # Settings config
-        self.config = pyqtconfig.ConfigManager()
+        self.config = pyqtconfig.QSettingsManager()
         self.config.set_defaults(self.default_settings)
         self.config.updated.connect(self.config_updated)
 
         # Settings handlers
         self.config.add_handler("theme", combobox, mapper=self.themes_map_dict)
 
+        # First set
+        self.config_updated()
+
     def config_updated(self):
         # Get dict index (theme name) from value
         newThemeName = list(self.themes_map_dict.keys())[
-            list(self.themes_map_dict.values()).index(self.config.as_dict()["theme"])
+            list(self.themes_map_dict.values()).index(self.config.get("theme"))
         ]
         settings.globalVars["MainWindow"].apply_stylesheet(
             settings.globalVars["MainWindow"],

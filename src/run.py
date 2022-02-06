@@ -18,6 +18,10 @@ settings.globalVars["RootTempDir"] = ROOT_TEMP_DIRECTORY
 
 if __name__ == "__main__":
     app = qtw.QApplication(sys.argv)
+    # Needed for saving QSettings
+    app.setApplicationName("ChimpStackr")
+    app.setOrganizationName("noah.peeters")
+
     window = Window()
 
     window.showMaximized()
