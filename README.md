@@ -2,7 +2,6 @@
 [![chimpstackr](https://snapcraft.io/chimpstackr/badge.svg)](https://snapcraft.io/chimpstackr) ![GitHub repo size](https://img.shields.io/github/repo-size/noah-peeters/ChimpStackr) ![GitHub](https://img.shields.io/github/license/noah-peeters/ChimpStackr) ![GitHub commits since latest release (by date)](https://img.shields.io/github/commits-since/noah-peeters/ChimpStackr/latest)
 
 Open source multi-platform program for focus stacking many images. 
-ChimpStackr is a program that can be used for focus stacking many images.
 Focus stacking is often a necessity when working with high-magnification pictures.. 
 ## Table of contents
 * [Installation](#installation)
