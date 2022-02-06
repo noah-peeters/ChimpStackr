@@ -2,6 +2,7 @@
     Class containing clickable image QListWidgets for loaded images and processed images.
     Clicking on an item will trigger displaying it.
 """
+import os
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 
@@ -34,6 +35,15 @@ class LoadedImagesList(qtw.QListWidget):
             image_paths = []
             for url in event.mimeData().urls():
                 image_paths.append(str(url.toLocalFile()))
+
+            # If dragged path is a folder; use it's content (absolute paths)
+            if len(image_paths) == 1:
+                directory = image_paths[0]
+                if os.path.isdir(directory):
+                    image_paths = [
+                        os.path.abspath(os.path.join(directory, p))
+                        for p in os.listdir(directory)
+                    ]
 
             settings.globalVars["MainWindow"].set_new_loaded_image_files(image_paths)
 
@@ -68,7 +78,7 @@ class LoadedImagesWidget(qtw.QWidget):
         self.list.addItems(self.default_loaded_images_items)
         self.headerText.setText(self.default_header_text)
 
-    # Needed to prevent calling from other thread 
+    # Needed to prevent calling from other thread
     def setHeaderText(self, msg):
         self.headerText.setText(msg)
 
