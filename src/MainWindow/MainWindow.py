@@ -52,10 +52,6 @@ class Window(qtw.QMainWindow, qt_material.QtStyleTools):
         self.statusBar().addPermanentWidget(self.progress_widget)
         self.progress_widget.setVisible(False)
 
-        # Stylesheet
-        # TODO: Make setting toggle that saves stylesheet
-        self.apply_stylesheet(self, "dark_blue.xml")
-
         # Setup algorithm API
         # TODO: Allow user to change program settings
         self.LaplacianAlgorithm = algorithm_API.LaplacianPyramid(
