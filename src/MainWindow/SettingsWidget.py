@@ -34,7 +34,6 @@ class ViewWidget(qtw.QWidget):
         "light_yellow": 19,
     }
 
-    # TODO: Allow change of theme
     def __init__(self):
         super().__init__()
 
