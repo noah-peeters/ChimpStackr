@@ -8,7 +8,7 @@ import modules.pyqtconfig as pyqtconfig
 import src.settings as settings
 
 # Settings under "View" tab
-class ViewWidget(qtw.QDialog):
+class ViewWidget(qtw.QWidget):
     default_settings = {
         "theme": 2,
     }
