@@ -5,7 +5,6 @@
 import os
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
-import qt_material
 
 import src.settings as settings
 import src.MainWindow.QActions as qt_actions_setup
@@ -23,7 +22,7 @@ import src.algorithm.API as algorithm_API
 # TODO: Make UI more expressive after long operation finished. Show success/error messages
 
 
-class Window(qtw.QMainWindow, qt_material.QtStyleTools):
+class Window(qtw.QMainWindow):
     loaded_image_names = []
     # Reference dir for image loading/export
     current_image_directory = os.path.expanduser("~")

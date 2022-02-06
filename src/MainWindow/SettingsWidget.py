@@ -1,14 +1,14 @@
 """
 Settings widget that handles user changing settings.
 """
-import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
+import qt_material
 
 import modules.pyqtconfig as pyqtconfig
 import src.settings as settings
 
 # Settings under "View" tab
-class ViewWidget(qtw.QWidget):
+class ViewWidget(qtw.QDialog):
     default_settings = {
         "theme": 2,
     }
@@ -36,6 +36,7 @@ class ViewWidget(qtw.QWidget):
 
     def __init__(self):
         super().__init__()
+        self.hide()
 
         combobox = qtw.QComboBox(self)
         combobox.addItems(self.themes_map_dict)
@@ -65,26 +66,26 @@ class ViewWidget(qtw.QWidget):
 
     def config_updated(self):
         # Get dict index (theme name) from value
-        newThemeName = list(self.themes_map_dict.keys())[
-            list(self.themes_map_dict.values()).index(self.config.get("theme"))
-        ]
-        settings.globalVars["MainWindow"].apply_stylesheet(
-            settings.globalVars["MainWindow"],
-            newThemeName + ".xml",
+        newTheme = (
+            list(self.themes_map_dict.keys())[
+                list(self.themes_map_dict.values()).index(self.config.get("theme"))
+            ]
+            + ".xml"
+        )
+        qt_material.apply_stylesheet(
+            settings.globalVars["MainApplication"], theme=newTheme
         )
 
         self.current_config.setText(str(self.config.as_dict()))
 
 
-class SettingsWidget(qtw.QWidget):
+class SettingsWidget(qtw.QDialog):
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle("Edit settings")
+        self.setModal(True)
 
         stackedLayout = qtw.QStackedLayout()
         stackedLayout.addWidget(ViewWidget())
-
-        mainLayout = qtw.QHBoxLayout()
-        mainLayout.addLayout(stackedLayout)
-        self.setLayout(mainLayout)
+        self.setLayout(stackedLayout)
