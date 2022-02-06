@@ -40,10 +40,14 @@ class ViewWidget(qtw.QWidget):
         combobox = qtw.QComboBox(self)
         combobox.addItems(self.themes_map_dict)
 
+        h_layout = qtw.QHBoxLayout()
+        h_layout.addWidget(qtw.QLabel("Application theme:"))
+        h_layout.addWidget(combobox)
+
         self.current_config = qtw.QTextEdit()
 
         v_layout = qtw.QVBoxLayout()
-        v_layout.addWidget(combobox)
+        v_layout.addLayout(h_layout)
         v_layout.addWidget(self.current_config)
 
         self.setLayout(v_layout)
