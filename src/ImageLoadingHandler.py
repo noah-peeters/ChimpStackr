@@ -11,12 +11,10 @@ import imageio
 
 import src.settings as settings
 
-
 class ImageLoadingHandler:
     def __init__(self):
         return
 
-    # TODO: Display error if read failed (failed to read image);
     # Load src image to BGR 2D numpy array
     def read_image_from_path(self, path):
         # Get extension without dot at beginning
@@ -24,11 +22,15 @@ class ImageLoadingHandler:
         extension = extension[1:]
         if str.lower(extension) in settings.globalVars["SupportedReadFormats"]:
             # Regular imread (-1 loads the image with "as is")
-            return cv2.imread(path, -1)
+            try:
+                return cv2.imread(path, -1)
+            except Exception:
+                return None
+
         elif str.upper(extension) in settings.globalVars["SupportedRAWFormats"]:
             # Read RAW image
+            # TODO: Handle RAW image read fail?
             with rawpy.imread(path) as raw:
-
                 processed = None
                 try:
                     # Extract thumbnail or preview (faster)
@@ -45,7 +47,7 @@ class ImageLoadingHandler:
                         processed = thumb.data
 
                 processed = cv2.cvtColor(processed, cv2.COLOR_RGB2BGR)
-                
+
             return processed
 
     # Get RAW image view from path (uses copy() to allow usage after closing raw file)
