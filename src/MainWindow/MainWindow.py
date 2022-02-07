@@ -137,14 +137,43 @@ class Window(qtw.QMainWindow):
             if self.clear_all_images() == False:
                 return
 
-            # TODO: Check if valid (and same??) format; discard unsupported formats + show warning saying what images were discarded
+            # TODO Test
+            # TODO: Check if same format?
+            # Check if valid format; discard unsupported formats + show warning saying what images were discarded
+            supportedformats = []
+            for ext in settings["SupportedReadFormats"]:
+                supportedformats.append("." + ext)
+            validPaths = []
+            invalidPaths = []
+            for path in new_loaded_images:
+                for ext in settings["SupportedReadFormats"]:
+                    if path.endswith(supportedformats):
+                        validPaths.append(path)
+                    else:
+                        invalidPaths.append(path)
+
+            if len(invalidPaths) > 0:
+                # Display Error message
+                msg = qtw.QMessageBox(self)
+                msg.setStandardButtons(qtw.QMessageBox.Ok)
+                msg.setIcon(qtw.QMessageBox.Critical)
+                msg.setWindowTitle("Failed to load")
+                msg.setText(
+                    "Failed to load certain images.\nThey have automatically been excluded.\nPlease ensure they use a supported format.\n"
+                )
+                text = ""
+                for path in invalidPaths:
+                    text += "\n" + path + ";"
+                msg.setDetailedText(text)
+                msg.show()
+
             self.statusBar().showMessage(
                 "Loading images...", self.statusbar_msg_display_time
             )
-            self.current_image_directory = os.path.dirname(new_loaded_images[0])
-            self.centralWidget().set_loaded_images(new_loaded_images)
-            self.LaplacianAlgorithm.update_image_paths(new_loaded_images)
-            settings.globalVars["LoadedImagePaths"] = new_loaded_images
+            self.current_image_directory = os.path.dirname(validPaths[0])
+            self.centralWidget().set_loaded_images(validPaths)
+            self.LaplacianAlgorithm.update_image_paths(validPaths)
+            settings.globalVars["LoadedImagePaths"] = validPaths
 
     # Shutdown all currently running processes, cleanup and close window
     # TODO: Shutdown currently running processes
