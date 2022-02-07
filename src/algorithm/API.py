@@ -77,6 +77,7 @@ class LaplacianPyramid:
             fused_image, 8, 8
         )
 
+    # TODO: Rewrite for easy stopping of task (using signals??)
     # Stack loaded images ( +create laplacian pyramids if not already created)
     def stack_images(self, signals):
         if len(self.laplacian_pyramid_archive_names) <= 0:
