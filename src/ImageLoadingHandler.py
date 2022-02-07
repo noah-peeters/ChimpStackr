@@ -29,7 +29,6 @@ class ImageLoadingHandler:
 
         elif str.upper(extension) in settings.globalVars["SupportedRAWFormats"]:
             # Read RAW image
-            # TODO: Handle RAW image read fail?
             with rawpy.imread(path) as raw:
                 processed = None
                 try:

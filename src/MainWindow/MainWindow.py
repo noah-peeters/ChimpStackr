@@ -131,7 +131,6 @@ class Window(qtw.QMainWindow):
             # No images were originally loaded
             return True
 
-    # TODO: Dragging a folder gives an error; use contents of folder (if valid images)
     # Update loaded image files
     def set_new_loaded_image_files(self, new_loaded_images):
         if len(new_loaded_images) > 0:
