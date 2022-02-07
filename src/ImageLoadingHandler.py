@@ -27,26 +27,25 @@ class ImageLoadingHandler:
             return cv2.imread(path, -1)
         elif str.upper(extension) in settings.globalVars["SupportedRAWFormats"]:
             # Read RAW image
-            raw = rawpy.imread(path)
+            with rawpy.imread(path) as raw:
 
-            processed = None
-            try:
-                # Extract thumbnail or preview (faster)
-                thumb = raw.extract_thumb()
-            except:
-                # If no thumb/preview, then postprocess RAW image (slower)
-                processed = raw.postprocess(use_camera_wb=True)
-            else:
-                if thumb.format == rawpy.ThumbFormat.JPEG:
-                    # Convert bytes object to ndarray
-                    processed = imageio.imread(BytesIO(thumb.data))
-                elif thumb.format == rawpy.ThumbFormat.BITMAP:
-                    # Ndarray
-                    processed = thumb.data
+                processed = None
+                try:
+                    # Extract thumbnail or preview (faster)
+                    thumb = raw.extract_thumb()
+                except:
+                    # If no thumb/preview, then postprocess RAW image (slower)
+                    processed = raw.postprocess(use_camera_wb=True)
+                else:
+                    if thumb.format == rawpy.ThumbFormat.JPEG:
+                        # Convert bytes object to ndarray
+                        processed = imageio.imread(BytesIO(thumb.data))
+                    elif thumb.format == rawpy.ThumbFormat.BITMAP:
+                        # Ndarray
+                        processed = thumb.data
 
-            processed = cv2.cvtColor(processed, cv2.COLOR_RGB2BGR)
-
-            raw.close()
+                processed = cv2.cvtColor(processed, cv2.COLOR_RGB2BGR)
+                
             return processed
 
     # Get RAW image view from path (uses copy() to allow usage after closing raw file)
