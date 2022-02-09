@@ -3,7 +3,7 @@
 # Automatically generates releases on new version tag
 # Example trigger:
 # git commit -a -m "Commit message"
-# 
+# git tag v0.1.0
 # git push
 # git push origin --tags
 
