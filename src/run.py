@@ -19,9 +19,12 @@ settings.globalVars["RootTempDir"] = ROOT_TEMP_DIRECTORY
 
 # Taskbar icon fix for Windows 7
 # Src: https://stackoverflow.com/questions/1551605/how-to-set-applications-taskbar-icon-in-windows-7S
-import ctypes
-myappid = 'mycompany.myproduct.subproduct.version' # arbitrary string
-ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+try:
+    import ctypes
+    myappid = 'mycompany.myproduct.subproduct.version' # arbitrary string
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+except Exception:
+    print("Don't fix Windows 7 icon")
 
 if __name__ == "__main__":
     app = qtw.QApplication(sys.argv)

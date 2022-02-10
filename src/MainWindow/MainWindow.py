@@ -34,6 +34,9 @@ class Window(qtw.QMainWindow):
         settings.globalVars["LoadedImagePaths"] = []
 
         self.statusbar_msg_display_time = 2000  # (ms)
+        self.supportedReadFormats = []
+        for ext in settings.globalVars["SupportedReadFormats"]:
+            self.supportedReadFormats.append("." + ext)
 
         self.setWindowTitle("ChimpStackr")
         geometry = self.screen().availableGeometry()
@@ -137,20 +140,15 @@ class Window(qtw.QMainWindow):
             if self.clear_all_images() == False:
                 return
 
-            # TODO Test
             # TODO: Check if same format?
             # Check if valid format; discard unsupported formats + show warning saying what images were discarded
-            supportedformats = []
-            for ext in settings["SupportedReadFormats"]:
-                supportedformats.append("." + ext)
             validPaths = []
             invalidPaths = []
             for path in new_loaded_images:
-                for ext in settings["SupportedReadFormats"]:
-                    if path.endswith(supportedformats):
-                        validPaths.append(path)
-                    else:
-                        invalidPaths.append(path)
+                if path.endswith(tuple(self.supportedReadFormats)):
+                    validPaths.append(path)
+                else:
+                    invalidPaths.append(path)
 
             if len(invalidPaths) > 0:
                 # Display Error message
@@ -163,7 +161,7 @@ class Window(qtw.QMainWindow):
                 )
                 text = ""
                 for path in invalidPaths:
-                    text += "\n" + path + ";"
+                    text += path + "\n"
                 msg.setDetailedText(text)
                 msg.show()
 
