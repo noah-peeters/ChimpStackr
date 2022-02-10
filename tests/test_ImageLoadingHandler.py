@@ -1,14 +1,11 @@
 """
 Test loading of RAW and jpg images.
 """
-
-# Hack to import modules
-# src: https://codeolives.com/2020/01/10/python-reference-module-in-parent-directory/
 import os, sys
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
-sys.path.append(parentdir)
+sys.path.insert(0, parentdir)
 
 import numpy as np
 

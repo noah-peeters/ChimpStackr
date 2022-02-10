@@ -1,15 +1,13 @@
 """
 Test multiple functions of algorithm API.
 """
-# Hack to import modules from src
-# src: https://codeolives.com/2020/01/10/python-reference-module-in-parent-directory/
 import os, sys, tempfile
 import numpy as np
 import PySide6.QtCore as qtc
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
-sys.path.append(parentdir)
+sys.path.insert(0,parentdir)
 
 import src.MainWindow.Threading as QThreading
 from src.algorithm import API
