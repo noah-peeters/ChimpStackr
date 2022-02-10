@@ -81,7 +81,8 @@ class ResultDialog(qtw.QMessageBox):
             self.setWindowTitle("Export failed")
             self.setText("Failed to export!\n")
             if errorStackTrace != None:
-                self.setInformativeText("Error stack trace:\n" + str(errorStackTrace))
+                self.setInformativeText("Error stack trace:")
+                self.setDetailedText(str(errorStackTrace))
                 
         elif imgPath != None and errorStackTrace == None:
             # Success msg
