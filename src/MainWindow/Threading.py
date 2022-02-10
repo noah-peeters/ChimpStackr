@@ -13,6 +13,9 @@ class WorkerSignals(qtc.QObject):
     # Error message
     # TODO: Use error signal
     error = qtc.Signal(tuple)
+    # TODO: Use stop signal
+    # Make thread stop task in progress
+    stop = qtc.Signal()
     # General signal to call once part of a task has finished
     finished_inter_task = qtc.Signal(list)
 
