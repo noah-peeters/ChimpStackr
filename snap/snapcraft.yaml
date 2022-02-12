@@ -28,6 +28,11 @@ parts:
     source: ./src
     organize:
       "*": src/
+  copy-source-code2:
+    plugin: dump
+    source: ./modules
+    organize:
+      "*": modules/    
   chimpstackr:
     plugin: python
     source: .
@@ -41,4 +46,4 @@ parts:
       - libxkbfile1
       - gstreamer1.0-gl
       - libtbb2
-    after: [copy-source-code]
+    after: [copy-source-code,copy-source-code2]
