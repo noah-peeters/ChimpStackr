@@ -16,6 +16,7 @@ class ImageLoadingHandler:
     def __init__(self):
         return
 
+    # TODO: Display error on image failed to load (image might have moved location)
     # Load src image to BGR 2D numpy array
     def read_image_from_path(self, path):
         # Get extension without dot at beginning

@@ -14,6 +14,8 @@
 """
 import time, statistics
 
+FINAL_MULTIPLIER = 1.75 # Multiplier for final time (placeholder for better time detection)
+
 # TODO: Really large value in second phase of stacking process??
 time_spent_percentages = {
     "laplacian_pyramid_generation": 55,
@@ -54,7 +56,7 @@ class TimeRemainingHandler:
                 time_left + (100 / percentage_increment * mean_time_taken) * multiplier
             )
 
-        formatted = time.strftime("%H:%M:%S", time.gmtime(time_left))
+        formatted = time.strftime("%H:%M:%S", time.gmtime(time_left * FINAL_MULTIPLIER))
         return "Time left until program finish: " + formatted
 
     # Remove cached variables
