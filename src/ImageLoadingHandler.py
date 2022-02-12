@@ -11,6 +11,7 @@ import imageio
 
 import src.settings as settings
 
+
 class ImageLoadingHandler:
     def __init__(self):
         return
@@ -20,7 +21,7 @@ class ImageLoadingHandler:
         # Get extension without dot at beginning
         _, extension = os.path.splitext(path)
         extension = extension[1:]
-        if str.lower(extension) in settings.globalVars["SupportedReadFormats"]:
+        if str.lower(extension) in settings.globalVars["SupportedImageReadFormats"]:
             # Regular imread (-1 loads the image with "as is")
             try:
                 return cv2.imread(path, -1)

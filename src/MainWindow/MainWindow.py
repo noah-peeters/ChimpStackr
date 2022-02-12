@@ -35,7 +35,9 @@ class Window(qtw.QMainWindow):
 
         self.statusbar_msg_display_time = 2000  # (ms)
         self.supportedReadFormats = []
-        for ext in settings.globalVars["SupportedReadFormats"]:
+        for ext in settings.globalVars["SupportedImageReadFormats"]:
+            self.supportedReadFormats.append("." + ext)
+        for ext in settings.globalVars["SupportedRAWFormats"]:
             self.supportedReadFormats.append("." + ext)
 
         self.setWindowTitle("ChimpStackr")
@@ -168,10 +170,11 @@ class Window(qtw.QMainWindow):
             self.statusBar().showMessage(
                 "Loading images...", self.statusbar_msg_display_time
             )
-            self.current_image_directory = os.path.dirname(validPaths[0])
-            self.centralWidget().set_loaded_images(validPaths)
-            self.LaplacianAlgorithm.update_image_paths(validPaths)
-            settings.globalVars["LoadedImagePaths"] = validPaths
+            if len(validPaths) > 0:
+                self.current_image_directory = os.path.dirname(validPaths[0])
+                self.centralWidget().set_loaded_images(validPaths)
+                self.LaplacianAlgorithm.update_image_paths(validPaths)
+                settings.globalVars["LoadedImagePaths"] = validPaths
 
     # Shutdown all currently running processes, cleanup and close window
     # TODO: Shutdown currently running processes
