@@ -5,6 +5,7 @@
 import os
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
+import PySide6.QtGui as qtg
 
 import src.settings as settings
 
@@ -87,20 +88,16 @@ class LoadedImagesWidget(qtw.QWidget):
     """
 
     # TODO: Implement method of removing selected images on rightclick
-    # Display image options on right click
-    # def contextMenuEvent(self, event: qtg.QContextMenuEvent) -> None:
-    #     menu = qtw.QMenu()
+    # Remove selected images on right-click
+    def contextMenuEvent(self, event: qtg.QContextMenuEvent) -> None:
+        menu = qtw.QMenu()
+        reset_zoom_action = qtg.QAction("Remove selected images")
+        menu.addAction(reset_zoom_action)
+        selected_action = menu.exec(event.globalPos())
 
-    #     reset_zoom_action = qtg.QAction("Reset zoom")
-    #     reset_zoom_action.setStatusTip("Reset zoom in between image selections.")
-    #     reset_zoom_action.setCheckable(True)
-    #     reset_zoom_action.setChecked(False)
-
-    #     menu.addAction(reset_zoom_action)
-    #     selected_action = menu.exec(event.globalPos())
-
-    #     if selected_action == reset_zoom_action:
-    #         self.reset_zoom = reset_zoom_action.isChecked()
+        if selected_action == reset_zoom_action:
+            self.reset_zoom = reset_zoom_action.isChecked()
+            print(self.list.selectedItems())
 
 
 # Widget for displaying processed/stacked images

@@ -11,16 +11,18 @@ import imageio
 
 import src.settings as settings
 
+
 class ImageLoadingHandler:
     def __init__(self):
         return
 
+    # TODO: Display error on image failed to load (image might have moved location)
     # Load src image to BGR 2D numpy array
     def read_image_from_path(self, path):
         # Get extension without dot at beginning
         _, extension = os.path.splitext(path)
         extension = extension[1:]
-        if str.lower(extension) in settings.globalVars["SupportedReadFormats"]:
+        if str.lower(extension) in settings.globalVars["SupportedImageReadFormats"]:
             # Regular imread (-1 loads the image with "as is")
             try:
                 return cv2.imread(path, -1)

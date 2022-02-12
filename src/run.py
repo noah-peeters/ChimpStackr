@@ -12,7 +12,7 @@ import src.settings as settings
 import src.MainWindow.MainWindow as MainWindow
 
 # Directory for storing tempfiles. Automatically deletes on program exit.
-ROOT_TEMP_DIRECTORY = tempfile.TemporaryDirectory(prefix="FocusStacking_")
+ROOT_TEMP_DIRECTORY = tempfile.TemporaryDirectory(prefix="ChimpStackr_")
 settings.init()
 settings.globalVars["RootTempDir"] = ROOT_TEMP_DIRECTORY
 

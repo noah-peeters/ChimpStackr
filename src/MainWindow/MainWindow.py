@@ -23,7 +23,6 @@ import src.algorithm.API as algorithm_API
 
 
 class Window(qtw.QMainWindow):
-    loaded_image_names = []
     # Reference dir for image loading/export
     current_image_directory = os.path.expanduser("~")
 
@@ -35,7 +34,9 @@ class Window(qtw.QMainWindow):
 
         self.statusbar_msg_display_time = 2000  # (ms)
         self.supportedReadFormats = []
-        for ext in settings.globalVars["SupportedReadFormats"]:
+        for ext in settings.globalVars["SupportedImageReadFormats"]:
+            self.supportedReadFormats.append("." + ext)
+        for ext in settings.globalVars["SupportedRAWFormats"]:
             self.supportedReadFormats.append("." + ext)
 
         self.setWindowTitle("ChimpStackr")
@@ -134,6 +135,17 @@ class Window(qtw.QMainWindow):
             # No images were originally loaded
             return True
 
+    # Remove some images from loaded images list
+    def remove_some_images(self, paths):
+        if len(paths) > 0:
+            new_paths = []
+            for old_path in settings.globalVars["LoadedImagePaths"]:
+                # Only add to new list if not excluded
+                if len([match for match in paths if old_path in match]) <= 0:
+                    new_paths.append(old_path)
+
+            self.set_new_loaded_image_files(new_paths)
+
     # Update loaded image files
     def set_new_loaded_image_files(self, new_loaded_images):
         if len(new_loaded_images) > 0:
@@ -168,10 +180,11 @@ class Window(qtw.QMainWindow):
             self.statusBar().showMessage(
                 "Loading images...", self.statusbar_msg_display_time
             )
-            self.current_image_directory = os.path.dirname(validPaths[0])
-            self.centralWidget().set_loaded_images(validPaths)
-            self.LaplacianAlgorithm.update_image_paths(validPaths)
-            settings.globalVars["LoadedImagePaths"] = validPaths
+            if len(validPaths) > 0:
+                self.current_image_directory = os.path.dirname(validPaths[0])
+                self.centralWidget().set_loaded_images(validPaths)
+                self.LaplacianAlgorithm.update_image_paths(validPaths)
+                settings.globalVars["LoadedImagePaths"] = validPaths
 
     # Shutdown all currently running processes, cleanup and close window
     # TODO: Shutdown currently running processes
@@ -206,7 +219,7 @@ class Window(qtw.QMainWindow):
         self.statusBar().showMessage(
             "Started aligning & stacking images...", self.statusbar_msg_display_time
         )
-        self.LaplacianAlgorithm.align_and_stack_images()
+        # self.LaplacianAlgorithm.align_and_stack_images()
 
     def stack_loaded_images(self):
         if len(settings.globalVars["LoadedImagePaths"]) == 0:
