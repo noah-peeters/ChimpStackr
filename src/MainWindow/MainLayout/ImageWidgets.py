@@ -91,10 +91,7 @@ class LoadedImagesWidget(qtw.QWidget):
     # Remove selected images on right-click
     def contextMenuEvent(self, event: qtg.QContextMenuEvent) -> None:
         menu = qtw.QMenu()
-
-        reset_zoom_action = qtg.QAction("Remove images")
-        reset_zoom_action.setStatusTip("Remove selected images from list.")
-
+        reset_zoom_action = qtg.QAction("Remove selected images")
         menu.addAction(reset_zoom_action)
         selected_action = menu.exec(event.globalPos())
 
