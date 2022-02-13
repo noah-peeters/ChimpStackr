@@ -14,10 +14,12 @@
 """
 import time, statistics
 
-FINAL_MULTIPLIER = 1.75 # Multiplier for final time (placeholder for better time detection)
+FINAL_MULTIPLIER = (
+    1.75  # Multiplier for final time (placeholder for better time detection)
+)
 
-# TODO: Really large value in second phase of stacking process??
 time_spent_percentages = {
+    "align_images": 50,
     "laplacian_pyramid_generation": 55,
     "laplacian_pyramid_focus_fusion": 45,
 }

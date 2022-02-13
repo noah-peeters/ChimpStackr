@@ -1,7 +1,7 @@
 """
     Exposed API for easily aligning/stacking multiple images.
 """
-import os
+import os, time
 
 import src.utilities as utilities
 import src.algorithm.pyramid as pyramid_algorithm
@@ -47,15 +47,27 @@ class LaplacianPyramid:
         self.image_paths = new_image_paths
 
     # Align and stack images
-    def align_and_stack_images(self,signals):
-        # Align images to previous
+    def align_and_stack_images(self, signals):
+        # Align images to reference
+        ref_index=round(len(self.image_paths)/2)
         aligned_images_tmp_paths = []
         for i, path in enumerate(self.image_paths):
-            if i != 0:
+            print("Aligning: " + path)
+            if i != ref_index:
+                start_time = time.time()
                 aligned_images_tmp_paths.append(
                     self.Algorithm.align_image_pair(
-                        self.image_paths[i - 1], path, self.root_temp_directory
+                        self.image_paths[ref_index], path, self.root_temp_directory
                     )
+                )
+                # Send progress signal
+                signals.finished_inter_task.emit(
+                    [
+                        "align_images",
+                        i + 1,
+                        len(self.image_paths),
+                        time.time() - start_time,
+                    ]
                 )
 
         self.laplacian_pyramid_archive_names_aligned = (
@@ -63,11 +75,14 @@ class LaplacianPyramid:
                 aligned_images_tmp_paths,
                 self.root_temp_directory,
                 self.pyramid_num_levels,
+                signals,
             )
         )
 
         stacked_pyramid = self.Algorithm.focus_fuse_pyramids(
-            self.laplacian_pyramid_archive_names_aligned, self.fusion_kernel_size_pixels
+            self.laplacian_pyramid_archive_names_aligned,
+            self.fusion_kernel_size_pixels,
+            signals,
         )
 
         # Reconstruct image from Laplacian pyramid

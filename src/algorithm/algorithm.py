@@ -136,12 +136,12 @@ class Algorithm:
         im2 = self.ImageLoadingHandler.read_image_from_path(im2_path)
 
         # ECC params
-        n_iters = 500
-        e_thresh = 1e-5
+        n_iters = 5000
+        e_thresh = 1e-6
         warp_mode = cv2.MOTION_EUCLIDEAN
         criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, n_iters, e_thresh)
-
         num_levels = 4
+
         warp = np.array([[1, 0, 0], [0, 1, 0]], dtype=np.float32)
         warp = warp * np.array([[1, 1, 2], [1, 1, 2]], dtype=np.float32) ** (
             1 - num_levels

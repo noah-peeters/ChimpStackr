@@ -247,8 +247,8 @@ class Window(qtw.QMainWindow):
         worker.signals.finished_inter_task.connect(finished_inter_task)
 
         # Execute
-        self.threadpool.start(worker)
-        self.progress_widget.setVisible(True)
+        # self.threadpool.start(worker)
+        # self.progress_widget.setVisible(True)
 
     def stack_loaded_images(self):
         if len(settings.globalVars["LoadedImagePaths"]) == 0:

@@ -8,6 +8,7 @@ from io import BytesIO
 import rawpy
 import cv2
 import imageio
+import numpy as np
 
 import src.settings as settings
 
@@ -23,14 +24,13 @@ class ImageLoadingHandler:
         _, extension = os.path.splitext(path)
         extension = extension[1:]
         if str.lower(extension) in settings.globalVars["SupportedImageReadFormats"]:
-            # Regular imread (-1 loads the image with "as is")
+            # Regular imread (-1 loads the image "as is")
             try:
                 return cv2.imread(path, -1)
             except Exception:
                 return None
-
         elif str.upper(extension) in settings.globalVars["SupportedRAWFormats"]:
-            # Read RAW image
+            # Load RAW image
             with rawpy.imread(path) as raw:
                 processed = None
                 try:
@@ -50,6 +50,9 @@ class ImageLoadingHandler:
                 processed = cv2.cvtColor(processed, cv2.COLOR_RGB2BGR)
 
             return processed
+        elif str.lower(extension) == "npy":
+            # Load data from ".npy" format
+            return np.load(path, allow_pickle=False)
 
     # Get RAW image view from path (uses copy() to allow usage after closing raw file)
     def get_raw_view(self, path):
