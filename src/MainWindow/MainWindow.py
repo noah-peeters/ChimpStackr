@@ -53,7 +53,6 @@ class Window(qtw.QMainWindow):
         # Permanent progressbar inside statusbar
         self.progress_widget = ProgressBar.ProgressBar()
         self.statusBar().addPermanentWidget(self.progress_widget)
-        self.progress_widget.setVisible(False)
 
         # Setup algorithm API
         # TODO: Allow user to change program settings
@@ -230,16 +229,14 @@ class Window(qtw.QMainWindow):
                     task_key, percentage_finished
                 )
             )
-            self.progress_widget.progressbar.setValue(new_progressbar_value)
-
-            # Set new statusbar text
-            self.progress_widget.progress_label.setText(
+            self.progress_widget.update_value(
+                new_progressbar_value,
                 self.TimeRemainingHandler.calculate_time_remaining(
                     task_key,
                     1 / num_to_process_total * 100,
                     100 - percentage_finished,
                     time_taken,
-                )
+                ),
             )
 
         worker = QThreading.Worker(self.LaplacianAlgorithm.align_and_stack_images)
@@ -275,16 +272,14 @@ class Window(qtw.QMainWindow):
                     task_key, percentage_finished
                 )
             )
-            self.progress_widget.progressbar.setValue(new_progressbar_value)
-
-            # Set new statusbar text
-            self.progress_widget.progress_label.setText(
+            self.progress_widget.update_value(
+                new_progressbar_value,
                 self.TimeRemainingHandler.calculate_time_remaining(
                     task_key,
                     1 / num_to_process_total * 100,
                     100 - percentage_finished,
                     time_taken,
-                )
+                ),
             )
 
         worker = QThreading.Worker(self.LaplacianAlgorithm.stack_images)
@@ -301,8 +296,8 @@ class Window(qtw.QMainWindow):
         # TODO: Properly implement
         # StackFinishedDialog.Message()
 
-        # Reset progressbar and add selectable stack result
-        self.progress_widget.reset_and_hide()
+        # Reset progressbar and add selectable stack result image
+        self.progress_widget.update_value()
         self.centralWidget().add_processed_image(self.LaplacianAlgorithm.output_image)
 
         # Clear TimeRemaining cache
