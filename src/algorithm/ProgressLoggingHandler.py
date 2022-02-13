@@ -3,7 +3,7 @@ Class that connects to QtSignals. Keeps track of timing of different parts of st
 Data can be retrieved once finished, to display in a graph.
 """
 
-# TODO: Implement time log
+# TODO: Implement
 class Logger:
     time_stamps = {}
 

@@ -105,60 +105,6 @@ def compute_focusmap(pyr_level1, pyr_level2, kernel_size):
             focusmap[y, x] = value_to_insert
 
     return focusmap
-    y_range = pyr_level1.shape[0]
-    x_range = pyr_level1.shape[1]
-
-    # 2D focusmap (dtype=bool)
-    # 0 => pixel of pyr1
-    # 1 => pixel of pyr2
-    focusmap = np.empty((y_range, x_range), dtype=np.uint8)
-
-    # Loop through pixels of this pyramid level
-    for y in nb.prange(y_range):  # Most images are wider (more values on x-axis)
-        for x in range(x_range):
-            highest_image_index = 0
-            highest_value = float(0)
-            for image_index in range(2):  # Loop through images
-                if image_index == 0:
-                    current_pyramid = pyr_level1
-                else:
-                    current_pyramid = pyr_level2
-
-                # Get small patch (kernel_size) around this pixel
-                k = int(kernel_size / 2)
-                patch = current_pyramid[y - k : y + k, x - k : x + k]
-
-                # Padd array with zeros if needed (edges of image)
-                y_pad = kernel_size - patch.shape[0]
-                x_pad = kernel_size - patch.shape[1]
-                patch = pad_array(patch, y_pad, x_pad)
-
-                # Convert BGR patch to grayscale
-                grayscale_patch = (
-                    0.2989 * patch[:, :, 2]
-                    + 0.5870 * patch[:, :, 1]
-                    + 0.1140 * patch[:, :, 0]
-                )
-
-                # Get entropy of kernel
-                # deviation = entropy(grayscale_patch, disk(10))
-                # print(kernel_entropy)
-
-                # Get deviation of kernel
-                deviation = get_deviation(grayscale_patch)
-                if deviation > highest_value:
-                    highest_value = deviation
-                    highest_image_index = image_index
-
-            value_to_insert = 0
-            if highest_image_index != 0:
-                value_to_insert = 1
-
-            # Write most in-focus pixel to output
-            focusmap[y, x] = value_to_insert
-
-    return focusmap
-
 
 # Compute output pyramid_level from source arrays and focusmap
 @nb.njit(

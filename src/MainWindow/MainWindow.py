@@ -219,7 +219,36 @@ class Window(qtw.QMainWindow):
         self.statusBar().showMessage(
             "Started aligning & stacking images...", self.statusbar_msg_display_time
         )
-        # self.LaplacianAlgorithm.align_and_stack_images()
+
+        def finished_inter_task(result_list):
+            task_key, num_processed, num_to_process_total, time_taken = result_list
+            percentage_finished = num_processed / num_to_process_total * 100
+
+            # Compute and set new progressbar value
+            new_progressbar_value = (
+                self.TimeRemainingHandler.calculate_progressbar_value(
+                    task_key, percentage_finished
+                )
+            )
+            self.progress_widget.progressbar.setValue(new_progressbar_value)
+
+            # Set new statusbar text
+            self.progress_widget.progress_label.setText(
+                self.TimeRemainingHandler.calculate_time_remaining(
+                    task_key,
+                    1 / num_to_process_total * 100,
+                    100 - percentage_finished,
+                    time_taken,
+                )
+            )
+
+        worker = QThreading.Worker(self.LaplacianAlgorithm.align_and_stack_images)
+        worker.signals.finished.connect(self.finished_stack)
+        worker.signals.finished_inter_task.connect(finished_inter_task)
+
+        # Execute
+        self.threadpool.start(worker)
+        self.progress_widget.setVisible(True)
 
     def stack_loaded_images(self):
         if len(settings.globalVars["LoadedImagePaths"]) == 0:

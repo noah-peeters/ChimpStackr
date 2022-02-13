@@ -47,7 +47,7 @@ class LaplacianPyramid:
         self.image_paths = new_image_paths
 
     # Align and stack images
-    def align_and_stack_images(self):
+    def align_and_stack_images(self,signals):
         # Align images to previous
         aligned_images_tmp_paths = []
         for i, path in enumerate(self.image_paths):
