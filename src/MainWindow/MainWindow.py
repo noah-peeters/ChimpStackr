@@ -35,9 +35,9 @@ class Window(qtw.QMainWindow):
         self.statusbar_msg_display_time = 2000  # (ms)
         self.supportedReadFormats = []
         for ext in settings.globalVars["SupportedImageReadFormats"]:
-            self.supportedReadFormats.append("." + ext)
+            self.supportedReadFormats.append("." + str.lower(ext))
         for ext in settings.globalVars["SupportedRAWFormats"]:
-            self.supportedReadFormats.append("." + ext)
+            self.supportedReadFormats.append("." + str.lower(ext))
 
         self.setWindowTitle("ChimpStackr")
         geometry = self.screen().availableGeometry()
@@ -156,7 +156,7 @@ class Window(qtw.QMainWindow):
             validPaths = []
             invalidPaths = []
             for path in new_loaded_images:
-                if path.endswith(tuple(self.supportedReadFormats)):
+                if str.lower(path).endswith(tuple(self.supportedReadFormats)):
                     validPaths.append(path)
                 else:
                     invalidPaths.append(path)
