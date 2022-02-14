@@ -21,10 +21,10 @@ class CenterWidget(qtw.QWidget):
         self.image_display = ImageViewer.ImageViewer()
 
         # Connect to "selected item change" signals
-        self.ImageWidgets.loaded_images_widget.list.itemClicked.connect(
+        self.ImageWidgets.loaded_images_widget.list.currentItemChanged.connect(
             self.image_display.update_displayed_image
         )
-        self.ImageWidgets.processed_images_widget.list.itemClicked.connect(
+        self.ImageWidgets.processed_images_widget.list.currentItemChanged.connect(
             self.image_display.update_displayed_image
         )
 
