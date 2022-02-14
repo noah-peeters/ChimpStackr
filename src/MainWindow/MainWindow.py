@@ -128,19 +128,17 @@ class Window(qtw.QMainWindow):
                 )
                 self.centralWidget().add_processed_image(None)
                 return True
-            else:
-                return False
         else:
             # No images were originally loaded
             return True
 
-    # Remove some images from loaded images list
-    def remove_some_images(self, paths):
-        if len(paths) > 0:
+    # Remove some images from loaded images list (used on right click action)
+    def remove_some_images(self, paths_to_remove):
+        if len(paths_to_remove) > 0:
             new_paths = []
             for old_path in settings.globalVars["LoadedImagePaths"]:
                 # Only add to new list if not excluded
-                if len([match for match in paths if old_path in match]) <= 0:
+                if len([match for match in paths_to_remove if old_path in match]) <= 0:
                     new_paths.append(old_path)
 
             self.set_new_loaded_image_files(new_paths)

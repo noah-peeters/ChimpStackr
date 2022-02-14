@@ -14,6 +14,7 @@ class LoadedImagesList(qtw.QListWidget):
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
+        self.setSelectionMode(qtw.QAbstractItemView.ExtendedSelection)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls:
@@ -87,7 +88,6 @@ class LoadedImagesWidget(qtw.QWidget):
         Overridden signals
     """
 
-    # TODO: Implement method of removing selected images on rightclick
     # Remove selected images on right-click
     def contextMenuEvent(self, event: qtg.QContextMenuEvent) -> None:
         menu = qtw.QMenu()
@@ -97,8 +97,10 @@ class LoadedImagesWidget(qtw.QWidget):
 
         if selected_action == reset_zoom_action:
             self.reset_zoom = reset_zoom_action.isChecked()
-            print(self.list.selectedItems())
-
+            paths_to_remove=[]
+            for listItem in self.list.selectedItems():
+                paths_to_remove.append(listItem.data(qtc.Qt.UserRole))
+            settings.globalVars["MainWindow"].remove_some_images(paths_to_remove)
 
 # Widget for displaying processed/stacked images
 class ProcessedImagesWidget(qtw.QWidget):
