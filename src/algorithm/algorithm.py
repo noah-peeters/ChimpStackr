@@ -49,6 +49,7 @@ def get_deviation(matrix):
     return summed_deviation
 
 
+# TODO: Pass 2D grayscale images as parameters (remove conversion inside)
 # Compute focusmap for the same pyramid level in 2 different pyramids
 @nb.njit(
     nb.uint8[:, :](nb.float32[:, :, :], nb.float32[:, :, :], nb.int64),
@@ -105,6 +106,7 @@ def compute_focusmap(pyr_level1, pyr_level2, kernel_size):
             focusmap[y, x] = value_to_insert
 
     return focusmap
+
 
 # Compute output pyramid_level from source arrays and focusmap
 @nb.njit(
