@@ -1,11 +1,12 @@
 """
     Main pyramid stacking algorithm(s) + image alignment algorithm.
 """
-import os, tempfile, time
+import os, tempfile, time, multiprocessing
 import cv2
 import numpy as np
 import numba as nb
 from numba.typed import List
+import pyfftw
 
 import src.algorithm.image_storage as image_storage
 import src.algorithm.pyramid as pyramid_algorithm
@@ -125,68 +126,55 @@ def fuse_pyramid_levels_using_focusmap(pyr_level1, pyr_level2, focusmap):
     return output
 
 
+# Compute image translation; (x, y)-shift for image alignment
+def compute_image_translation(im0, im1):
+    # Use amount of CPU cores as thread count
+    pyfftw.config.NUM_THREADS = multiprocessing.cpu_count()
+    pyfftw.config.PLANNER_EFFORT = "FFTW_ESTIMATE"
+    pyfftw.interfaces.cache.enable()  # Important for speed-up when using "pyfftw.interfaces"
+    pyfftw.interfaces.cache.set_keepalive_time(60)
+
+    # Byte align arrays for a potential speedup (vector operations)
+    im0 = pyfftw.byte_align(im0)
+    im1 = pyfftw.byte_align(im1)
+
+    shape = im0.shape
+    f0 = pyfftw.interfaces.numpy_fft.fft2(im0).astype(np.complex64)
+    f1 = pyfftw.interfaces.numpy_fft.fft2(im1).astype(np.complex64)
+
+    ir = abs(
+        pyfftw.interfaces.numpy_fft.ifft2((f0 * f1.conjugate()) / (abs(f0) * abs(f1)))
+    )
+    t0, t1 = np.unravel_index(np.argmax(ir), shape)
+    if t0 > shape[0] // 2:
+        t0 -= shape[0]
+    if t1 > shape[1] // 2:
+        t1 -= shape[1]
+    return [t0, t1]
+
+
 class Algorithm:
     def __init__(self):
         self.ImageStorage = image_storage.ImageStorageHandler()
         self.ImageLoadingHandler = ImageLoadingHandler.ImageLoadingHandler()
 
-    # ECC image alignment using pyramid approximation
-    # src: https://stackoverflow.com/questions/45997891/cv2-motion-euclidean-for-the-warp-mode-in-ecc-image-alignment-method
+    # Fast Fourier Transform (FFT) image translational registration ((x, y)-shift only!)
     def align_image_pair(self, ref_im_path, im2_path, root_temp_dir):
         # Load images
-        ref_im = self.ImageLoadingHandler.read_image_from_path(ref_im_path)
+        im1 = self.ImageLoadingHandler.read_image_from_path(ref_im_path)
         im2 = self.ImageLoadingHandler.read_image_from_path(im2_path)
 
-        # ECC params
-        n_iters = 5000
-        e_thresh = 1e-6
-        warp_mode = cv2.MOTION_EUCLIDEAN
-        criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, n_iters, e_thresh)
-        num_levels = 4
-
-        warp = np.array([[1, 0, 0], [0, 1, 0]], dtype=np.float32)
-        warp = warp * np.array([[1, 1, 2], [1, 1, 2]], dtype=np.float32) ** (
-            1 - num_levels
+        # Calculate translational shift
+        y_shift, x_shift = compute_image_translation(
+            cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY),
+            cv2.cvtColor(im2, cv2.COLOR_BGR2GRAY),
         )
+        # Shift image
+        height, width = im2.shape[:2]
+        translation_matrix = np.float32([[1, 0, x_shift], [0, 1, y_shift]])
+        aligned = cv2.warpAffine(im2, translation_matrix, (width, height))
 
-        # Construct grayscale pyramid
-        gray1 = cv2.cvtColor(ref_im, cv2.COLOR_BGR2GRAY)
-        gray2 = cv2.cvtColor(im2, cv2.COLOR_BGR2GRAY)
-        gray1_pyr = [gray1]
-        gray2_pyr = [gray2]
-
-        for level in range(num_levels):
-            gray1_pyr.insert(
-                0,
-                cv2.resize(
-                    gray1_pyr[0], None, fx=1 / 2, fy=1 / 2, interpolation=cv2.INTER_AREA
-                ),
-            )
-            gray2_pyr.insert(
-                0,
-                cv2.resize(
-                    gray2_pyr[0], None, fx=1 / 2, fy=1 / 2, interpolation=cv2.INTER_AREA
-                ),
-            )
-
-        # run pyramid ECC
-        for level in range(num_levels):
-            _, warp = cv2.findTransformECC(
-                gray1_pyr[level], gray2_pyr[level], warp, warp_mode, criteria, None, 1
-            )
-
-            if level != num_levels - 1:  # scale up for the next pyramid level
-                warp = warp * np.array([[1, 1, 2], [1, 1, 2]], dtype=np.float32)
-
-        # Align image
-        aligned = cv2.warpAffine(
-            im2,
-            warp,
-            (ref_im.shape[1], ref_im.shape[0]),
-            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
-        )
-
-        # Write to disk
+        # Write aligned img to disk
         file_handle, tmp_file = tempfile.mkstemp(".npy", None, root_temp_dir.name)
         np.save(tmp_file, aligned, allow_pickle=False)
 
