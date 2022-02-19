@@ -163,20 +163,22 @@ class Algorithm:
         # Load images
         im1 = self.ImageLoadingHandler.read_image_from_path(ref_im_path)
         im2 = self.ImageLoadingHandler.read_image_from_path(im2_path)
-
-        # Calculate translational shift
-        y_shift, x_shift = compute_image_translation(
-            cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY),
-            cv2.cvtColor(im2, cv2.COLOR_BGR2GRAY),
-        )
-        # Shift image
-        height, width = im2.shape[:2]
-        translation_matrix = np.float32([[1, 0, x_shift], [0, 1, y_shift]])
-        aligned = cv2.warpAffine(im2, translation_matrix, (width, height))
+        if ref_im_path == im2_path:
+            output_image = im2  # Don't align if given 2 identical images
+        else:
+            # Calculate translational shift
+            y_shift, x_shift = compute_image_translation(
+                cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY),
+                cv2.cvtColor(im2, cv2.COLOR_BGR2GRAY),
+            )
+            # Shift image
+            height, width = im2.shape[:2]
+            translation_matrix = np.float32([[1, 0, x_shift], [0, 1, y_shift]])
+            output_image = cv2.warpAffine(im2, translation_matrix, (width, height))
 
         # Write aligned img to disk
         file_handle, tmp_file = tempfile.mkstemp(".npy", None, root_temp_dir.name)
-        np.save(tmp_file, aligned, allow_pickle=False)
+        np.save(tmp_file, output_image, allow_pickle=False)
 
         os.close(file_handle)
         return tmp_file
