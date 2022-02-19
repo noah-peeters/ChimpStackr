@@ -3,7 +3,7 @@ PySide6==6.2.3
 qt-material==2.8.19
 
 # Algorithm requirements
-opencv-python-headless==4.5.5.62 # (UI not needed)
+opencv-python==4.5.5.62 # TODO: Change to "opencv-python-headless"?? --> cvtColor not working??
 numpy==1.21.5 # Update to 1.22 when numba supports it
 numba==0.55.1
 rawpy==0.17.0

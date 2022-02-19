@@ -15,6 +15,7 @@ class ImageStorageHandler:
     def __init__(self):
         return
 
+    # TODO: Check what size is written to disk (probably way to large), and use BMP/EXR/... for saving to smaller file??
     # Write laplacian pyramid of image to archive on disk (as float16)
     def write_laplacian_pyramid_to_disk(self, laplacian_pyramid, root_dir):
         file_handle, tmp_file = tempfile.mkstemp(".npz", None, root_dir.name)

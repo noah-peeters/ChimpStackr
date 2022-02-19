@@ -31,6 +31,18 @@ class ImageLoadingHandler:
                 return None
         elif str.upper(extension) in settings.globalVars["SupportedRAWFormats"]:
             # Load RAW image
+            """
+            TODO: Error (when image was loaded from SD-card directly)
+            File "C:\Users\noahe\Documents\PythonFocusStackingGui\src\MainWindow\MainLayout\ImageViewer.py", line 67, in update_displayed_image
+                image = self.ImageLoading.read_image_from_path(path)
+            File "C:\Users\noahe\Documents\PythonFocusStackingGui\src\ImageLoadingHandler.py", line 34, in read_image_from_path
+                with rawpy.imread(path) as raw:
+            File "C:\Users\noahe\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.8_qbz5n2kfra8p0\LocalCache\local-packages\Python38\site-packages\rawpy\__init__.py", line 20, in imread
+                d.open_file(pathOrFile)
+            File "rawpy\_rawpy.pyx", line 409, in rawpy._rawpy.RawPy.open_file
+            File "rawpy\_rawpy.pyx", line 936, in rawpy._rawpy.RawPy.handle_error
+            rawpy._rawpy.LibRawIOError: b'Input/output error'
+            """
             with rawpy.imread(path) as raw:
                 processed = None
                 try:
