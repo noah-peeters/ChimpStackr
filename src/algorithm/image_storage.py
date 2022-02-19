@@ -7,6 +7,7 @@ import os, tempfile
 
 import numpy as np
 from numba.typed import List
+import cv2
 
 import src.utilities as utilities
 
@@ -15,13 +16,13 @@ class ImageStorageHandler:
     def __init__(self):
         return
 
-    # TODO: Check what size is written to disk (probably way to large), and use BMP/EXR/... for saving to smaller file??
+    # TODO: Don't pass root_dir as argument, but use global var
     # Write laplacian pyramid of image to archive on disk (as float16)
     def write_laplacian_pyramid_to_disk(self, laplacian_pyramid, root_dir):
         file_handle, tmp_file = tempfile.mkstemp(".npz", None, root_dir.name)
-        dictionary = {}
 
         # Append pyramid levels to dictionary
+        dictionary = {}
         for i, pyramid_level in enumerate(laplacian_pyramid):
             dictionary["Laplacian_" + str(i)] = pyramid_level.astype(np.float16)
 
@@ -30,6 +31,7 @@ class ImageStorageHandler:
 
         # Ensure write to disk
         os.close(file_handle)
+
         return tmp_file
 
     # Load laplacian pyramid from archive on disk (as float32)
@@ -40,6 +42,7 @@ class ImageStorageHandler:
         laplacian_pyr_keys = sorted(archive.files, key=utilities.int_string_sorting)
         laplacian_pyr = List()
         for key in laplacian_pyr_keys:
-            laplacian_pyr.append(archive[key].astype(np.float32))
+            pyr_level = archive[key].astype(np.float32)
+            laplacian_pyr.append(pyr_level)
 
         return laplacian_pyr
