@@ -1,7 +1,7 @@
 """
     Main pyramid stacking algorithm(s) + image alignment algorithm.
 """
-import os, tempfile, time, multiprocessing
+import os, tempfile, time, multiprocessing, math
 import cv2
 import numpy as np
 import numba as nb
@@ -126,31 +126,77 @@ def fuse_pyramid_levels_using_focusmap(pyr_level1, pyr_level2, focusmap):
     return output
 
 
+# Pre-processing on image before DFT registration
+def resize_image_for_dft(im, scale_division_factor):
+    # Get shortest/longest axis
+    shortest_axis = 0
+    longest_axis = 1
+    if im.shape[1] < im.shape[0]:
+        shortest_axis = 1
+        longest_axis = 0
+
+    # Resize image (longest axis + keep aspect ratio)
+    new_longest_size = im.shape[longest_axis] / scale_division_factor
+    multiplication_factor = new_longest_size / im.shape[longest_axis]
+    resized_image = cv2.resize(
+        im,
+        (
+            math.floor(im.shape[1] * multiplication_factor),
+            math.floor(im.shape[0] * multiplication_factor),
+        ),
+    )
+
+    # Make image square
+    pad_size = resized_image.shape[longest_axis] - resized_image.shape[shortest_axis]
+    pad_color = [0, 0, 0]
+    if shortest_axis == 0:
+        # Pad to height (bottom)
+        square_image = cv2.copyMakeBorder(
+            resized_image, 0, pad_size, 0, 0, cv2.BORDER_CONSTANT, value=pad_color
+        )
+    else:
+        # Pad to width (right)
+        square_image = cv2.copyMakeBorder(
+            resized_image, 0, 0, 0, pad_size, cv2.BORDER_CONSTANT, value=pad_color
+        )
+
+    return square_image
+
+
 # Compute image translation; (x, y)-shift for image alignment
-def compute_image_translation(im0, im1):
+def compute_image_translation(im0, im1, scale_division_factor):
     # Use amount of CPU cores as thread count
     pyfftw.config.NUM_THREADS = multiprocessing.cpu_count()
     pyfftw.config.PLANNER_EFFORT = "FFTW_ESTIMATE"
     pyfftw.interfaces.cache.enable()  # Important for speed-up when using "pyfftw.interfaces"
     pyfftw.interfaces.cache.set_keepalive_time(60)
 
+    # Prepare images (grayscale conversion + resize)
+    im0 = resize_image_for_dft(
+        cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY), scale_division_factor
+    )
+    im1 = resize_image_for_dft(
+        cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY), scale_division_factor
+    )
+
     # Byte align arrays for a potential speedup (vector operations)
     im0 = pyfftw.byte_align(im0)
     im1 = pyfftw.byte_align(im1)
 
-    shape = im0.shape
     f0 = pyfftw.interfaces.numpy_fft.fft2(im0).astype(np.complex64)
     f1 = pyfftw.interfaces.numpy_fft.fft2(im1).astype(np.complex64)
 
-    ir = abs(
-        pyfftw.interfaces.numpy_fft.ifft2((f0 * f1.conjugate()) / (abs(f0) * abs(f1)))
-    )
-    t0, t1 = np.unravel_index(np.argmax(ir), shape)
-    if t0 > shape[0] // 2:
-        t0 -= shape[0]
-    if t1 > shape[1] // 2:
-        t1 -= shape[1]
-    return [t0, t1]
+    cross_power_spectrum = (f0 * f1.conj()) / np.abs(f0 * f1.conj())
+    r = np.abs(pyfftw.interfaces.numpy_fft.ifft2(cross_power_spectrum))
+    # Shift pairs to to center of image
+    r = np.fft.fftshift(r)
+
+    [py, px] = np.argwhere(r == r.max())[0]
+    cx, cy = int(im0.shape[0] / 2), int(im0.shape[0] / 2)
+    shift_x = cx - px
+    shift_y = cy - py
+    # Times "scale_division_factor" for correct offset on original image's shape
+    return -shift_y * scale_division_factor, -shift_x * scale_division_factor
 
 
 class Algorithm:
@@ -167,9 +213,9 @@ class Algorithm:
             output_image = im2  # Don't align if given 2 identical images
         else:
             # Calculate translational shift
+            scale_division_factor = 3
             y_shift, x_shift = compute_image_translation(
-                cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY),
-                cv2.cvtColor(im2, cv2.COLOR_BGR2GRAY),
+                im1, im2, scale_division_factor
             )
             # Shift image
             height, width = im2.shape[:2]
