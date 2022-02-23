@@ -94,7 +94,7 @@ class LaplacianPyramid:
 
         # Reconstruct image from Laplacian pyramid
         fused_image = pyramid_algorithm.reconstruct(stacked_pyramid)
-
+        self.output_image=fused_image
         # TODO: Don't apply contrast?
         # self.output_image = self.PostProcessing.apply_brightness_contrast(
         #     fused_image, 8, 8
@@ -122,6 +122,7 @@ class LaplacianPyramid:
 
         # Reconstruct image from Laplacian pyramid
         fused_image = pyramid_algorithm.reconstruct(stacked_pyramid)
+        self.output_image=fused_image
         # TODO: Don't apply contrast?
         # self.output_image = self.PostProcessing.apply_brightness_contrast(
         #     fused_image, 8, 8
