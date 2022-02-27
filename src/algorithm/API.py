@@ -54,17 +54,18 @@ class LaplacianPyramid:
         for i, path in enumerate(self.image_paths):
             print("Aligning: " + path)
             start_time = time.time()
-            if i != 0:
-                aligned_images_tmp_paths.append(
-                    self.Algorithm.align_image_pair(
-                        self.image_paths[i - 1], path, self.root_temp_directory
-                    )
-                )
-            else:
+            if i == 0:
                 # Will just return the image (no alignment)
                 aligned_images_tmp_paths.append(
                     self.Algorithm.align_image_pair(
                         path, path, self.root_temp_directory
+                    )
+                )
+            else:
+                # Use previous *aligned* image instead of src image!
+                aligned_images_tmp_paths.append(
+                    self.Algorithm.align_image_pair(
+                        aligned_images_tmp_paths[i - 1], path, self.root_temp_directory
                     )
                 )
             # Send progress signal
@@ -94,7 +95,7 @@ class LaplacianPyramid:
 
         # Reconstruct image from Laplacian pyramid
         fused_image = pyramid_algorithm.reconstruct(stacked_pyramid)
-        self.output_image=fused_image
+        self.output_image = fused_image
         # TODO: Don't apply contrast?
         # self.output_image = self.PostProcessing.apply_brightness_contrast(
         #     fused_image, 8, 8
@@ -122,7 +123,7 @@ class LaplacianPyramid:
 
         # Reconstruct image from Laplacian pyramid
         fused_image = pyramid_algorithm.reconstruct(stacked_pyramid)
-        self.output_image=fused_image
+        self.output_image = fused_image
         # TODO: Don't apply contrast?
         # self.output_image = self.PostProcessing.apply_brightness_contrast(
         #     fused_image, 8, 8

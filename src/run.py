@@ -21,6 +21,7 @@ settings.globalVars["RootTempDir"] = ROOT_TEMP_DIRECTORY
 # Src: https://stackoverflow.com/questions/1551605/how-to-set-applications-taskbar-icon-in-windows-7S
 try:
     import ctypes
+
     myappid = "mycompany.myproduct.subproduct.version"  # arbitrary string
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 except Exception:
@@ -31,11 +32,12 @@ if __name__ == "__main__":
     # Needed for saving QSettings
     app.setApplicationName("ChimpStackr")
     app.setOrganizationName("noah.peeters")
-    app.setWindowIcon(qtg.QIcon("snap/gui/icon.png"))
 
     settings.globalVars["MainApplication"] = app
 
     window = MainWindow.Window()
+    # TODO: Doesn't work on windows
+    window.setWindowIcon(qtg.QIcon("snap/gui/icon.png"))
     window.showMaximized()
 
     sys.exit(app.exec())

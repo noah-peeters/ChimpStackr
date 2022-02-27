@@ -14,9 +14,7 @@
 """
 import time, statistics
 
-FINAL_MULTIPLIER = (
-    1.75  # Multiplier for final time (placeholder for better time detection)
-)
+# TODO: Re-implement (not working properly)
 
 time_spent_percentages = {
     "align_images": 50,
@@ -31,12 +29,21 @@ class TimeRemainingHandler:
 
     # Calculate progressbar value (range: [0, 100]) from current operation percentage
     def calculate_progressbar_value(self, operation_name, percentage_finished):
-        calc = percentage_finished * time_spent_percentages[operation_name] / 100
-        if operation_name == "laplacian_pyramid_focus_fusion":
-            # Return sum of previous
-            return time_spent_percentages["laplacian_pyramid_generation"] + calc
-        else:
+        # calc = percentage_finished * time_spent_percentages[operation_name] / 100
+        # if operation_name == "laplacian_pyramid_focus_fusion":
+        #     # Return sum of previous
+        #     return time_spent_percentages["laplacian_pyramid_generation"] + calc
+        # else:
+        #     return calc
+        calc=percentage_finished / 3
+        if operation_name == "align_images":
             return calc
+        elif operation_name == "laplacian_pyramid_generation":
+            # One previous has finished
+            return calc + 100 / 3
+        elif operation_name == "laplacian_pyramid_focus_fusion":
+            # Two previous have completed
+            return calc + (100 / 3) * 2
 
     # Return remaining time of algorithm (hh:mm:ss)
     def calculate_time_remaining(
@@ -58,7 +65,7 @@ class TimeRemainingHandler:
                 time_left + (100 / percentage_increment * mean_time_taken) * multiplier
             )
 
-        formatted = time.strftime("%H:%M:%S", time.gmtime(time_left * FINAL_MULTIPLIER))
+        formatted = time.strftime("%H:%M:%S", time.gmtime(time_left * 1.75))
         return "Time left until program finish: " + formatted
 
     # Remove cached variables
