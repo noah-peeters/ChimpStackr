@@ -11,4 +11,4 @@ imageio==2.16.0
 pyfftw==0.13.0
 
 # TODO: Check if really needed (used for image alignment)
-scipy==1.8.0
+scipy==1.7.3 # 1.8.0 gives error on mac pyinstaller build
