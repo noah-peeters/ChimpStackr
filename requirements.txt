@@ -9,3 +9,6 @@ numba==0.55.1
 rawpy==0.17.0
 imageio==2.16.0
 pyfftw==0.13.0
+
+# TODO: Check if really needed (used for image alignment)
+scipy==1.8.0
