@@ -39,6 +39,7 @@ parts:
         plugin: cmake
         build-packages:
           - on amd64:
+            - lib32stdc++6
             - gcc-multilib
             - g++-multilib
   chimpstackr:
