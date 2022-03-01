@@ -1,7 +1,6 @@
 """
     Script that sets up QActions for mainWindow QMainWindow.
 """
-import PySide6.QtCore as qtc
 import PySide6.QtGui as qtg
 import PySide6.QtWidgets as qtw
 
@@ -15,14 +14,26 @@ class AboutAppWidget(qtw.QMessageBox):
         self.setStandardButtons(qtw.QMessageBox.Ok)
         self.setIcon(qtw.QMessageBox.Information)
         self.setWindowTitle("About")
-        
+
         import PySide6
         import src
+        import platform
 
         self.setText(
             "ChimpStackr version: {}\n".format(src.__version__)
             + "Qt version: {}\n".format(PySide6.__version__)
+            + "OS: {}".format(platform.platform())
         )
+
+        # self.addButton(self.Ok)
+        copyButton = self.addButton("Copy", qtw.QMessageBox.RejectRole)
+        copyButton.clicked.connect(self.copy_text)
+
+    # Copy text to clipboard
+    def copy_text(self):
+        cb = qtw.QApplication.clipboard()
+        cb.clear(mode=cb.Clipboard)
+        cb.setText(self.text(), mode=cb.Clipboard)
 
 
 def setup_actions():
