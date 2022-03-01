@@ -25,8 +25,6 @@ class AboutAppWidget(qtw.QMessageBox):
             + "OS: {}\n".format(platform.platform())
             + "Python version: {}\n".format(platform.python_version())
         )
-
-        # self.addButton(self.Ok)
         copyButton = self.addButton("Copy", qtw.QMessageBox.RejectRole)
         copyButton.clicked.connect(self.copy_text)
 
