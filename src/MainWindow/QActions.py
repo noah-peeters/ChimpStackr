@@ -1,10 +1,23 @@
 """
     Script that sets up QActions for mainWindow QMainWindow.
 """
+import PySide6.QtCore as qtc
 import PySide6.QtGui as qtg
 import PySide6.QtWidgets as qtw
 
 import src.settings as settings
+
+
+class AboutAppWidget(qtw.QMessageBox):
+    def __init__(self):
+        super().__init__()
+
+        self.setStandardButtons(qtw.QMessageBox.Ok)
+        self.setIcon(qtw.QMessageBox.Information)
+        self.setWindowTitle("About")
+        import PySide6
+
+        self.setText("Qt version: {}\n".format(PySide6.__version__))
 
 
 def setup_actions():
@@ -82,7 +95,8 @@ def setup_actions():
     """ Help menu """
     help = menubar.addMenu("&Help")
 
-    qt = qtg.QAction("About &Qt", mainWindow)
-    qt.setStatusTip("Information on Qt, the UI framework.")
-    qt.triggered.connect(qtw.QApplication.aboutQt)
-    help.addAction(qt)
+    aboutApp = AboutAppWidget()
+    about = qtg.QAction("&About", mainWindow)
+    about.setStatusTip("ChimpStackr")
+    about.triggered.connect(lambda: aboutApp.exec())
+    help.addAction(about)
