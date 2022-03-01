@@ -29,13 +29,7 @@ class TimeRemainingHandler:
 
     # Calculate progressbar value (range: [0, 100]) from current operation percentage
     def calculate_progressbar_value(self, operation_name, percentage_finished):
-        # calc = percentage_finished * time_spent_percentages[operation_name] / 100
-        # if operation_name == "laplacian_pyramid_focus_fusion":
-        #     # Return sum of previous
-        #     return time_spent_percentages["laplacian_pyramid_generation"] + calc
-        # else:
-        #     return calc
-        calc=percentage_finished / 3
+        calc = percentage_finished / 3
         if operation_name == "align_images":
             return calc
         elif operation_name == "laplacian_pyramid_generation":

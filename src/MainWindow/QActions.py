@@ -15,9 +15,14 @@ class AboutAppWidget(qtw.QMessageBox):
         self.setStandardButtons(qtw.QMessageBox.Ok)
         self.setIcon(qtw.QMessageBox.Information)
         self.setWindowTitle("About")
+        
         import PySide6
+        import src
 
-        self.setText("Qt version: {}\n".format(PySide6.__version__))
+        self.setText(
+            "ChimpStackr version: {}\n".format(src.__version__)
+            + "Qt version: {}\n".format(PySide6.__version__)
+        )
 
 
 def setup_actions():
