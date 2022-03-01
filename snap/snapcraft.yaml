@@ -49,9 +49,11 @@ parts:
     requirements: ['requirements.txt']
     build-packages:
       - libxkbfile-dev
+      - libtbb-dev
     stage-packages:
       - libxkbcommon0
       - libgtk-3-0
       - libxkbfile1
       - gstreamer1.0-gl
+      - libtbb2
     after: [copy-source-code,copy-source-code2]
