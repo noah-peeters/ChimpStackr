@@ -22,7 +22,8 @@ class AboutAppWidget(qtw.QMessageBox):
         self.setText(
             "ChimpStackr version: {}\n".format(src.__version__)
             + "Qt version: {}\n".format(PySide6.__version__)
-            + "OS: {}".format(platform.platform())
+            + "OS: {}\n".format(platform.platform())
+            + "Python version: {}\n".format(platform.python_version())
         )
 
         # self.addButton(self.Ok)
