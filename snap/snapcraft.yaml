@@ -1,5 +1,6 @@
 # Useful resource: https://medium.com/@abulka/getting-python-and-wxpython-apps-into-the-ubuntu-app-store-ccca7ae537a3
 name: chimpstackr
+# TODO: Extract version from src's __version__
 version: v0.0.15
 summary: Focus stacking software
 description: |
