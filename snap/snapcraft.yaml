@@ -15,7 +15,7 @@ architectures:
 
 apps:
   chimpstackr:
-    command: bin/python3 bin/snapcraft-preload $SNAP/src/run.py
+    command: bin/python3 $SNAP/src/run.py
     extensions: 
       - kde-neon
     plugs:
@@ -33,16 +33,6 @@ parts:
     source: ./modules
     organize:
       "*": modules/
-  # Fix python multiprocessing /dev/shm/ r/w access
-  snapcraft-preload:
-        source: https://github.com/sergiusens/snapcraft-preload.git
-        plugin: cmake
-        build-packages:
-          - on amd64:
-            - gcc-multilib
-            - g++-multilib
-        stage-packages:
-          - lib32stdc++6
   chimpstackr:
     plugin: python
     source: .
