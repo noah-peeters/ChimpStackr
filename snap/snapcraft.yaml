@@ -15,7 +15,7 @@ architectures:
 
 apps:
   chimpstackr:
-    command: bin/snapcraft-preload bin/python3 $SNAP/src/run.py
+    command: bin/python3 bin/snapcraft-preload $SNAP/src/run.py
     extensions: 
       - kde-neon
     plugs:
@@ -39,9 +39,10 @@ parts:
         plugin: cmake
         build-packages:
           - on amd64:
-            - lib32stdc++6
             - gcc-multilib
             - g++-multilib
+        stage-packages:
+          - lib32stdc++6
   chimpstackr:
     plugin: python
     source: .
