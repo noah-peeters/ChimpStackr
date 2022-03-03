@@ -15,7 +15,7 @@ architectures:
 
 apps:
   chimpstackr:
-    command: bin/python3 $SNAP/src/run.py
+    command: bin/chimpstackr
     extensions: 
       - kde-neon
     plugs:
