@@ -16,7 +16,7 @@ architectures:
 apps:
   chimpstackr:
     command: bin/run
-    extensions: 
+    extensions:
       - kde-neon
     plugs:
       - home
@@ -46,4 +46,4 @@ parts:
       - libxkbfile1
       - gstreamer1.0-gl
       - libtbb2
-    after: [copy-source-code,copy-source-code2]
+    after: [copy-source-code, copy-source-code2]
