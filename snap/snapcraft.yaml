@@ -15,7 +15,7 @@ architectures:
 
 apps:
   chimpstackr:
-    command: bin/run
+    command: $SNAP/bin/app
     extensions:
       - kde-neon
     plugs:
@@ -23,16 +23,6 @@ apps:
       - removable-media
 
 parts:
-  copy-source-code:
-    plugin: dump
-    source: ./src
-    organize:
-      "*": src/
-  copy-source-code2:
-    plugin: dump
-    source: ./modules
-    organize:
-      "*": modules/
   snapcraft-preload:
     source: https://github.com/sergiusens/snapcraft-preload.git
     plugin: cmake

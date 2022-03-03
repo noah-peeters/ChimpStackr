@@ -22,5 +22,5 @@ setuptools.setup(
     ],
     packages=setuptools.find_packages(),
     python_requires=">=3.6",
-    entry_points={"console_scripts": ["run=src.run:main"]},
+    entry_points={"console_scripts": ["app=src.run:main"]},
 )
