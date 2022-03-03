@@ -40,6 +40,8 @@ parts:
       - on amd64:
         - gcc-multilib
         - g++-multilib
+    stage-packages:
+      - lib32stdc++6
   chimpstackr:
     plugin: python
     source: .
