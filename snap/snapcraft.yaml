@@ -15,7 +15,7 @@ architectures:
 
 apps:
   chimpstackr:
-    command: bin/snapcraft-preload bin/run
+    command: bin/snapcraft-preload $SNAP/bin/run
     extensions:
       - kde-neon
     plugs:
