@@ -15,7 +15,7 @@ architectures:
 
 apps:
   chimpstackr:
-    command: bin/chimpstackr
+    command: bin/run
     extensions: 
       - kde-neon
     plugs:

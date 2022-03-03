@@ -29,7 +29,7 @@ if os.name == "nt":
     except Exception:
         pass  # Platform older than Windows 7
 
-if __name__ == "__main__":
+def main():
     app = qtw.QApplication([])
     # Needed for saving QSettings
     app.setApplicationName("ChimpStackr")
@@ -45,5 +45,7 @@ if __name__ == "__main__":
     window.setWindowIcon(icon)
     app.exec()
     # sys.exit(app.exec())
+    ROOT_TEMP_DIRECTORY.cleanup()
 
-ROOT_TEMP_DIRECTORY.cleanup()
+if __name__ == "__main__":
+    main()
