@@ -1,16 +1,16 @@
 import setuptools
-
-with open("README.md", "r", encoding="utf-8") as fh:
-    long_description = fh.read()
+import src
+# with open("README.md", "r", encoding="utf-8") as fh:
+#     long_description = fh.read()
 
 setuptools.setup(
     name="chimpstackr",
-    version="0.0.16",
+    version=src.__version__,
     author="Noah Peeters",
     author_email="apenz1.peeters@gmail.com",
-    description="Focus Stacking software",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
+    # description="Focus Stacking software",
+    # long_description=long_description,
+    # long_description_content_type="text/markdown",
     url="https://github.com/noah-peeters/ChimpStackr",
     project_urls={
         "Bug Tracker": "https://github.com/noah-peeters/ChimpStackr/issues",

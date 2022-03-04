@@ -6,7 +6,7 @@ description: |
   ChimpStackr is a program that can be used for focus stacking many images.
   Focus stacking is often a necessity when working with high-magnification pictures.
 
-base: core20
+base: core18
 grade: stable # "stable" for release or "devel" when debugging
 confinement: strict
 
@@ -15,7 +15,7 @@ architectures:
 
 apps:
   chimpstackr:
-    command: bin/app
+    command: bin/snapcraft-preload bin/app
     extensions:
       - kde-neon
     plugs:
