@@ -15,7 +15,7 @@ architectures:
 
 apps:
   chimpstackr:
-    command: bin/app
+    command: usr/local/bin/snapcraft-preload $SNAP/bin/python3 -m chimpstackr
     extensions:
       - kde-neon
     plugs:
