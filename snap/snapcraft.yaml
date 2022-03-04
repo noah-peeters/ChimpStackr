@@ -15,7 +15,7 @@ architectures:
 
 apps:
   chimpstackr:
-    command: $SNAP/bin/app
+    command: bin/app
     extensions:
       - kde-neon
     plugs:
@@ -45,4 +45,3 @@ parts:
       - libxkbfile1
       - gstreamer1.0-gl
       - libtbb2
-    after: [copy-source-code, copy-source-code2]
