@@ -1,6 +1,6 @@
 # Useful resource: https://medium.com/@abulka/getting-python-and-wxpython-apps-into-the-ubuntu-app-store-ccca7ae537a3
 name: chimpstackr
-version: v0.0.16
+adopt-info: chimpstackr # Used to get version from git tags
 summary: Focus stacking software
 description: |
   ChimpStackr is a program that can be used for focus stacking many images.
@@ -15,7 +15,9 @@ architectures:
 
 apps:
   chimpstackr:
-    command: usr/local/bin/snapcraft-preload $SNAP/bin/python3 -m chimpstackr
+    command: bin/chimpstackr #usr/local/bin/snapcraft-preload $SNAP/bin/python3 -m chimpstackr
+    command-chain:
+      - usr/local/bin/snapcraft-preload # Fixes multiprocessing python module
     extensions:
       - kde-neon
     plugs:
@@ -36,6 +38,9 @@ parts:
     plugin: python
     source: .
     requirements: ['requirements.txt']
+    override-pull: |
+      snapcraftctl pull
+      snapcraftctl set-version $(git describe --tags --abbrev=0)
     build-packages:
       - libxkbfile-dev
       - libtbb-dev
@@ -45,3 +50,4 @@ parts:
       - libxkbfile1
       - gstreamer1.0-gl
       - libtbb2
+    after: [snapcraft-preload]
