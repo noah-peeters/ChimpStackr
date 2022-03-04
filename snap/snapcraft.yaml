@@ -34,6 +34,12 @@ parts:
         - g++-multilib
     stage-packages:
       - lib32stdc++6
+    # Copy ".so" files from usr/local/bin to $SNAP/bin
+    override-prime: |
+      snapcraftctl prime
+      mkdir -p $SNAPCRAFT_PRIME/lib
+      cp $SNAPCRAFT_PRIME/usr/local/lib/libsnapcraft-preload.so $SNAPCRAFT_PRIME/lib/libsnapcraft-preload.so
+      if [ ${SNAP_ARCH} = "amd64" ]; then cp $SNAPCRAFT_PRIME/usr/local/lib/libsnapcraft-preload32.so $SNAPCRAFT_PRIME/lib/libsnapcraft-preload32.so; fi
   chimpstackr:
     plugin: python
     source: .
