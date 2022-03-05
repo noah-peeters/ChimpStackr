@@ -2,7 +2,7 @@
     Script that houses the MainWindow class.
     It is the "root display".
 """
-import os
+import os, pwd
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 
@@ -24,7 +24,10 @@ import src.algorithm.API as algorithm_API
 
 class Window(qtw.QMainWindow):
     # Reference dir for image loading/export
-    current_image_directory = os.path.expanduser("~")
+    current_image_directory = os.path.expanduser(
+        f"~{pwd.getpwuid(os.geteuid())[0]}/"
+    )  # os.path.expanduser("~")
+    print(current_image_directory)
 
     def __init__(self):
         super().__init__()
@@ -222,10 +225,8 @@ class Window(qtw.QMainWindow):
             percentage_finished = num_processed / num_to_process_total * 100
 
             # Compute and set new progressbar value
-            new_progressbar_value = (
-                self.TimeRemainingHandler.calculate_progressbar_value(
-                    task_key, percentage_finished
-                )
+            new_progressbar_value = self.TimeRemainingHandler.calculate_progressbar_value(
+                task_key, percentage_finished
             )
             self.progress_widget.update_value(
                 new_progressbar_value,
@@ -265,10 +266,8 @@ class Window(qtw.QMainWindow):
             percentage_finished = num_processed / num_to_process_total * 100
 
             # Compute and set new progressbar value
-            new_progressbar_value = (
-                self.TimeRemainingHandler.calculate_progressbar_value(
-                    task_key, percentage_finished
-                )
+            new_progressbar_value = self.TimeRemainingHandler.calculate_progressbar_value(
+                task_key, percentage_finished
             )
             self.progress_widget.update_value(
                 new_progressbar_value,

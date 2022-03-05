@@ -22,8 +22,8 @@ class AboutAppWidget(qtw.QMessageBox):
         self.setText(
             "ChimpStackr version: {}\n".format(src.__version__)
             + "Qt version: {}\n".format(PySide6.__version__)
-            + "OS: {}\n".format(platform.platform())
             + "Python version: {}\n".format(platform.python_version())
+            + "OS: {}\n".format(platform.platform())
         )
         copyButton = self.addButton("Copy", qtw.QMessageBox.RejectRole)
         copyButton.clicked.connect(self.copy_text)
