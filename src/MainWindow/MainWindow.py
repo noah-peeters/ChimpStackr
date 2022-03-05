@@ -2,7 +2,7 @@
     Script that houses the MainWindow class.
     It is the "root display".
 """
-import os, pwd
+import os, pwd, sys
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 
@@ -190,6 +190,7 @@ class Window(qtw.QMainWindow):
     # TODO: Shutdown currently running processes
     def shutdown_application(self):
         self.close()
+        sys.exit()  # TODO: Check if running processes are stopped
 
     # Save project file to disk
     def save_project_to_file(self):
