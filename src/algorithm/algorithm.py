@@ -14,10 +14,7 @@ import src.ImageLoadingHandler as ImageLoadingHandler
 
 
 # Pad an array to be the kernel size (square). Only if needed
-@nb.njit(
-    nb.float64[:, :](nb.float64[:, :], nb.int64),
-    fastmath=True,
-)
+@nb.njit(nb.float64[:, :](nb.float64[:, :], nb.int64), fastmath=True, cache=True)
 def pad_array(array, kernel_size):
     y_shape = array.shape[0]
     x_shape = array.shape[1]
@@ -35,10 +32,7 @@ def pad_array(array, kernel_size):
 
 
 # Get deviation of a (grayscale image) matrix
-@nb.njit(
-    nb.float64(nb.float64[:, :]),
-    fastmath=True,
-)
+@nb.njit(nb.float64(nb.float64[:, :]), fastmath=True, cache=True)
 def get_deviation(matrix):
     summed_deviation = float(0)
     average_value = np.mean(matrix)
@@ -55,6 +49,7 @@ def get_deviation(matrix):
 @nb.njit(
     nb.uint8[:, :](nb.float32[:, :, :], nb.float32[:, :, :], nb.int64),
     parallel=True,
+    cache=True,
 )
 def compute_focusmap(pyr_level1, pyr_level2, kernel_size):
     y_range = pyr_level1.shape[0]
@@ -114,6 +109,7 @@ def compute_focusmap(pyr_level1, pyr_level2, kernel_size):
     nb.float32[:, :, :](nb.float32[:, :, :], nb.float32[:, :, :], nb.uint8[:, :]),
     fastmath=True,
     parallel=True,
+    cache=True,
 )
 def fuse_pyramid_levels_using_focusmap(pyr_level1, pyr_level2, focusmap):
     output = np.empty_like(pyr_level1)
