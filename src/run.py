@@ -41,7 +41,6 @@ def main():
     window = MainWindow.Window()
     window.showMaximized()
 
-    print(os.path.expanduser("~"))
     icon_path = "snap/gui/icon.png"
     if not os.path.isfile(icon_path):
         # Path to icon inside snap package

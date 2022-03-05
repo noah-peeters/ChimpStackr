@@ -39,9 +39,12 @@ def setup_actions():
     mainWindow = settings.globalVars["MainWindow"]
     # Load images action; user selects images from a QFileDialog
     def load_images_from_file():
+        print(mainWindow.current_image_directory)
         new_loaded_images, _ = qtw.QFileDialog.getOpenFileNames(
             mainWindow, "Select images to load.", mainWindow.current_image_directory
         )
+        print("2")
+        print(new_loaded_images)
         mainWindow.set_new_loaded_image_files(new_loaded_images)
 
     menubar = mainWindow.menuBar()
