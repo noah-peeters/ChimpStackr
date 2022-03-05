@@ -29,6 +29,7 @@ if os.name == "nt":
     except Exception:
         pass  # Platform older than Windows 7
 
+
 def main():
     app = qtw.QApplication([])
     # Needed for saving QSettings
@@ -40,12 +41,19 @@ def main():
     window = MainWindow.Window()
     window.showMaximized()
 
-    icon = qtg.QIcon("snap/gui/icon.png")
+    print(os.path.expanduser("~"))
+    icon_path = "snap/gui/icon.png"
+    if not os.path.isfile(icon_path):
+        # Path to icon inside snap package
+        icon_path = "meta/gui/icon.png"
+    
+    icon = qtg.QIcon(icon_path)
     app.setWindowIcon(icon)
     window.setWindowIcon(icon)
     app.exec()
     # sys.exit(app.exec())
     ROOT_TEMP_DIRECTORY.cleanup()
+
 
 if __name__ == "__main__":
     main()

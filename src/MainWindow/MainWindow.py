@@ -24,10 +24,8 @@ import src.algorithm.API as algorithm_API
 
 class Window(qtw.QMainWindow):
     # Reference dir for image loading/export
-    current_image_directory = os.path.expanduser(
-        f"~{pwd.getpwuid(os.geteuid())[0]}/"
-    )  # os.path.expanduser("~")
-    print(current_image_directory)
+    # os.path.expanduser("~")
+    current_image_directory = os.path.expanduser(f"~{pwd.getpwuid(os.geteuid())[0]}/")
 
     def __init__(self):
         super().__init__()
