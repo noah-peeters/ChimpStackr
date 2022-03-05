@@ -7,7 +7,6 @@ description: |
   Focus stacking is often a necessity when working with high-magnification pictures.
 
 base: core20
-compression: lzo
 grade: stable # "stable" for release or "devel" when debugging
 confinement: strict
 
@@ -24,6 +23,7 @@ apps:
     plugs:
       - home
       - removable-media
+      - mount-observe
 
 parts:
   snapcraft-preload:
