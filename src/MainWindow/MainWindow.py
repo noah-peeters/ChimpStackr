@@ -166,7 +166,7 @@ class Window(qtw.QMainWindow):
                 msg = qtw.QMessageBox(self)
                 msg.setStandardButtons(qtw.QMessageBox.Ok)
                 msg.setIcon(qtw.QMessageBox.Critical)
-                msg.setWindowTitle("Failed to load")
+                msg.setWindowTitle("Failed to load" + "{} files!".format(len(invalidPaths)))
                 msg.setText(
                     "Failed to load certain images.\nThey have automatically been excluded.\nPlease ensure they use a supported format.\n"
                 )
