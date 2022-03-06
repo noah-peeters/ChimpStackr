@@ -166,9 +166,9 @@ class Window(qtw.QMainWindow):
                 msg = qtw.QMessageBox(self)
                 msg.setStandardButtons(qtw.QMessageBox.Ok)
                 msg.setIcon(qtw.QMessageBox.Critical)
-                msg.setWindowTitle("Failed to load" + "{} files!".format(len(invalidPaths)))
+                msg.setWindowTitle("Failed to load {} files!".format(len(invalidPaths)))
                 msg.setText(
-                    "Failed to load certain images.\nThey have automatically been excluded.\nPlease ensure they use a supported format.\n"
+                    "Failed to load certain files.\nThey have automatically been excluded.\nPlease ensure a supported format is used.\n"
                 )
                 text = ""
                 for path in invalidPaths:
@@ -225,8 +225,10 @@ class Window(qtw.QMainWindow):
             percentage_finished = num_processed / num_to_process_total * 100
 
             # Compute and set new progressbar value
-            new_progressbar_value = self.TimeRemainingHandler.calculate_progressbar_value(
-                task_key, percentage_finished
+            new_progressbar_value = (
+                self.TimeRemainingHandler.calculate_progressbar_value(
+                    task_key, percentage_finished
+                )
             )
             self.progress_widget.update_value(
                 new_progressbar_value,
@@ -266,8 +268,10 @@ class Window(qtw.QMainWindow):
             percentage_finished = num_processed / num_to_process_total * 100
 
             # Compute and set new progressbar value
-            new_progressbar_value = self.TimeRemainingHandler.calculate_progressbar_value(
-                task_key, percentage_finished
+            new_progressbar_value = (
+                self.TimeRemainingHandler.calculate_progressbar_value(
+                    task_key, percentage_finished
+                )
             )
             self.progress_widget.update_value(
                 new_progressbar_value,
