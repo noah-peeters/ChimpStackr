@@ -29,3 +29,5 @@ Work in progress...
 ## Sources
 * Focus stacking algorithm (slightly adapted) implemented from:
 Wang, W., & Chang, F. (2011b). A Multi-focus Image Fusion Method Based on Laplacian Pyramid. _Journal of Computers_, _6_(12).
+
+* DFT image alignment algorithm adapted from: https://github.com/matejak/imreg_dft
