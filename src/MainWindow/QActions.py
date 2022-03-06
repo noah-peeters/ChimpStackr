@@ -1,6 +1,8 @@
 """
     Script that sets up QActions for mainWindow QMainWindow.
 """
+from optparse import Option
+import PySide6.QtCore as qtc
 import PySide6.QtGui as qtg
 import PySide6.QtWidgets as qtw
 
@@ -39,13 +41,14 @@ def setup_actions():
     mainWindow = settings.globalVars["MainWindow"]
     # Load images action; user selects images from a QFileDialog
     def load_images_from_file():
-        print(mainWindow.current_image_directory)
-        new_loaded_images, _ = qtw.QFileDialog.getOpenFileNames(
-            mainWindow, "Select images to load.", mainWindow.current_image_directory
+        # TODO: Use "setViewMode(qtw.QFileDialog.Detail)"?
+        fileNames, _ = qtw.QFileDialog.getOpenFileNames(
+            mainWindow,
+            "Select images to load.",
+            mainWindow.current_image_directory,
+            options=qtw.QFileDialog.DontUseNativeDialog,  # Required fix for snap
         )
-        print("2")
-        print(new_loaded_images)
-        mainWindow.set_new_loaded_image_files(new_loaded_images)
+        mainWindow.set_new_loaded_image_files(fileNames)
 
     menubar = mainWindow.menuBar()
 

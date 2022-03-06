@@ -73,6 +73,7 @@ class Window(qtw.QMainWindow):
                 "Export stacked image",
                 self.current_image_directory,
                 "JPEG (*.jpg *.jpeg);; PNG (*.png);; TIFF (*.tiff *.tif)",
+                options=qtw.QFileDialog.DontUseNativeDialog,
             )
             if outputFilePath:
                 outputFilePath = os.path.abspath(outputFilePath)

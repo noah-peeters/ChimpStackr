@@ -15,15 +15,14 @@ architectures:
 
 apps:
   chimpstackr:
-    command: bin/chimpstackr #usr/local/bin/snapcraft-preload $SNAP/bin/python3 -m chimpstackr
     command-chain:
       - usr/local/bin/snapcraft-preload # Fixes multiprocessing python module
+    command: bin/chimpstackr
     extensions:
       - kde-neon
     plugs:
       - home
       - removable-media
-      - mount-observe
 
 parts:
   snapcraft-preload:
