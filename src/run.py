@@ -23,7 +23,7 @@ if os.name == "nt":
     print("Fix Windows taskbar icon")
     import ctypes
 
-    myappid = "test.application"  # arbitrary string
+    myappid = u"test.application"  # arbitrary string
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
     except Exception:

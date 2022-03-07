@@ -2,7 +2,7 @@
     Script that houses the MainWindow class.
     It is the "root display".
 """
-import os, pwd, sys
+import os, sys
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 
@@ -21,11 +21,18 @@ import src.algorithm.API as algorithm_API
 
 # TODO: Make UI more expressive after long operation finished. Show success/error messages
 
+if os.name == "nt":
+    current_image_directory = os.path.expanduser("~")
+else:
+    # Possibly running in snap --> use method to get real home dir and not the snap's home dir
+    import pwd
+
+    current_image_directory = os.path.expanduser(f"~{pwd.getpwuid(os.geteuid())[0]}/")
+
 
 class Window(qtw.QMainWindow):
     # Reference dir for image loading/export
-    # os.path.expanduser("~")
-    current_image_directory = os.path.expanduser(f"~{pwd.getpwuid(os.geteuid())[0]}/")
+    current_image_directory = current_image_directory
 
     def __init__(self):
         super().__init__()
