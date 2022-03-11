@@ -33,7 +33,7 @@ def pad_array(array, kernel_size):
 
 # Get deviation of a (grayscale image) matrix
 @nb.njit(nb.float64(nb.float64[:, :]), fastmath=True, cache=True)
-def get_deviation(matrix):
+def get_std_deviation(matrix):
     summed_deviation = float(0)
     average_value = np.mean(matrix)
     kernel_area = matrix.shape[0] * matrix.shape[1]
@@ -41,7 +41,7 @@ def get_deviation(matrix):
     for y in range(matrix.shape[0]):
         for x in range(matrix.shape[1]):
             summed_deviation += (matrix[y, x] - average_value) ** 2 / kernel_area
-    return summed_deviation
+    return np.sqrt(summed_deviation)
 
 
 # TODO: Pass 2D grayscale images as parameters (remove conversion inside)
@@ -89,7 +89,7 @@ def compute_focusmap(pyr_level1, pyr_level2, kernel_size):
                 # print(kernel_entropy)
 
                 # Get deviation of kernel
-                deviation = get_deviation(padded_patch)
+                deviation = get_std_deviation(padded_patch)
                 if deviation > highest_value:
                     highest_value = deviation
                     highest_image_index = image_index
