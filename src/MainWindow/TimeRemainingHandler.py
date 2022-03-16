@@ -60,7 +60,7 @@ class TimeRemainingHandler:
             )
 
         formatted = time.strftime("%H:%M:%S", time.gmtime(time_left * 1.75))
-        return "Time left until program finish: " + formatted
+        return "Time left: " + formatted
 
     # Remove cached variables
     def clear_cache(self):
