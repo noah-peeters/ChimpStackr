@@ -2,7 +2,7 @@
     Script that houses the MainWindow class.
     It is the "root display".
 """
-import os, sys
+import os, sys, re
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 
@@ -99,10 +99,13 @@ class Window(qtw.QMainWindow):
                 elif usedFilter == "TIFF (*.tiff *.tif)":
                     imgType = "TIFF"
 
+                # Attach extension as per selected filter, if not there
+                if not os.path.splitext(outputFilePath)[1]:
+                    outputFilePath = outputFilePath + "." + imgType.lower()
+
                 ImageSavingDialog.createDialog(
                     self.LaplacianAlgorithm.output_image, imgType, outputFilePath
                 )
-
         else:
             # Display Error message
             msg = qtw.QMessageBox(self)
