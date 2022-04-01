@@ -54,40 +54,31 @@ def compute_focusmap(pyr_level1, pyr_level2, kernel_size):
     y_range = pyr_level1.shape[0]
     x_range = pyr_level1.shape[1]
 
-    # 2D focusmap (dtype=bool)
+    # 2D focusmap (dtype=uint8); possible values:
     # 0 => pixel of pyr1
     # 1 => pixel of pyr2
     focusmap = np.empty((y_range, x_range), dtype=np.uint8)
+    k = int(kernel_size / 2)
 
     # Loop through pixels of this pyramid level
     for y in nb.prange(y_range):  # Most images are wider (more values on x-axis)
         for x in nb.prange(x_range):
-            highest_image_index = 0
-            highest_value = float(0)
-            for image_index in nb.prange(2):  # Loop through images
-                current_pyramid = pyr_level1
-                if image_index != 0:
-                    current_pyramid = pyr_level2
+            # Get small patch (kernel_size) around this pixel
+            patch = pyr_level1[y - k : y + k, x - k : x + k]
+            # Padd array with zeros if needed (edges of image)
+            padded_patch = pad_array(patch, kernel_size)
+            dev1 = get_std_deviation(padded_patch)
 
-                # Get small patch (kernel_size) around this pixel
-                k = int(kernel_size / 2)
-                patch = current_pyramid[y - k : y + k, x - k : x + k]
+            patch = pyr_level2[y - k : y + k, x - k : x + k]
+            padded_patch = pad_array(patch, kernel_size)
+            dev2 = get_std_deviation(padded_patch)
 
-                # Padd array with zeros if needed (edges of image)
-                padded_patch = pad_array(patch, kernel_size)
-
-                # Get entropy of kernel
-                # deviation = entropy(padded_patch, disk(10))
-                # print(kernel_entropy)
-
-                # Get deviation of kernel
-                deviation = get_std_deviation(padded_patch)
-                if deviation > highest_value:
-                    highest_value = deviation
-                    highest_image_index = image_index
+            # Get entropy of kernel
+            # deviation = entropy(padded_patch, disk(10))
+            # print(kernel_entropy)
 
             value_to_insert = 0
-            if highest_image_index != 0:
+            if dev2 > dev1:
                 value_to_insert = 1
 
             # Write most in-focus pixel to output
@@ -197,8 +188,12 @@ class Algorithm:
                     if pyramid_level < threshold_index:
                         # Regular computation (slow; accurate)
                         current_focusmap = compute_focusmap(
-                            cv2.cvtColor(output_pyramid[pyramid_level], cv2.COLOR_BGR2GRAY),
-                            cv2.cvtColor(new_laplacian_pyramid[pyramid_level], cv2.COLOR_BGR2GRAY),
+                            cv2.cvtColor(
+                                output_pyramid[pyramid_level], cv2.COLOR_BGR2GRAY
+                            ),
+                            cv2.cvtColor(
+                                new_laplacian_pyramid[pyramid_level], cv2.COLOR_BGR2GRAY
+                            ),
                             kernel_size,
                         )
                     else:
