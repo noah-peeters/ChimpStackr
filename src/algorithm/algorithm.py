@@ -14,7 +14,7 @@ import src.ImageLoadingHandler as ImageLoadingHandler
 
 
 # Pad an array to be the kernel size (square). Only if needed
-@nb.njit(nb.float64[:, :](nb.float64[:, :], nb.int64), fastmath=True, cache=True)
+@nb.njit(nb.float32[:, :](nb.float32[:, :], nb.int64), fastmath=True, cache=True)
 def pad_array(array, kernel_size):
     y_shape = array.shape[0]
     x_shape = array.shape[1]
@@ -32,7 +32,7 @@ def pad_array(array, kernel_size):
 
 
 # Get deviation of a (grayscale image) matrix
-@nb.njit(nb.float64(nb.float64[:, :]), fastmath=True, cache=True)
+@nb.njit(nb.float32(nb.float32[:, :]), fastmath=True, cache=True)
 def get_std_deviation(matrix):
     summed_deviation = float(0)
     average_value = np.mean(matrix)
@@ -44,10 +44,9 @@ def get_std_deviation(matrix):
     return np.sqrt(summed_deviation)
 
 
-# TODO: Pass 2D grayscale images as parameters (remove conversion inside)
 # Compute focusmap for the same pyramid level in 2 different pyramids
 @nb.njit(
-    nb.uint8[:, :](nb.float32[:, :, :], nb.float32[:, :, :], nb.int64),
+    nb.uint8[:, :](nb.float32[:, :], nb.float32[:, :], nb.int64),
     parallel=True,
     cache=True,
 )
@@ -74,15 +73,8 @@ def compute_focusmap(pyr_level1, pyr_level2, kernel_size):
                 k = int(kernel_size / 2)
                 patch = current_pyramid[y - k : y + k, x - k : x + k]
 
-                # Convert BGR patch to grayscale
-                grayscale_patch = (
-                    0.2989 * patch[:, :, 2]
-                    + 0.5870 * patch[:, :, 1]
-                    + 0.1140 * patch[:, :, 0]
-                )
-
                 # Padd array with zeros if needed (edges of image)
-                padded_patch = pad_array(grayscale_patch, kernel_size)
+                padded_patch = pad_array(patch, kernel_size)
 
                 # Get entropy of kernel
                 # deviation = entropy(padded_patch, disk(10))
@@ -204,8 +196,8 @@ class Algorithm:
                     if pyramid_level < threshold_index:
                         # Regular computation (slow; accurate)
                         current_focusmap = compute_focusmap(
-                            output_pyramid[pyramid_level],
-                            new_laplacian_pyramid[pyramid_level],
+                            cv2.cvtColor(output_pyramid[pyramid_level], cv2.COLOR_BGR2GRAY),
+                            cv2.cvtColor(new_laplacian_pyramid[pyramid_level], cv2.COLOR_BGR2GRAY),
                             kernel_size,
                         )
                     else:
