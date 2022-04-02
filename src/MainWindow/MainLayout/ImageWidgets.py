@@ -9,12 +9,31 @@ import PySide6.QtGui as qtg
 
 import src.settings as settings
 
+# Helper class with infinite scrolling
+class InfiniteQListWidget(qtw.QListWidget):
+    def __init__(self):
+        super().__init__()
+        self.setSelectionMode(qtw.QAbstractItemView.ExtendedSelection)
 
-class LoadedImagesList(qtw.QListWidget):
+    # Setup infinite scrolling
+    def keyPressEvent(self, event):
+        if event.key() == qtc.Qt.Key_Down:
+            if self.currentRow() == self.count()-1:
+                self.setCurrentRow(0)
+                return
+        elif event.key() == qtc.Qt.Key_Up:
+            if self.currentRow() == 0:
+                self.setCurrentRow(self.count()-1)
+                return
+
+        # Otherwise, parent behavior
+        super().keyPressEvent(event)
+
+# QListWidget for displaying loaded images (allow drag & drop)
+class LoadedImagesList(InfiniteQListWidget):
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
-        self.setSelectionMode(qtw.QAbstractItemView.ExtendedSelection)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls:
@@ -109,8 +128,7 @@ class ProcessedImagesWidget(qtw.QWidget):
         settings.globalVars["ProcessedImagesWidget"] = self
 
         self.headerText = qtw.QLabel("Output image(s)")
-        self.list = qtw.QListWidget()
-        self.list.setSelectionMode(qtw.QAbstractItemView.ExtendedSelection)
+        self.list = InfiniteQListWidget()
 
         v_layout = qtw.QVBoxLayout()
         v_layout.addWidget(self.headerText)
