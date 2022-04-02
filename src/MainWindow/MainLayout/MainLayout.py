@@ -3,6 +3,7 @@
     Parent of loaded images widget, ImageViewer and splitter layout(s).
 """
 import os, tempfile
+from datetime import datetime
 import cv2
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
@@ -88,7 +89,7 @@ class CenterWidget(qtw.QWidget):
                 suffix=".jpg", dir=self.root_temp_directory.name
             )
             item = qtw.QListWidgetItem()
-            item.setText("lap_pyr_stacked")
+            item.setText(datetime.today().strftime("%Y%m%d") + "_LaplacianStacked")
             item.setData(qtc.Qt.UserRole, tmp_file)
 
             cv2.imwrite(tmp_file, new_image_array)
