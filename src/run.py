@@ -1,4 +1,5 @@
 import os, sys, tempfile
+import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 import PySide6.QtGui as qtg
 
@@ -30,27 +31,43 @@ if os.name == "nt":
         pass  # Platform older than Windows 7
 
 
+class CustomSplashScreen(qtw.QSplashScreen):
+    def __init__(self, my_pixmap):
+        super().__init__(my_pixmap)
+        self.setWindowFlags(qtc.Qt.WindowStaysOnTopHint | qtc.Qt.FramelessWindowHint)
+
+    def mousePressEvent(self, event):
+        # Disable default "click-to-dismiss" behaviour
+        pass
+
+
 def main():
-    app = qtw.QApplication([])
+    qApp = qtw.QApplication([])
     # Needed for saving QSettings
-    app.setApplicationName("ChimpStackr")
-    app.setOrganizationName("noah.peeters")
-
-    settings.globalVars["MainApplication"] = app
-
-    window = MainWindow.Window()
-    window.showMaximized()
+    qApp.setApplicationName("ChimpStackr")
+    qApp.setOrganizationName("noah.peeters")
+    settings.globalVars["MainApplication"] = qApp
 
     icon_path = "snap/gui/icon.png"
     if not os.path.isfile(icon_path):
         # Path to icon inside snap package
         icon_path = "meta/gui/icon.png"
-    
+
+    # Setup splashscreen
+    splash = CustomSplashScreen(qtg.QPixmap(icon_path))
+    splash.show()
+
+    window = MainWindow.Window()
+
     icon = qtg.QIcon(icon_path)
-    app.setWindowIcon(icon)
+    qApp.setWindowIcon(icon)
     window.setWindowIcon(icon)
-    app.exec()
-    # sys.exit(app.exec())
+
+    window.showMaximized()
+    splash.finish(window)
+
+    qApp.exec()
+    # sys.exit(qApp.exec())
     ROOT_TEMP_DIRECTORY.cleanup()
 
 

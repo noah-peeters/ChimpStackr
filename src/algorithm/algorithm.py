@@ -14,7 +14,11 @@ import src.ImageLoadingHandler as ImageLoadingHandler
 
 
 # Pad an array to be the kernel size (square). Only if needed
-@nb.njit(nb.float32[:, :](nb.float32[:, :], nb.int64), fastmath=True, cache=True)
+@nb.njit(
+    nb.float32[:, :](nb.float32[:, :], nb.int64),
+    fastmath=True,
+    cache=True,
+)
 def pad_array(array, kernel_size):
     y_shape = array.shape[0]
     x_shape = array.shape[1]
@@ -32,7 +36,11 @@ def pad_array(array, kernel_size):
 
 
 # Get deviation of a (grayscale image) matrix
-@nb.njit(nb.float32(nb.float32[:, :]), fastmath=True, cache=True)
+@nb.njit(
+    nb.float32(nb.float32[:, :]),
+    fastmath=True,
+    cache=True,
+)
 def get_std_deviation(matrix):
     summed_deviation = float(0)
     average_value = np.mean(matrix)
