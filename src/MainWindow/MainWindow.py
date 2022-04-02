@@ -24,7 +24,7 @@ import src.algorithm.API as algorithm_API
 if os.name == "nt":
     current_image_directory = os.path.expanduser("~")
 else:
-    # Possibly running in snap --> use method to get real home dir and not the snap's home dir
+    # Possibly running in snap --> get real home dir and not the snap's home dir
     import pwd
 
     current_image_directory = os.path.expanduser(f"~{pwd.getpwuid(os.geteuid())[0]}/")

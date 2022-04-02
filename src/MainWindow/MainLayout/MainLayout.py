@@ -19,29 +19,36 @@ class CenterWidget(qtw.QWidget):
         super().__init__()
         self.root_temp_directory = settings.globalVars["RootTempDir"]
         self.ImageWidgets = ImageWidgets.ImageWidgets()
-        self.image_display = ImageViewer.ImageViewer()
+        self.ImageViewer = ImageViewer.ImageViewer()
 
         # Connect to "selected item change" signals
         # "currentItemChanged" for keyboard key presses + "itemClicked" for mouseclicks
         self.ImageWidgets.loaded_images_widget.list.currentItemChanged.connect(
-            self.image_display.update_displayed_image
+            self.ImageViewer.update_displayed_image
         )
         self.ImageWidgets.loaded_images_widget.list.itemClicked.connect(
-            self.image_display.update_displayed_image
+            self.ImageViewer.update_displayed_image
         )
 
         self.ImageWidgets.processed_images_widget.list.currentItemChanged.connect(
-            self.image_display.update_displayed_image
+            self.ImageViewer.update_displayed_image
         )
         self.ImageWidgets.processed_images_widget.list.itemClicked.connect(
-            self.image_display.update_displayed_image
+            self.ImageViewer.update_displayed_image
         )
+
+        # QTabWidget above ImageViewer (toggle View/Retouch modes)
+        tabWidget = qtw.QTabWidget()
+        tabWidget.addTab(self.ImageViewer, "View")
+        tabWidget.addTab(ImageViewer.ImageViewer(), "Retouch")  # TODO
 
         # Create vertical splitter (QListWidgets/ImageViewer)
         v_splitter = qtw.QSplitter()
-        v_splitter.setChildrenCollapsible(False)
+        v_splitter.setChildrenCollapsible(
+            False
+        )  # TODO: Change to "True", but division by 0 in "ImageViewer" class
         v_splitter.addWidget(self.ImageWidgets)
-        v_splitter.addWidget(self.image_display)
+        v_splitter.addWidget(tabWidget)
 
         # Set splitter default size
         width = self.screen().availableGeometry().width()
@@ -56,7 +63,7 @@ class CenterWidget(qtw.QWidget):
     def set_loaded_images(self, new_image_files):
         # Clear currently displaying image
         self.ImageWidgets.loaded_images_widget.reset_to_default()
-        self.image_display.update_displayed_image(None)
+        self.ImageViewer.update_displayed_image(None)
 
         if len(new_image_files) <= 0:
             # No images selected, use default

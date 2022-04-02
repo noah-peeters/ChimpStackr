@@ -147,7 +147,7 @@ class ImageWidgets(qtw.QWidget):
 
         # Create Horizontal splitter (LoadedImagesWidget/ProcessedImagesWidget)
         h_splitter = qtw.QSplitter(qtc.Qt.Vertical)
-        h_splitter.setChildrenCollapsible(False)
+        h_splitter.setChildrenCollapsible(False) # TODO: Change to "True", but division by 0 in "ImageViewer" class
         h_splitter.addWidget(self.loaded_images_widget)
         h_splitter.addWidget(self.processed_images_widget)
 
