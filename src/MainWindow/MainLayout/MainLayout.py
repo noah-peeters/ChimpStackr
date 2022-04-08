@@ -8,8 +8,9 @@ import cv2
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 
+import src.ImageLoadingHandler as ImageLoadingHandler
 import src.MainWindow.MainLayout.ImageWidgets as ImageWidgets
-import src.MainWindow.MainLayout.ImageViewer as ImageViewer
+import src.MainWindow.MainLayout.ImageViewers as ImageViewers
 from src.utilities import int_string_sorting
 import src.settings as settings
 
@@ -19,34 +20,33 @@ class CenterWidget(qtw.QWidget):
         super().__init__()
         self.root_temp_directory = settings.globalVars["RootTempDir"]
         self.ImageWidgets = ImageWidgets.ImageWidgets()
-        self.ImageViewer = ImageViewer.ImageViewer()
+        self.ImageViewer = ImageViewers.ImageViewer()
+        self.ImageLoading = ImageLoadingHandler.ImageLoadingHandler()
 
         # Connect to "selected item change" signals
         # "currentItemChanged" for keyboard key presses + "itemClicked" for mouseclicks
         self.ImageWidgets.loaded_images_widget.list.currentItemChanged.connect(
-            self.ImageViewer.update_displayed_image
+            self.display_new_image
         )
         self.ImageWidgets.loaded_images_widget.list.itemClicked.connect(
-            self.ImageViewer.update_displayed_image
+            self.display_new_image
         )
 
         self.ImageWidgets.processed_images_widget.list.currentItemChanged.connect(
-            self.ImageViewer.update_displayed_image
+            self.display_new_image
         )
         self.ImageWidgets.processed_images_widget.list.itemClicked.connect(
-            self.ImageViewer.update_displayed_image
+            self.display_new_image
         )
 
         # QTabWidget above ImageViewer (toggle View/Retouch modes)
         tabWidget = qtw.QTabWidget()
         tabWidget.addTab(self.ImageViewer, "View")
-        tabWidget.addTab(ImageViewer.ImageViewer(), "Retouch")  # TODO
+        tabWidget.addTab(ImageViewers.ImageRetouchViewer(), "Retouch")  # TODO
 
         # Create vertical splitter (QListWidgets/ImageViewer)
         v_splitter = qtw.QSplitter()
-        v_splitter.setChildrenCollapsible(
-            False
-        )  # TODO: Change to "True", but division by 0 in "ImageViewer" class
+        v_splitter.setChildrenCollapsible(True)  # TODO: 3 dots on collapse
         v_splitter.addWidget(self.ImageWidgets)
         v_splitter.addWidget(tabWidget)
 
@@ -59,11 +59,24 @@ class CenterWidget(qtw.QWidget):
         layout.addWidget(v_splitter)
         self.setLayout(layout)
 
+    # Handles image update listwidget item clicks
+    def display_new_image(self, list_widget_item):
+        if list_widget_item:
+            # Display selected image
+            path = list_widget_item.data(qtc.Qt.UserRole)
+            if path:
+                image = self.ImageLoading.read_image_from_path(path)
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                self.ImageViewer.set_image(image)
+                return
+        # Clear image
+        self.ImageViewer.set_image(None)
+
     # Update currently loaded images + relevant UI
     def set_loaded_images(self, new_image_files):
         # Clear currently displaying image
         self.ImageWidgets.loaded_images_widget.reset_to_default()
-        self.ImageViewer.update_displayed_image(None)
+        self.ImageViewer.set_image(None)
 
         if len(new_image_files) <= 0:
             # No images selected, use default

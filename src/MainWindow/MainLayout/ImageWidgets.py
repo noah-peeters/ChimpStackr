@@ -18,16 +18,17 @@ class InfiniteQListWidget(qtw.QListWidget):
     # Setup infinite scrolling
     def keyPressEvent(self, event):
         if event.key() == qtc.Qt.Key_Down:
-            if self.currentRow() == self.count()-1:
+            if self.currentRow() == self.count() - 1:
                 self.setCurrentRow(0)
                 return
         elif event.key() == qtc.Qt.Key_Up:
             if self.currentRow() == 0:
-                self.setCurrentRow(self.count()-1)
+                self.setCurrentRow(self.count() - 1)
                 return
 
         # Otherwise, parent behavior
         super().keyPressEvent(event)
+
 
 # QListWidget for displaying loaded images (allow drag & drop)
 class LoadedImagesList(InfiniteQListWidget):
@@ -116,10 +117,11 @@ class LoadedImagesWidget(qtw.QWidget):
 
         if selected_action == reset_zoom_action:
             self.reset_zoom = reset_zoom_action.isChecked()
-            paths_to_remove=[]
+            paths_to_remove = []
             for listItem in self.list.selectedItems():
                 paths_to_remove.append(listItem.data(qtc.Qt.UserRole))
             settings.globalVars["MainWindow"].remove_some_images(paths_to_remove)
+
 
 # Widget for displaying processed/stacked images
 class ProcessedImagesWidget(qtw.QWidget):
@@ -147,7 +149,7 @@ class ImageWidgets(qtw.QWidget):
 
         # Create Horizontal splitter (LoadedImagesWidget/ProcessedImagesWidget)
         h_splitter = qtw.QSplitter(qtc.Qt.Vertical)
-        h_splitter.setChildrenCollapsible(False) # TODO: Change to "True", but division by 0 in "ImageViewer" class
+        h_splitter.setChildrenCollapsible(True)  # TODO: 3 dots on collapse
         h_splitter.addWidget(self.loaded_images_widget)
         h_splitter.addWidget(self.processed_images_widget)
 

@@ -55,6 +55,7 @@ def get_std_deviation(matrix):
 # Compute focusmap for the same pyramid level in 2 different pyramids
 @nb.njit(
     nb.uint8[:, :](nb.float32[:, :], nb.float32[:, :], nb.int64),
+    fastmath=True,
     parallel=True,
     cache=True,
 )
