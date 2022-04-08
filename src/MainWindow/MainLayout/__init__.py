@@ -21,6 +21,7 @@ class CenterWidget(qtw.QWidget):
         self.root_temp_directory = settings.globalVars["RootTempDir"]
         self.ImageWidgets = ImageWidgets.ImageWidgets()
         self.ImageViewer = ImageViewers.ImageViewer()
+        self.RetouchingViewer = ImageViewers.ImageRetouchingWidget()
         self.ImageLoading = ImageLoadingHandler.ImageLoadingHandler()
 
         # Connect to "selected item change" signals
@@ -42,8 +43,7 @@ class CenterWidget(qtw.QWidget):
         # QTabWidget above ImageViewer (toggle View/Retouch modes)
         tabWidget = qtw.QTabWidget()
         tabWidget.addTab(self.ImageViewer, "View")
-
-        tabWidget.addTab(ImageViewers.ImageRetouchingWidget(), "Retouch")  # TODO
+        tabWidget.addTab(self.RetouchingViewer, "Retouch")
 
         # Create vertical splitter (QListWidgets/ImageViewer)
         v_splitter = qtw.QSplitter()
@@ -61,7 +61,7 @@ class CenterWidget(qtw.QWidget):
         self.setLayout(layout)
 
     # Handles image update listwidget item clicks
-    def display_new_image(self, list_widget_item):
+    def display_new_image(self, list_widget_item: qtw.QListWidgetItem) -> None:
         if list_widget_item:
             # Display selected image
             path = list_widget_item.data(qtc.Qt.UserRole)
@@ -69,9 +69,28 @@ class CenterWidget(qtw.QWidget):
                 image = self.ImageLoading.read_image_from_path(path)
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 self.ImageViewer.set_image(image)
+                if (
+                    list_widget_item.listWidget()
+                    == self.ImageWidgets.loaded_images_widget.list
+                ):
+                    self.RetouchingViewer.set_retouch_image(image)
+                else:
+                    self.RetouchingViewer.set_image(image)
                 return
-        # Clear image
-        self.ImageViewer.set_image(None)
+            # Clear image
+            self.ImageViewer.set_image(None)
+            if (
+                list_widget_item.listWidget()
+                == self.ImageWidgets.loaded_images_widget.list
+            ):
+                self.RetouchingViewer.set_retouch_image(None)
+            else:
+                self.RetouchingViewer.set_image(None)
+        else:
+            # Clear all
+            self.ImageViewer.set_image(None)
+            self.RetouchingViewer.set_retouch_image(None)
+            self.RetouchingViewer.set_image(None)
 
     # Update currently loaded images + relevant UI
     def set_loaded_images(self, new_image_files):

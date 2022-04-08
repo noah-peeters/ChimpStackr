@@ -54,8 +54,9 @@ class PaintingWidget(qtw.QWidget):
 
         hLayout = qtw.QHBoxLayout()
         self.label = qtw.QLabel()
+        self.label.setAlignment(qtc.Qt.AlignCenter)
 
-        self.default_pixmap = qtg.QPixmap(5000, 5000)
+        self.default_pixmap = qtg.QPixmap(10, 10)
         self.default_pixmap.fill(qtc.Qt.transparent)
         self.pixmap_canvas = self.default_pixmap.copy()
         self.update_visible_pixmap()
@@ -77,14 +78,10 @@ class PaintingWidget(qtw.QWidget):
 
         # Resize label/pixmap(s) to image
         size = self.parent.pixmapPicture.pixmap().size()
-        if (
-            self.size() != size
-            or self.default_pixmap.size() != size
-            or self.pixmap_canvas.size() != size
-        ):
-            self.setFixedSize(size)
-            self.default_pixmap = self.default_pixmap.scaled(size)
+        if self.label.size() != size or self.pixmap_canvas.size() != size:
+            self.label.setFixedSize(size)
             self.pixmap_canvas = self.pixmap_canvas.scaled(size)
+            self.update_visible_pixmap()
 
         # Paint a new line
         if len(self.parent.lines_to_paint) > 0:

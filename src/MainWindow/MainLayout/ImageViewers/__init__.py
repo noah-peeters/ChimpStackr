@@ -148,18 +148,6 @@ class ImageRetouchingWidget(qtw.QWidget):
         self.retouch_viewer.sendWheelEvent.connect(self.image_viewer.handleWheelEvent)
         self.image_viewer.sendWheelEvent.connect(self.retouch_viewer.handleWheelEvent)
 
-        # TODO: Temporary
-        import numpy as np
-
-        self.image_viewer.set_image(
-            np.random.randint(
-                0,
-                255,
-                size=(2000, 1500, 3),
-                dtype=np.uint8,
-            )
-        )
-
     def set_retouch_image(self, image):
         self.retouch_viewer.set_image(image)
 

@@ -5,6 +5,7 @@ Retouching scene inherits this class.
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 import PySide6.QtGui as qtg
+from cv2 import boundingRect
 
 
 class ImageScene(qtw.QGraphicsScene):

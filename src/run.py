@@ -36,9 +36,10 @@ class CustomSplashScreen(qtw.QSplashScreen):
         super().__init__(my_pixmap)
         self.setWindowFlags(qtc.Qt.WindowStaysOnTopHint | qtc.Qt.FramelessWindowHint)
 
-    def mousePressEvent(self, event):
+    def mousePressEvent(self, event: qtg.QMouseEvent) -> None:
         # Disable default "click-to-dismiss" behaviour
-        pass
+        event.accept()
+        return
 
 
 def main():

@@ -27,7 +27,10 @@ class ImageRetouchScene(image_scene.ImageScene):
         self.UndoRedoClass = retouch_helpers.UndoRedoPixmapClass()
 
         self.painting_widget = retouch_helpers.PaintingWidget(self)
-        self.addWidget(self.painting_widget)
+        # TODO: setGraphicsEffect() on proxy_widget for translucency?
+        proxy_widget = self.addWidget(self.painting_widget)
+        # TODO: More sophisticated solution???
+        proxy_widget.setPos(-10, -10)  # Compensate for 10px border
 
         # Add empty pixmap to undo/redo class
         self.painting_widget.request_save_to_undoredo = True
@@ -92,7 +95,7 @@ class ImageRetouchScene(image_scene.ImageScene):
             else:
                 self.current_brush_size = self.min_brush_size
 
-        self.mouse_tooltip.showText(
+        self.graphicsViewer.mouse_tooltip.showText(
             qtg.QCursor.pos(),
             str(self.current_brush_size) + "px brush size",
             msecShowTime=self.graphicsViewer.tooltip_displaytime_ms,
@@ -101,6 +104,7 @@ class ImageRetouchScene(image_scene.ImageScene):
         # Update cursor size (QPen size gets updated on mouseclick)
         self.update_cursor_circle()
         event.accept()
+        return
 
     def keyPressEvent(self, event: qtg.QKeyEvent) -> None:
         if event.key() == qtc.Qt.Key_T:
@@ -169,15 +173,8 @@ class ImageRetouchScene(image_scene.ImageScene):
                 return  # Not allowed to draw (no mouse click)
 
             self.paint_end_pos = newPos
-            # TODO: Determine reason for 10px X-offset
             self.lines_to_paint.append(
-                qtc.QLineF(
-                    self.paint_begin_pos.x() - 10,
-                    self.paint_begin_pos.y(),
-                    self.paint_end_pos.x() - 10,
-                    self.paint_end_pos.y(),
-                )
-                # qtc.QLineF(self.paint_begin_pos, self.paint_end_pos)
+                qtc.QLineF(self.paint_begin_pos, self.paint_end_pos)
             )
 
             # Let QWidget handle (re)painting
