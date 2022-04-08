@@ -5,7 +5,7 @@ import os, time
 
 import src.utilities as utilities
 import src.algorithm.pyramid as pyramid_algorithm
-import src.algorithm.algorithm as algorithm
+import src.algorithm as algorithm
 
 
 class LaplacianPyramid:

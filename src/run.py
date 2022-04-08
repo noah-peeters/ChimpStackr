@@ -10,7 +10,7 @@ parentdir = os.path.dirname(currentdir)
 sys.path.insert(0, parentdir)  # Insert at first place
 
 import src.settings as settings
-import src.MainWindow.MainWindow as MainWindow
+import src.MainWindow as MainWindow
 
 # Directory for storing tempfiles. Automatically deletes on program exit.
 ROOT_TEMP_DIRECTORY = tempfile.TemporaryDirectory(prefix="ChimpStackr_")

@@ -7,10 +7,10 @@ import PySide6.QtCore as qtc
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
-sys.path.insert(0,parentdir)
+sys.path.insert(0, parentdir)
 
 import src.MainWindow.Threading as QThreading
-from src.algorithm import API
+import src.algorithm.API as API
 
 ROOT_TEMP_DIRECTORY = tempfile.TemporaryDirectory(prefix="FocusStacking_")
 
