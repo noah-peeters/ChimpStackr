@@ -95,7 +95,7 @@ class ImageRetouchScene(image_scene.ImageScene):
         self.mouse_tooltip.showText(
             qtg.QCursor.pos(),
             str(self.current_brush_size) + "px brush size",
-            msecShowTime=self.tooltip_displaytime_ms,
+            msecShowTime=self.graphicsViewer.tooltip_displaytime_ms,
         )
 
         # Update cursor size (QPen size gets updated on mouseclick)

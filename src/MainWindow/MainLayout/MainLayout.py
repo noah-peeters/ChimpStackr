@@ -42,7 +42,8 @@ class CenterWidget(qtw.QWidget):
         # QTabWidget above ImageViewer (toggle View/Retouch modes)
         tabWidget = qtw.QTabWidget()
         tabWidget.addTab(self.ImageViewer, "View")
-        tabWidget.addTab(ImageViewers.ImageRetouchViewer(), "Retouch")  # TODO
+
+        tabWidget.addTab(ImageViewers.ImageRetouchingWidget(), "Retouch")  # TODO
 
         # Create vertical splitter (QListWidgets/ImageViewer)
         v_splitter = qtw.QSplitter()
