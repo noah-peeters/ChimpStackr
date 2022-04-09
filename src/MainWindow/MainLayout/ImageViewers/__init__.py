@@ -112,6 +112,44 @@ class ImageRetouchViewer(ImageViewer):
         super().__init__(viewerScene)
 
 
+# Top widget for retouching settings
+class RetouchingTopWidget(qtw.QWidget):
+    def __init__(self):
+        super().__init__()
+        combobox = qtw.QComboBox()
+        combobox.addItems(
+            {
+                "Direct copy": 0,
+                "Lighten": 1,
+                "Darken": 2,
+            }
+        )
+        combobox.setToolTip("Method used for copying.")
+        combobox.setItemData(
+            0, "Directly copy masked pixels to output.", qtc.Qt.ToolTipRole
+        )
+        combobox.setItemData(
+            1,
+            "Copy masked pixels if higher luminance (lighter) than output.",
+            qtc.Qt.ToolTipRole,
+        )
+        combobox.setItemData(
+            2,
+            "Copy masked pixels if lower luminance (darker) than output.",
+            qtc.Qt.ToolTipRole,
+        )
+        button = qtw.QPushButton()
+        button.setText("Save output image.")
+
+        self.setMaximumHeight(50)
+        # print(button.size().height())  # TODO: Use button size, but height returns large value (480px)???
+
+        hLayout = qtw.QHBoxLayout()
+        hLayout.addWidget(combobox)
+        hLayout.addWidget(button)
+        self.setLayout(hLayout)
+
+
 # Widget that displays a retouching viewer, and a regular image viewer
 class ImageRetouchingWidget(qtw.QWidget):
     def __init__(self):
@@ -127,9 +165,11 @@ class ImageRetouchingWidget(qtw.QWidget):
         width = int(self.size().width() / 2)
         vSplitter.setSizes([width, width])
 
-        hLayout = qtw.QHBoxLayout()
-        hLayout.addWidget(vSplitter)
-        self.setLayout(hLayout)
+        vLayout = qtw.QVBoxLayout()
+        vLayout.addWidget(RetouchingTopWidget())
+        vLayout.addWidget(vSplitter)
+
+        self.setLayout(vLayout)
 
         # Sync movement between viewers
         self.retouch_viewer.verticalScrollBar().valueChanged.connect(
