@@ -219,7 +219,7 @@ class ImageRetouchingWidget(qtw.QWidget):
                 qtw.QMessageBox.Ok,
             )
             if reply == qtw.QMessageBox.Ok:
-                print("Change to new image")
+                self.image_viewer.set_image(image)
         else:
             # Instantly set new (no previous image)
             self.image_viewer.set_image(image)
