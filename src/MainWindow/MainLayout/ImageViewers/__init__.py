@@ -188,8 +188,38 @@ class ImageRetouchingWidget(qtw.QWidget):
         self.retouch_viewer.sendWheelEvent.connect(self.image_viewer.handleWheelEvent)
         self.image_viewer.sendWheelEvent.connect(self.retouch_viewer.handleWheelEvent)
 
+    # Set image to retouch output with
     def set_retouch_image(self, image):
         self.retouch_viewer.set_image(image)
 
-    def set_image(self, image):
-        self.image_viewer.set_image(image)
+    # Set output image
+    def set_output_image(self, image):
+        if image is None:
+            self.image_viewer.set_image(None)
+            return
+
+        # Convert here to see if image has actually been changed
+        qImage = qtg.QImage(
+            image,
+            image.shape[1],
+            image.shape[0],
+            image.shape[1] * 3,
+            qtg.QImage.Format_RGB888,
+        )
+        if (
+            self.image_viewer.viewerScene.hasImage
+            and qImage != self.image_viewer.viewerScene.currentQImage
+        ):
+            # Ask user first before changing image
+            reply = qtw.QMessageBox.question(
+                self,
+                "Change output?",
+                "Are you sure you want to select a new output image for retouching? Some changes might not be saved.",
+                qtw.QMessageBox.Cancel,
+                qtw.QMessageBox.Ok,
+            )
+            if reply == qtw.QMessageBox.Ok:
+                print("Change to new image")
+        else:
+            # Instantly set new (no previous image)
+            self.image_viewer.set_image(image)

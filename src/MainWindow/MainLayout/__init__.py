@@ -68,29 +68,23 @@ class CenterWidget(qtw.QWidget):
             if path:
                 image = self.ImageLoading.read_image_from_path(path)
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                # Always update regular viewer's image
                 self.ImageViewer.set_image(image)
+
+                # Update retouching image depending on if image is source or output
                 if (
                     list_widget_item.listWidget()
                     == self.ImageWidgets.loaded_images_widget.list
                 ):
                     self.RetouchingViewer.set_retouch_image(image)
                 else:
-                    self.RetouchingViewer.set_image(image)
+                    self.RetouchingViewer.set_output_image(image)
                 return
-            # Clear image
-            self.ImageViewer.set_image(None)
-            if (
-                list_widget_item.listWidget()
-                == self.ImageWidgets.loaded_images_widget.list
-            ):
-                self.RetouchingViewer.set_retouch_image(None)
-            else:
-                self.RetouchingViewer.set_image(None)
-        else:
-            # Clear all
-            self.ImageViewer.set_image(None)
-            self.RetouchingViewer.set_retouch_image(None)
-            self.RetouchingViewer.set_image(None)
+
+        # Clear all (if no image was changed)
+        self.ImageViewer.set_image(None)
+        self.RetouchingViewer.set_retouch_image(None)
+        self.RetouchingViewer.set_output_image(None)
 
     # Update currently loaded images + relevant UI
     def set_loaded_images(self, new_image_files):

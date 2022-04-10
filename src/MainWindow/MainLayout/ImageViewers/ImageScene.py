@@ -2,10 +2,8 @@
 Scene for regular image display (no retouching).
 Retouching scene inherits this class.
 """
-import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 import PySide6.QtGui as qtg
-from cv2 import boundingRect
 
 
 class ImageScene(qtw.QGraphicsScene):
@@ -18,6 +16,7 @@ class ImageScene(qtw.QGraphicsScene):
         self.addItem(self.pixmapPicture)
 
         self.graphicsViewer = graphicsViewer
+        self.currentQImage = None
 
     # Display new image (RGB)
     def set_image(self, image):
@@ -25,17 +24,18 @@ class ImageScene(qtw.QGraphicsScene):
             # Clear pixmap image
             self.pixmapPicture.setPixmap(qtg.QPixmap())
             self.hasImage = False
+            self.currentQImage = None
         else:
             # Convert np RGB array to QImage
             # src: https://stackoverflow.com/questions/34232632/convert-python-opencv-image-numpy-array-to-pyqt-qpixmap-image
-            qimage = qtg.QImage(
+            self.currentQImage = qtg.QImage(
                 image,
                 image.shape[1],
                 image.shape[0],
                 image.shape[1] * 3,
                 qtg.QImage.Format_RGB888,
             )
-            self.pixmapPicture.setPixmap(qtg.QPixmap.fromImage(qimage))
+            self.pixmapPicture.setPixmap(qtg.QPixmap.fromImage(self.currentQImage))
             self.hasImage = True
             if self.adjust_zoom:
                 self.graphicsViewer.fitInView()
