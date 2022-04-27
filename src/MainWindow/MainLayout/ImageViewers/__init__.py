@@ -5,7 +5,6 @@ These should be used by external scripts.
 import PySide6.QtWidgets as qtw
 import PySide6.QtCore as qtc
 import PySide6.QtGui as qtg
-from sqlalchemy import true
 
 import src.MainWindow.MainLayout.ImageViewers.ImageScene as image_scene
 import src.MainWindow.MainLayout.ImageViewers.ImageRetouchScene as image_retouch_scene

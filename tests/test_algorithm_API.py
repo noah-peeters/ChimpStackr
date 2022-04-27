@@ -21,7 +21,6 @@ def test_image_paths_update():
     laplacian_pyramid_algorithm.update_image_paths(os.listdir("tests/low_res_images"))
     assert len(laplacian_pyramid_algorithm.image_paths) == 10
 
-
 # TODO: Test aligning images
 
 # Test stacking images
