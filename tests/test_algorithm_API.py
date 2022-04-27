@@ -24,14 +24,14 @@ def test_image_paths_update():
 # TODO: Test aligning images
 
 # Test stacking images
-def test_image_stacking():
-    worker = QThreading.Worker(laplacian_pyramid_algorithm.stack_images)
-    threadpool = qtc.QThreadPool()
+# def test_image_stacking():
+#     worker = QThreading.Worker(laplacian_pyramid_algorithm.stack_images)
+#     threadpool = qtc.QThreadPool()
 
-    def finished_stack():
-        assert type(laplacian_pyramid_algorithm.output_image) == np.ndarray
-        assert laplacian_pyramid_algorithm.output_image.shape == (4000, 6000, 3)
-        assert laplacian_pyramid_algorithm.output_image.dtype == np.uint8
+#     def finished_stack():
+#         assert type(laplacian_pyramid_algorithm.output_image) == np.ndarray
+#         assert laplacian_pyramid_algorithm.output_image.shape == (4000, 6000, 3)
+#         assert laplacian_pyramid_algorithm.output_image.dtype == np.uint8
 
-    worker.signals.finished.connect(finished_stack)
-    threadpool.start(worker)
+#     worker.signals.finished.connect(finished_stack)
+#     threadpool.start(worker)
