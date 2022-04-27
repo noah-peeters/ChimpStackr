@@ -4,6 +4,8 @@ Test multiple functions of algorithm API.
 import os, sys, tempfile
 import numpy as np
 import PySide6.QtCore as qtc
+import PySide6.QtWidgets as qtw
+
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
@@ -24,14 +26,14 @@ def test_image_paths_update():
 # TODO: Test aligning images
 
 # Test stacking images
-# def test_image_stacking():
-#     worker = QThreading.Worker(laplacian_pyramid_algorithm.stack_images)
-#     threadpool = qtc.QThreadPool()
+def test_image_stacking():
+    worker = QThreading.Worker(laplacian_pyramid_algorithm.stack_images)
+    threadpool = qtc.QThreadPool()
 
-#     def finished_stack():
-#         assert type(laplacian_pyramid_algorithm.output_image) == np.ndarray
-#         assert laplacian_pyramid_algorithm.output_image.shape == (4000, 6000, 3)
-#         assert laplacian_pyramid_algorithm.output_image.dtype == np.uint8
+    def finished_stack():
+        assert type(laplacian_pyramid_algorithm.output_image) == np.ndarray
+        assert laplacian_pyramid_algorithm.output_image.shape == (4000, 6000, 3)
+        assert laplacian_pyramid_algorithm.output_image.dtype == np.uint8
 
-#     worker.signals.finished.connect(finished_stack)
-#     threadpool.start(worker)
+    worker.signals.finished.connect(finished_stack)
+    threadpool.start(worker)
