@@ -1,6 +1,6 @@
 # Pure UI requirements
 pyside6_essentials==6.3.0
-qt-material==2.9
+qt-material==2.11
 
 # Algorithm requirements
 opencv-python==4.5.5.64 # TODO: Change to "opencv-python-headless"?? --> cvtColor not working??
