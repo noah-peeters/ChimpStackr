@@ -46,6 +46,7 @@ class LaplacianPyramid:
     # Align and stack images
     def align_and_stack_images(self, signals):
         # Align images to reference
+        # TODO: Allow option to align image stack to start, end, middle or previous images
         # ref_index=round(len(self.image_paths)/2)
         aligned_images_tmp_paths = []
         for i, path in enumerate(self.image_paths):
