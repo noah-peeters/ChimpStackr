@@ -5,7 +5,7 @@ qt-material==2.9
 # Algorithm requirements
 opencv-python==4.5.5.64 # TODO: Change to "opencv-python-headless"?? --> cvtColor not working??
 numpy==1.21.5 # Update to 1.22 when numba supports it
-numba==0.55.1
+numba==0.55.2
 rawpy==0.17.1
 imageio==2.19.0
 pyfftw==0.13.0
