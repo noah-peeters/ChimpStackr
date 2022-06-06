@@ -1,6 +1,6 @@
 # Pure UI requirements
 pyside6_essentials==6.3.0
-qt-material==2.9
+qt-material==2.12
 
 # Algorithm requirements
 opencv-python==4.5.5.64 # TODO: Change to "opencv-python-headless"?? --> cvtColor not working??
@@ -11,4 +11,4 @@ imageio==2.19.3
 pyfftw==0.13.0
 
 # TODO: Check if really needed (used for image alignment)
-scipy==1.7.3 # 1.8.0 gives error on mac pyinstaller build
+scipy==1.8.1 # 1.8.0 gives error on mac pyinstaller build
