@@ -7,7 +7,7 @@ opencv-python==4.6.0.66 # TODO: Change to "opencv-python-headless"?? --> cvtColo
 numpy==1.21.5 # Update to 1.22 when numba supports it
 numba==0.55.2
 rawpy==0.17.1
-imageio==2.19.3
+imageio==2.21.2
 pyfftw==0.13.0
 
 # TODO: Check if really needed (used for image alignment)
