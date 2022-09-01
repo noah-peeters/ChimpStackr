@@ -7,7 +7,6 @@ import os, tempfile
 
 import numpy as np
 from numba.typed import List
-import cv2
 
 import src.utilities as utilities
 

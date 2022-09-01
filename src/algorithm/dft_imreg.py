@@ -1,7 +1,6 @@
 import math
 import cv2
 import numpy as np
-import numba as nb
 import pyfftw.interfaces.numpy_fft as fft
 import scipy.ndimage as ndi
 import scipy.ndimage.interpolation as ndii
@@ -98,7 +97,7 @@ def _logpolar_filter(shape):
     xx = np.linspace(-np.pi / 2.0, np.pi / 2.0, shape[1])[np.newaxis, :]
     # Supressing low spatial frequencies is a must when using log-polar
     # transform. The scale stuff is poorly reflected with low freqs.
-    rads = np.sqrt(yy ** 2 + xx ** 2)
+    rads = np.sqrt(yy**2 + xx**2)
     filt = 1.0 - np.cos(rads) ** 2
     # vvv This doesn't really matter, very high freqs are not too usable anyway
     filt[np.abs(rads) > np.pi / 2] = 1
@@ -166,7 +165,7 @@ def _get_constraint_mask(shape, log_base, constraints=None):
         elif sigma is None:
             pass
         else:
-            mask *= np.exp(-(scales ** 2) / sigma ** 2)
+            mask *= np.exp(-(scales**2) / sigma**2)
 
     if "angle" in constraints:
         angle, sigma = constraints["angle"]
@@ -184,7 +183,7 @@ def _get_constraint_mask(shape, log_base, constraints=None):
         elif sigma is None:
             pass
         else:
-            mask *= np.exp(-(angles ** 2) / sigma ** 2)
+            mask *= np.exp(-(angles**2) / sigma**2)
 
     mask = fft.fftshift(mask)
     return mask
@@ -223,7 +222,7 @@ def _argmax_ext(array, exponent):
         col = np.arange(array.shape[0])[:, np.newaxis]
         row = np.arange(array.shape[1])[np.newaxis, :]
 
-        arr2 = array ** exponent
+        arr2 = array**exponent
         arrsum = arr2.sum()
         if arrsum == 0:
             # We have to return SOMETHING, so let's go for (0, 0)
@@ -476,7 +475,7 @@ def _get_ang_scale(ims, exponent="inf", constraints=None):
     angle = -np.pi * arg_ang / float(pcorr_shape[0])
     angle = np.rad2deg(angle)
     angle = wrap_angle(angle, 360)
-    scale = log_base ** arg_rad
+    scale = log_base**arg_rad
 
     angle = -angle
     scale = 1.0 / scale
@@ -625,7 +624,7 @@ def _get_odds(angle, target, stdev):
         ]
         odds0, odds1 = 0, 0
         if stdev > 0:
-            odds0, odds1 = [np.exp(-(diff ** 2) / stdev ** 2) for diff in diffs]
+            odds0, odds1 = [np.exp(-(diff**2) / stdev**2) for diff in diffs]
         if odds0 == 0 and odds1 > 0:
             # -1 is treated as infinity in _phase_correlation
             ret = -1
@@ -663,7 +662,7 @@ def argmax_translation(array, filter_pcorr, constraints=None):
             vals = np.zeros(dom.size)
             vals[idx] = 1.0
         else:
-            vals = np.exp(-((dom - pos) ** 2) / sigma ** 2)
+            vals = np.exp(-((dom - pos) ** 2) / sigma**2)
         if dim == 0:
             mask *= vals[:, np.newaxis]
         else:
@@ -958,7 +957,7 @@ class im_reg:
 
         return result.astype(np.uint8)
 
-    #TODO: Implement with option of selecting what method to use
+    # TODO: Implement with option of selecting what method to use
     # Register im1 to im0 for Rotation, Scale, Translation (RST)
     def register_image_RST(
         self,

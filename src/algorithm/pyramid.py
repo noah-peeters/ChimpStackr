@@ -32,7 +32,7 @@ def laplacian_pyramid(img, num_levels):
     for i in range(num_levels, 0, -1):
         size = (gaussian_pyr[i - 1].shape[1], gaussian_pyr[i - 1].shape[0])
         gaussian_expanded = cv2.pyrUp(gaussian_pyr[i], dstsize=size)
-        
+
         laplacian = np.subtract(gaussian_pyr[i - 1], gaussian_expanded)
         laplacian_pyr.append(laplacian)
     return laplacian_pyr
@@ -47,6 +47,6 @@ def reconstruct(laplacian_pyr):
         size = (laplacian_pyr[i + 1].shape[1], laplacian_pyr[i + 1].shape[0])
         laplacian_expanded = cv2.pyrUp(laplacian_top, dstsize=size)
         laplacian_top = cv2.add(laplacian_pyr[i + 1], laplacian_expanded)
-        
+
         laplacian_lst.append(laplacian_top)
     return laplacian_lst[num_levels]

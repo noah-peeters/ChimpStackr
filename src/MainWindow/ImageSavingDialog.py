@@ -83,7 +83,7 @@ class ResultDialog(qtw.QMessageBox):
             if errorStackTrace != None:
                 self.setInformativeText("Error stack trace:")
                 self.setDetailedText(str(errorStackTrace))
-                
+
         elif imgPath != None and errorStackTrace == None:
             # Success msg
             self.setStandardButtons(qtw.QMessageBox.Ok)
