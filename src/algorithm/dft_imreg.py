@@ -957,7 +957,7 @@ class im_reg:
 
         return result.astype(np.uint8)
 
-    # TODO: Implement with option of selecting what method to use
+    # TODO: Implement with option of selecting what method to use (not yet successfully implemented)
     # Register im1 to im0 for Rotation, Scale, Translation (RST)
     def register_image_RST(
         self,
