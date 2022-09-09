@@ -1,0 +1,58 @@
+"""
+Focus stacking algorithms on GPU accelerated with Numba's cuda.
+"""
+import numba.cuda as cuda
+
+
+### Internal functions ###
+
+# Device function that can be called from within a kernel
+# We are not able to pad an array on the gpu (np.zeros) like we use on the cpu,
+# so we calculate how many zero values would be added to pad the array.
+@cuda.jit(device=True)
+def get_deviation(matrix, kernel_size):
+    # compute zeros to add
+    y_shape = matrix.shape[0]
+    x_shape = matrix.shape[1]
+    num_elements = y_shape * matrix.shape[1]
+
+    y_pad = kernel_size - y_shape
+    x_pad = kernel_size - x_shape
+    zeros_to_add = y_pad * y_shape + x_pad * x_shape
+    # Total elements in padded matrix
+    total_elements = num_elements + zeros_to_add
+
+    # Get average value of matrix
+    average_value = 0
+    for y in range(y_shape):
+        for x in range(x_shape):
+            average_value += matrix[y, x]
+    average_value = average_value / total_elements
+
+    summed_deviation = float(0)
+    for y in range(y_shape):
+        for x in range(x_shape):
+            summed_deviation += (matrix[y, x] - average_value) ** 2 / total_elements
+    return summed_deviation
+
+
+### Exposed functions ###
+
+
+@cuda.jit
+def compute_focus_map(array1, array2, kernel_size, focusmap):
+    x, y = cuda.grid(2)
+    # If grid index is larger than image shape, do nothing
+    if x < array1.shape[0] and y < array1.shape[1]:
+        value_to_insert = 0
+
+        k = int(kernel_size / 2)
+        patch1 = array1[x - k : x + k, y - k : y + k]
+        patch2 = array2[x - k : x + k, y - k : y + k]
+
+        # Compare 2 (standard) deviations
+        if get_deviation(patch2, kernel_size) > get_deviation(patch1, kernel_size):
+            value_to_insert = 1
+
+        # Write most in-focus pixel to output
+        focusmap[x, y] = value_to_insert
