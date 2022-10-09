@@ -73,14 +73,16 @@ def main():
 
     icon = qtg.QIcon(icon_path)
     qApp.setWindowIcon(icon)
-    # window.setWindowIcon(icon)
 
     window.showMaximized()
     splash.finish(window)
 
-    qApp.exec()
-    # sys.exit(qApp.exec())
-    ROOT_TEMP_DIRECTORY.cleanup()
+    try:
+        qApp.exec()
+        sys.exit()
+    finally:
+        # Cleanup temporary diretory, even if an exception occured in the app
+        ROOT_TEMP_DIRECTORY.cleanup()
 
 
 if __name__ == "__main__":

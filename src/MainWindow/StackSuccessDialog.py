@@ -2,7 +2,6 @@
     Dialog displayed at end of stacking.
     Shows stats about the stack.
 """
-# TODO: Properly implement
 import PySide6.QtWidgets as qtw
 
 
