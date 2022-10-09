@@ -18,10 +18,9 @@ settings.init()
 settings.globalVars["RootTempDir"] = ROOT_TEMP_DIRECTORY
 
 
-# Taskbar icon fix for Windows 7
+# Taskbar icon fix for Windows
 # Src: https://stackoverflow.com/questions/1551605/how-to-set-applications-taskbar-icon-in-windows-7S
 if os.name == "nt":
-    print("Fix Windows taskbar icon")
     import ctypes
 
     myappid = "test.application"  # arbitrary string
@@ -42,6 +41,17 @@ class CustomSplashScreen(qtw.QSplashScreen):
         return
 
 
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+
 def main():
     qApp = qtw.QApplication([])
     # Needed for saving QSettings
@@ -49,7 +59,8 @@ def main():
     qApp.setOrganizationName("noah.peeters")
     settings.globalVars["MainApplication"] = qApp
 
-    icon_path = "snap/gui/icon.png"
+    # Get icon for Windows/Mac (PyInstaller) or source code run
+    icon_path = resource_path("snap/gui/icon.png")
     if not os.path.isfile(icon_path):
         # Path to icon inside snap package
         icon_path = "meta/gui/icon.png"
@@ -62,7 +73,7 @@ def main():
 
     icon = qtg.QIcon(icon_path)
     qApp.setWindowIcon(icon)
-    window.setWindowIcon(icon)
+    # window.setWindowIcon(icon)
 
     window.showMaximized()
     splash.finish(window)
