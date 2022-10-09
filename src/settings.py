@@ -1,5 +1,7 @@
 """
 Global variables shared between all scripts.
+Consts van be created be set by other scripts.
+Consts (obviously) shouldn't be changed after they have been set once. 
 """
 
 

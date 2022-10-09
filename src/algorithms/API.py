@@ -4,20 +4,20 @@
 import os, time
 
 import src.utilities as utilities
-import src.algorithm.pyramid as pyramid_algorithm
-import src.algorithm as algorithm
+import src.algorithms.pyramid as pyramid_algorithm
+import src.algorithms as algorithms
+import src.settings as settings
 
 
 class LaplacianPyramid:
-    def __init__(self, root_temp_directory, fusion_kernel_size=6, pyramid_num_levels=8):
+    def __init__(self, fusion_kernel_size=6, pyramid_num_levels=8):
         self.output_image = None
         self.image_paths = []
         # Archive names for Laplacian pyramids of src and aligned images
         self.laplacian_pyramid_archive_names = []
         self.laplacian_pyramid_archive_names_aligned = []
-        self.root_temp_directory = root_temp_directory
 
-        self.Algorithm = algorithm.Algorithm()
+        self.Algorithm = algorithms.Algorithm()
 
         # Parameters
         self.fusion_kernel_size_pixels = fusion_kernel_size
@@ -49,21 +49,20 @@ class LaplacianPyramid:
         # TODO: Allow option to align image stack to start, end, middle or previous images
         # ref_index=round(len(self.image_paths)/2)
         aligned_images_tmp_paths = []
+        # TODO: Place every sub-step inside this loop and change emitted signal to "finished_image"
         for i, path in enumerate(self.image_paths):
             print("Aligning: " + path)
             start_time = time.time()
             if i == 0:
                 # Will just return the image (no alignment)
                 aligned_images_tmp_paths.append(
-                    self.Algorithm.align_image_pair(
-                        path, path, self.root_temp_directory
-                    )
+                    self.Algorithm.align_image_pair(path, path)
                 )
             else:
                 # Use previous *aligned* image instead of src image!
                 aligned_images_tmp_paths.append(
                     self.Algorithm.align_image_pair(
-                        aligned_images_tmp_paths[i - 1], path, self.root_temp_directory
+                        aligned_images_tmp_paths[i - 1], path
                     )
                 )
             # Send progress signal
@@ -76,15 +75,16 @@ class LaplacianPyramid:
                 ]
             )
 
+        # Generate laplacian pyramids for every aligned image
         self.laplacian_pyramid_archive_names_aligned = (
             self.Algorithm.generate_laplacian_pyramids(
                 aligned_images_tmp_paths,
-                self.root_temp_directory,
                 self.pyramid_num_levels,
                 signals,
             )
         )
 
+        # Stack aligned image pyramids
         stacked_pyramid = self.Algorithm.focus_fuse_pyramids(
             self.laplacian_pyramid_archive_names_aligned,
             self.fusion_kernel_size_pixels,
@@ -103,7 +103,7 @@ class LaplacianPyramid:
             self.laplacian_pyramid_archive_names = (
                 self.Algorithm.generate_laplacian_pyramids(
                     self.image_paths,
-                    self.root_temp_directory,
+                    settings.globalVars["RootTempDir"],
                     self.pyramid_num_levels,
                     signals,
                 )

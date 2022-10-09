@@ -17,7 +17,7 @@ import src.MainWindow.TimeRemainingHandler as TimeRemainingHandler
 import src.MainWindow.ImageSavingDialog as ImageSavingDialog
 import src.MainWindow.SettingsWidget as SettingsWidget
 
-import src.algorithm.API as algorithm_API
+import src.algorithms.API as algorithm_API
 
 # TODO: Make UI more expressive after long operation finished. Show success/error messages
 
@@ -64,9 +64,7 @@ class Window(qtw.QMainWindow):
 
         # Setup algorithm API
         # TODO: Allow user to change program settings
-        self.LaplacianAlgorithm = algorithm_API.LaplacianPyramid(
-            settings.globalVars["RootTempDir"], 6, 8
-        )
+        self.LaplacianAlgorithm = algorithm_API.LaplacianPyramid(6, 8)
         self.TimeRemainingHandler = TimeRemainingHandler.TimeRemainingHandler()
 
         # Threadpool for multi-threading (prevent UI freezing)

@@ -1,5 +1,5 @@
 """
-    Main pyramid stacking algorithm(s) + image alignment algorithm.
+    Main pyramid stacking + image alignment algorithm(s).
 """
 import os, tempfile, time
 import cv2
@@ -7,10 +7,11 @@ import numpy as np
 import numba as nb
 from numba.typed import List
 
-import src.algorithm.image_storage as image_storage
-import src.algorithm.dft_imreg as dft_imreg
-import src.algorithm.pyramid as pyramid_algorithm
+import src.algorithms.image_storage as image_storage
+import src.algorithms.dft_imreg as dft_imreg
+import src.algorithms.pyramid as pyramid_algorithm
 import src.ImageLoadingHandler as ImageLoadingHandler
+import src.settings as settings
 
 
 # Pad an array to be the kernel size (square). Only if needed
@@ -122,7 +123,7 @@ class Algorithm:
         self.DFT_Imreg = dft_imreg.im_reg()
 
     # Fast Fourier Transform (FFT) image translational registration ((x, y)-shift only!)
-    def align_image_pair(self, ref_im_path, im2_path, root_temp_dir):
+    def align_image_pair(self, ref_im_path, im2_path):
         # Load images
         im0 = self.ImageLoadingHandler.read_image_from_path(ref_im_path)
         im1 = self.ImageLoadingHandler.read_image_from_path(im2_path)
@@ -135,14 +136,17 @@ class Algorithm:
             )
 
         # Write aligned img to disk
-        file_handle, tmp_file = tempfile.mkstemp(".npy", None, root_temp_dir.name)
+        file_handle, tmp_file = tempfile.mkstemp(
+            ".npy", None, settings.globalVars["RootTempDir"].name
+        )
         np.save(tmp_file, output_image, allow_pickle=False)
 
         os.close(file_handle)
         return tmp_file
 
+    # TODO: Remove in favor of "generate_laplacian_pyramid_pair"
     # Generate laplacian pyramids for every image (if not already created) and write to disk archive
-    def generate_laplacian_pyramids(self, image_paths, root_dir, num_levels, signals):
+    def generate_laplacian_pyramids(self, image_paths, num_levels, signals):
         laplacian_pyramid_archive_names = []
         for i, path in enumerate(image_paths):
             start_time = time.time()
@@ -153,7 +157,7 @@ class Algorithm:
             pyramid = pyramid_algorithm.laplacian_pyramid(image, num_levels)
 
             tmp_file = self.ImageStorage.write_laplacian_pyramid_to_disk(
-                pyramid, root_dir
+                pyramid, settings.globalVars["RootTempDir"]
             )
             laplacian_pyramid_archive_names.append(tmp_file)
             del pyramid
@@ -170,7 +174,9 @@ class Algorithm:
 
         return laplacian_pyramid_archive_names
 
-    # Fuse all images from their Laplacian pyramids
+    # def generate_laplacian_pyramid_pair(self, im1_path, im2_path)
+
+    # Fuse all sub-images of an image's Laplacian pyramid
     def focus_fuse_pyramids(self, image_archive_names, kernel_size, signals):
         output_pyramid = List()
         for i, archive_name in enumerate(image_archive_names):
