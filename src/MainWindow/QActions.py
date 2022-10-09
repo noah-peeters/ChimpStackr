@@ -81,7 +81,7 @@ def setup_actions():
     exit = qtg.QAction("&Exit", mainWindow)
     exit.setShortcut(qtg.QKeySequence("Ctrl+W"))
     exit.setStatusTip("Exit from application. You might lose unsaved work!")
-    exit.triggered.connect(mainWindow.shutdown_application)
+    exit.triggered.connect(mainWindow.close)
     file_menu.addAction(exit)
 
     """ Processing menu/toolbar """

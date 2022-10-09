@@ -191,12 +191,6 @@ class Window(qtw.QMainWindow):
                 self.LaplacianAlgorithm.update_image_paths(validPaths)
                 settings.globalVars["LoadedImagePaths"] = validPaths
 
-    # Shutdown all currently running processes, cleanup and close window
-    # TODO: Shutdown currently running processes
-    def shutdown_application(self):
-        self.close()
-        sys.exit()  # TODO: Check if running processes are stopped
-
     # Save project file to disk
     def save_project_to_file(self):
         self.statusBar().showMessage(
@@ -314,5 +308,7 @@ class Window(qtw.QMainWindow):
         if reply == qtw.QMessageBox.Yes:
             # TODO: Tell possibly running tasks to quit
             event.accept()
+            # Close other windows
+            settings.globalVars["MainApplication"].closeAllWindows()
         else:
             event.ignore()

@@ -57,6 +57,8 @@ def main():
     # Needed for saving QSettings
     qApp.setApplicationName("ChimpStackr")
     qApp.setOrganizationName("noah.peeters")
+    # Uses names of QApplication (above)
+    settings.globalVars["QSettings"] = qtc.QSettings()
     settings.globalVars["MainApplication"] = qApp
 
     # Get icon for Windows/Mac (PyInstaller) or source code run
