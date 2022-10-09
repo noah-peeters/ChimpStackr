@@ -1,10 +1,8 @@
 """
     Main pyramid stacking + image alignment algorithm(s).
 """
-import time
 import cv2
 
-import src.algorithms.image_storage as image_storage
 import src.algorithms.dft_imreg as dft_imreg
 import src.algorithms.pyramid as pyramid_algorithm
 import src.ImageLoadingHandler as ImageLoadingHandler
