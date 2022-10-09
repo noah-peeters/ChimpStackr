@@ -230,23 +230,17 @@ class Window(qtw.QMainWindow):
 
         def finished_inter_task(result_list):
             task_key, num_processed, num_to_process_total, time_taken = result_list
-            percentage_finished = num_processed / num_to_process_total * 100
-
-            # Compute and set new progressbar value
-            new_progressbar_value = (
-                self.TimeRemainingHandler.calculate_progressbar_value(
-                    task_key, percentage_finished
+            if task_key == "finished_image":
+                # Update progressbar slider and "time remaining" text
+                percentage_finished = num_processed / num_to_process_total * 100
+                self.progress_widget.update_value(
+                    percentage_finished,
+                    self.TimeRemainingHandler.calculate_time_remaining(
+                        1 / num_to_process_total * 100,
+                        100 - percentage_finished,
+                        time_taken,
+                    ),
                 )
-            )
-            self.progress_widget.update_value(
-                new_progressbar_value,
-                self.TimeRemainingHandler.calculate_time_remaining(
-                    task_key,
-                    1 / num_to_process_total * 100,
-                    100 - percentage_finished,
-                    time_taken,
-                ),
-            )
 
         worker = QThreading.Worker(self.LaplacianAlgorithm.align_and_stack_images)
         worker.signals.finished.connect(self.finished_stack)
@@ -273,23 +267,17 @@ class Window(qtw.QMainWindow):
 
         def finished_inter_task(result_list):
             task_key, num_processed, num_to_process_total, time_taken = result_list
-            percentage_finished = num_processed / num_to_process_total * 100
-
-            # Compute and set new progressbar value
-            new_progressbar_value = (
-                self.TimeRemainingHandler.calculate_progressbar_value(
-                    task_key, percentage_finished
+            if task_key == "finished_image":
+                # Update progressbar slider and "time remaining" text
+                percentage_finished = num_processed / num_to_process_total * 100
+                self.progress_widget.update_value(
+                    percentage_finished,
+                    self.TimeRemainingHandler.calculate_time_remaining(
+                        1 / num_to_process_total * 100,
+                        100 - percentage_finished,
+                        time_taken,
+                    ),
                 )
-            )
-            self.progress_widget.update_value(
-                new_progressbar_value,
-                self.TimeRemainingHandler.calculate_time_remaining(
-                    task_key,
-                    1 / num_to_process_total * 100,
-                    100 - percentage_finished,
-                    time_taken,
-                ),
-            )
 
         worker = QThreading.Worker(self.LaplacianAlgorithm.stack_images)
         worker.signals.finished.connect(self.finished_stack)

@@ -18,7 +18,6 @@ import src.settings as settings
 class CenterWidget(qtw.QWidget):
     def __init__(self):
         super().__init__()
-        self.root_temp_directory = settings.globalVars["RootTempDir"]
         self.ImageWidgets = ImageWidgets.ImageWidgets()
         self.ImageViewer = ImageViewers.ImageViewer()
         self.RetouchingViewer = ImageViewers.ImageRetouchingWidget()
@@ -118,9 +117,8 @@ class CenterWidget(qtw.QWidget):
         else:
             self.ImageWidgets.processed_images_widget.setVisible(True)
             # Add image to list & store data file
-            # TODO: Why is tempfile stored in this folder??
             file_handle, tmp_file = tempfile.mkstemp(
-                suffix=".jpg", dir=self.root_temp_directory.name
+                suffix=".jpg", dir=settings.globalVars["RootTempDir"].name
             )
             item = qtw.QListWidgetItem()
             item.setText(datetime.today().strftime("%Y%m%d") + "_LaplacianStacked")

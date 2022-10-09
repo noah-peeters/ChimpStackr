@@ -43,78 +43,99 @@ class LaplacianPyramid:
 
         self.image_paths = new_image_paths
 
-    # Align and stack images
+    # TODO: Rewrite for easy stopping of task (using signals??)
     def align_and_stack_images(self, signals):
+        """
+        Align and stack images.
+        """
         # Align images to reference
         # TODO: Allow option to align image stack to start, end, middle or previous images
         # ref_index=round(len(self.image_paths)/2)
-        aligned_images_tmp_paths = []
-        # TODO: Place every sub-step inside this loop and change emitted signal to "finished_image"
+
+        # Will copy first image (ndarray) in this list without alignment
+        aligned_images = [
+            self.Algorithm.align_image_pair(self.image_paths[0], self.image_paths[0])
+        ]
+        fused_pyr = self.Algorithm.generate_laplacian_pyramid(
+            aligned_images[0], self.pyramid_num_levels
+        )
+
         for i, path in enumerate(self.image_paths):
-            print("Aligning: " + path)
-            start_time = time.time()
             if i == 0:
-                # Will just return the image (no alignment)
-                aligned_images_tmp_paths.append(
-                    self.Algorithm.align_image_pair(path, path)
-                )
-            else:
-                # Use previous *aligned* image instead of src image!
-                aligned_images_tmp_paths.append(
-                    self.Algorithm.align_image_pair(
-                        aligned_images_tmp_paths[i - 1], path
-                    )
-                )
+                continue  # First image is already copied in list
+
+            start_time = time.time()
+            # Use previous *aligned* image instead of src image!
+            aligned_images.append(
+                self.Algorithm.align_image_pair(aligned_images[0], path)
+            )
+
+            # Generate pyramid for the (aligned) image
+            new_pyr = self.Algorithm.generate_laplacian_pyramid(
+                aligned_images[1], self.pyramid_num_levels
+            )
+            # Remove first aligned image array from list (lower memory usage)
+            del aligned_images[0]
+            # Fuse this new pyramid with the existing one
+            fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
+                fused_pyr, new_pyr, self.fusion_kernel_size_pixels
+            )
+
             # Send progress signal
             signals.finished_inter_task.emit(
                 [
-                    "align_images",
+                    "finished_image",
                     i + 1,
                     len(self.image_paths),
                     time.time() - start_time,
                 ]
             )
 
-        # Generate laplacian pyramids for every aligned image
-        self.laplacian_pyramid_archive_names_aligned = (
-            self.Algorithm.generate_laplacian_pyramids(
-                aligned_images_tmp_paths,
-                self.pyramid_num_levels,
-                signals,
-            )
-        )
-
-        # Stack aligned image pyramids
-        stacked_pyramid = self.Algorithm.focus_fuse_pyramids(
-            self.laplacian_pyramid_archive_names_aligned,
-            self.fusion_kernel_size_pixels,
-            signals,
-        )
-
         # Reconstruct image from Laplacian pyramid
-        fused_image = pyramid_algorithm.reconstruct(stacked_pyramid)
+        fused_image = pyramid_algorithm.reconstruct(fused_pyr)
         self.output_image = fused_image
 
     # TODO: Rewrite for easy stopping of task (using signals??)
-    # Stack loaded images ( +create laplacian pyramids if not already created)
     def stack_images(self, signals):
-        if len(self.laplacian_pyramid_archive_names) <= 0:
-            # Compute Laplacian pyramids of src images
-            self.laplacian_pyramid_archive_names = (
-                self.Algorithm.generate_laplacian_pyramids(
-                    self.image_paths,
-                    settings.globalVars["RootTempDir"],
-                    self.pyramid_num_levels,
-                    signals,
-                )
-            )
-
-        stacked_pyramid = self.Algorithm.focus_fuse_pyramids(
-            self.laplacian_pyramid_archive_names,
-            self.fusion_kernel_size_pixels,
-            signals,
+        """
+        Stack images.
+        """
+        # Will just load first image from path
+        im0 = self.Algorithm.align_image_pair(self.image_paths[0], self.image_paths[0])
+        fused_pyr = self.Algorithm.generate_laplacian_pyramid(
+            im0,
+            self.pyramid_num_levels,
         )
 
+        for i, path in enumerate(self.image_paths):
+            if i == 0:
+                continue  # First image is already copied in pyr
+
+            start_time = time.time()
+
+            # Load from path
+            im1 = self.Algorithm.align_image_pair(path, path)
+            # Generate pyramid for the image
+            new_pyr = self.Algorithm.generate_laplacian_pyramid(
+                im1, self.pyramid_num_levels
+            )
+            # Delete image (lower memory usage)
+            del im1
+            # Fuse this new pyramid with the existing one
+            fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
+                fused_pyr, new_pyr, self.fusion_kernel_size_pixels
+            )
+
+            # Send progress signal
+            signals.finished_inter_task.emit(
+                [
+                    "finished_image",
+                    i + 1,
+                    len(self.image_paths),
+                    time.time() - start_time,
+                ]
+            )
+
         # Reconstruct image from Laplacian pyramid
-        fused_image = pyramid_algorithm.reconstruct(stacked_pyramid)
+        fused_image = pyramid_algorithm.reconstruct(fused_pyr)
         self.output_image = fused_image

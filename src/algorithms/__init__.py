@@ -122,59 +122,40 @@ class Algorithm:
         self.ImageLoadingHandler = ImageLoadingHandler.ImageLoadingHandler()
         self.DFT_Imreg = dft_imreg.im_reg()
 
-    # Fast Fourier Transform (FFT) image translational registration ((x, y)-shift only!)
-    def align_image_pair(self, ref_im_path, im2_path):
-        # Load images
-        im0 = self.ImageLoadingHandler.read_image_from_path(ref_im_path)
-        im1 = self.ImageLoadingHandler.read_image_from_path(im2_path)
-        if ref_im_path == im2_path:
-            output_image = im0  # Don't align if given 2 identical images
-        else:
-            # Calculate translational shift
-            output_image = self.DFT_Imreg.register_image_translation(
-                im0, im1, scale_factor=10
-            )
+    def align_image_pair(self, ref_im, im_to_align):
+        """
+        Fast Fourier Transform (FFT) image translational registration ((x, y)-shift only!)
+        'ref_im' and 'im_to_align' can be an image array (np.ndarray), or an image path (str).
+        In the latter case, the images will be loaded into memory first.
 
-        # Write aligned img to disk
-        file_handle, tmp_file = tempfile.mkstemp(
-            ".npy", None, settings.globalVars["RootTempDir"].name
+        When both images are of type 'str', and they are the same,
+        'im_to_align' will be loaded into memory and be returned without alignment.
+        """
+        if type(ref_im) == str and type(im_to_align) == str:
+            return self.ImageLoadingHandler.read_image_from_path(im_to_align)
+
+        if type(ref_im) == str:
+            ref_im = self.ImageLoadingHandler.read_image_from_path(ref_im)
+        if type(im_to_align) == str:
+            im_to_align = self.ImageLoadingHandler.read_image_from_path(im_to_align)
+
+        # Calculate translational shift
+        # TODO: Allow adjusting "scale_factor"??
+        return self.DFT_Imreg.register_image_translation(
+            ref_im, im_to_align, scale_factor=10
         )
-        np.save(tmp_file, output_image, allow_pickle=False)
 
-        os.close(file_handle)
-        return tmp_file
+    def generate_laplacian_pyramid(self, im1, num_levels):
+        """
+        Generates a laplacian pyramid for each image.
+        'im1' can be an image array (np.ndarray), or an image path (str).
+        In the latter case, the image will be loaded into memory first.
+        """
+        if type(im1) == str:
+            im1 = self.ImageLoadingHandler.read_image_from_path(im1)
 
-    # TODO: Remove in favor of "generate_laplacian_pyramid_pair"
-    # Generate laplacian pyramids for every image (if not already created) and write to disk archive
-    def generate_laplacian_pyramids(self, image_paths, num_levels, signals):
-        laplacian_pyramid_archive_names = []
-        for i, path in enumerate(image_paths):
-            start_time = time.time()
-
-            # Load from src image
-            image = self.ImageLoadingHandler.read_image_from_path(path)
-
-            pyramid = pyramid_algorithm.laplacian_pyramid(image, num_levels)
-
-            tmp_file = self.ImageStorage.write_laplacian_pyramid_to_disk(
-                pyramid, settings.globalVars["RootTempDir"]
-            )
-            laplacian_pyramid_archive_names.append(tmp_file)
-            del pyramid
-
-            # Send progress signal
-            signals.finished_inter_task.emit(
-                [
-                    "laplacian_pyramid_generation",
-                    i + 1,
-                    len(image_paths),
-                    time.time() - start_time,
-                ]
-            )
-
-        return laplacian_pyramid_archive_names
-
-    # def generate_laplacian_pyramid_pair(self, im1_path, im2_path)
+        pyr1 = pyramid_algorithm.laplacian_pyramid(im1, num_levels)
+        return pyr1
 
     # Fuse all sub-images of an image's Laplacian pyramid
     def focus_fuse_pyramids(self, image_archive_names, kernel_size, signals):
@@ -241,3 +222,41 @@ class Algorithm:
             )
 
         return output_pyramid
+
+    def focus_fuse_pyramid_pair(self, pyr1, pyr2, kernel_size):
+        """
+        Fuse 2 image pyramids into one.
+        Each pyramid level will be compared between the two pyramids,
+        and the sharpest pixels/parts of each image will be placed in the output pyramid.
+        """
+        # Upscale last/largest focusmap (faster than computation)
+        threshold_index = len(pyr2) - 1
+        # TODO: Check if Numba's 'List()' is needed? Use regular Python list instead?
+        new_pyr = List()
+        current_focusmap = None
+        # Loop through pyramid levels from smallest to largest shape, and fuse each level
+        for pyramid_level in range(len(pyr2)):
+            # Calculate what parts are more/less in focus between the pyramids
+            if pyramid_level < threshold_index:
+                # Regular computation (slow; accurate)
+                current_focusmap = compute_focusmap(
+                    cv2.cvtColor(pyr1[pyramid_level], cv2.COLOR_BGR2GRAY),
+                    cv2.cvtColor(pyr2[pyramid_level], cv2.COLOR_BGR2GRAY),
+                    kernel_size,
+                )
+            else:
+                # TODO: See if upscale really provides any benefit
+                # Upscale previous mask (faster; less accurate)
+                s = pyr2[pyramid_level].shape
+                current_focusmap = cv2.resize(
+                    current_focusmap, (s[1], s[0]), interpolation=cv2.INTER_AREA
+                )
+
+            # Write output pyramid level using the calculated focusmap
+            new_pyr_level = fuse_pyramid_levels_using_focusmap(
+                pyr1[pyramid_level],
+                pyr2[pyramid_level],
+                current_focusmap,
+            )
+            new_pyr.append(new_pyr_level)
+        return new_pyr

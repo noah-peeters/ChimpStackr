@@ -8,6 +8,8 @@ import PySide6.QtWidgets as qtw
 
 
 class ProgressBar(qtw.QWidget):
+    anim_duration = 500  # In ms
+
     def __init__(self):
         super().__init__()
 
@@ -28,8 +30,24 @@ class ProgressBar(qtw.QWidget):
 
     # Update progressbar value and/or label text
     def update_value(self, value=None, text=None):
+        """
+        Update progressbar value and/or label text.
+        Will smoothly animate progressbar slider.
+
+        If both values are none (default), this widget will be hidden.
+        """
         if value:
-            self.progressbar.setValue(value)
+            # Smoothly animate progressbar movement
+            if hasattr(self, "animation"):
+                self.animation.stop()
+            else:
+                self.animation = qtc.QPropertyAnimation(
+                    targetObject=self.progressbar, propertyName=b"value"
+                )
+                self.animation.setDuration(self.anim_duration)
+                self.animation.setEasingCurve(qtc.QEasingCurve.OutQuad)
+            self.animation.setEndValue(value)
+            self.animation.start()
         if text:
             self.progress_label.setText(text)
 

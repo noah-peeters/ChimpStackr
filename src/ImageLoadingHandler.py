@@ -18,8 +18,10 @@ class ImageLoadingHandler:
         return
 
     # TODO: Display error on image failed to load (image might have moved location)
-    # Load src image to BGR 2D numpy array
     def read_image_from_path(self, path):
+        """
+        Load src image from path to BGR 2D numpy array.
+        """
         # Get extension without dot at beginning
         _, extension = os.path.splitext(path)
         extension = extension[1:]
@@ -66,8 +68,8 @@ class ImageLoadingHandler:
             # Load data from ".npy" format
             return np.load(path, allow_pickle=False)
 
-    # Get RAW image view from path (uses copy() to allow usage after closing raw file)
     def get_raw_view(self, path):
+        """Get RAW image view from path (uses copy() to allow usage after closing raw file)"""
         raw = rawpy.imread(path)
         image = raw.raw_image_visible.copy()
         raw.close()
