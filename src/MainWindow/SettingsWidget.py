@@ -77,6 +77,7 @@ class UserInterfaceWidget(qtw.QWidget):
 
 
 class ComputingWidget(qtw.QWidget):
+    # TODO: Test if behaving correctly on pc with no CUDA GPU, and with multiple GPUs
     def __init__(self, settings_widget):
         super().__init__()
         self.settings_widget = settings_widget
@@ -91,7 +92,7 @@ class ComputingWidget(qtw.QWidget):
                 name = name[2 : len(name) - 1]
                 available_gpus_dict[f"{name}, CC: {cc[0]}.{cc[1]}"] = device.id
 
-        layout = qtw.QVBoxLayout()
+        layout = qtw.QHBoxLayout()
 
         # QGroupBox
         self.use_gpu_groupbox = qtw.QGroupBox("Use CUDA GPU")
@@ -101,7 +102,6 @@ class ComputingWidget(qtw.QWidget):
         self.use_gpu_groupbox.setEnabled(cuda.is_available())
         self.use_gpu_groupbox.setCheckable(cuda.is_available())
 
-        # TODO: Remember chosen GPU's ID (+ check if still a valid id?!)
         self.selectable_gpus_combobox = qtw.QComboBox()
         self.selectable_gpus_combobox.addItems(available_gpus_dict)
         sub_layout.addWidget(self.selectable_gpus_combobox)
@@ -114,24 +114,45 @@ class ComputingWidget(qtw.QWidget):
 
         # First set
         self.update_gpu_group_box()
+        self.update_selected_gpu()
+        # Update on changed
         self.use_gpu_groupbox.toggled.connect(self.update_gpu_group_box)
+        self.selectable_gpus_combobox.currentIndexChanged.connect(
+            self.update_selected_gpu
+        )
 
-    def update_gpu_group_box(self, new_value=None):
+    def update_gpu_group_box(self, new_bool=None):
         """
         Toggle usage of GPU.
         Will only be available if "cuda.is_available()" returns True.
         When no new value is passed, the widget will be updated to the last saved value in QSettings.
         """
-        if new_value != None:
+        if new_bool != None:
             # Save new value to QSettings
-            self.settings_widget.change_setting("computing/use_gpu", new_value)
+            self.settings_widget.change_setting("computing/use_gpu", int(new_bool))
         else:
             # Only update visuals
-            # QSettings file saves bools as strings
-            bool_value = (
-                settings.globalVars["QSettings"].value("computing/use_gpu") == "true"
+            self.use_gpu_groupbox.setChecked(
+                bool(settings.globalVars["QSettings"].value("computing/use_gpu"))
             )
-            self.use_gpu_groupbox.setChecked(bool_value)
+
+    def update_selected_gpu(self, new_id=None):
+        """
+        Toggle the currently chosen GPU's index.
+        Will check if the new index is still valid,
+        as the available GPU's might have changed.
+        """
+        if new_id == None:
+            new_id = settings.globalVars["QSettings"].value("computing/selected_gpu_id")
+
+        # Check if saved id is valid, reset to 0 otherwise
+        if new_id < self.selectable_gpus_combobox.count() - 1:
+            new_id = 0
+
+        # Save new id to QSettings
+        self.settings_widget.change_setting("computing/selected_gpu_id", new_id)
+        # Update visuals
+        self.selectable_gpus_combobox.setCurrentIndex(new_id)
 
 
 class SettingsWidget(qtw.QTabWidget):
@@ -140,8 +161,8 @@ class SettingsWidget(qtw.QTabWidget):
             "theme": 2,
         },
         "computing": {
-            "use_gpu": False,
-            "gpu_id": 0,
+            "use_gpu": 0,  # Bool: 0 is False; 1 is True
+            "selected_gpu_id": 0,
         },
     }
     setting_updated = qtc.Signal(tuple)
