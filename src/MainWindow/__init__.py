@@ -2,7 +2,7 @@
     Script that houses the MainWindow class.
     It is the "root display".
 """
-import os, sys
+import os
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 
@@ -288,9 +288,6 @@ class Window(qtw.QMainWindow):
         # Reset progressbar and add selectable stack result image
         self.progress_widget.update_value()
         self.centralWidget().add_processed_image(self.LaplacianAlgorithm.output_image)
-
-        # Clear TimeRemaining cache
-        self.TimeRemainingHandler.clear_cache()
 
     """
         Overridden signals

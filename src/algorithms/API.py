@@ -1,7 +1,7 @@
 """
     Exposed API for easily aligning/stacking multiple images.
 """
-import os, time
+import time
 
 import src.utilities as utilities
 import src.algorithms.pyramid as pyramid_algorithm
@@ -13,41 +13,36 @@ class LaplacianPyramid:
     def __init__(self, fusion_kernel_size=6, pyramid_num_levels=8):
         self.output_image = None
         self.image_paths = []
-        # Archive names for Laplacian pyramids of src and aligned images
-        self.laplacian_pyramid_archive_names = []
-        self.laplacian_pyramid_archive_names_aligned = []
 
         self.Algorithm = algorithms.Algorithm()
 
         # Parameters
-        self.fusion_kernel_size_pixels = fusion_kernel_size
+        self.fusion_kernel_size = fusion_kernel_size
         self.pyramid_num_levels = pyramid_num_levels
 
-    # Set new image paths and sort them
+    def toggle_cpu_gpu(self):
+        """
+        Use saved settings to toggle if GPU is used for some parts of the algorithm.
+        This function will be called every time the algorithm starts (before start),
+        so prevent changes mid-way are not possible.
+        """
+        self.Algorithm.toggle_cpu_gpu(
+            bool(settings.globalVars["QSettings"].value("computing/use_gpu")),
+            int(settings.globalVars["QSettings"].value("computing/selected_gpu_id")),
+        )
+
     def update_image_paths(self, new_image_paths):
-        new_image_paths = sorted(new_image_paths, key=utilities.int_string_sorting)
-        if new_image_paths != self.image_paths:
-            # Delete tempfiles
-            for path in (
-                self.laplacian_pyramid_archive_names
-                + self.laplacian_pyramid_archive_names_aligned
-            ):
-                try:
-                    os.remove(path)
-                except:
-                    print("Unable to remove tempfile")
-
-            # Reset loaded Laplacian lists
-            self.laplacian_pyramid_archive_names = []
-            self.laplacian_pyramid_archive_names_aligned = []
-
-        self.image_paths = new_image_paths
+        """
+        Set new image paths (sorted by name).
+        """
+        self.image_paths = sorted(new_image_paths, key=utilities.int_string_sorting)
 
     # TODO: Rewrite for easy stopping of task (using signals??)
     def align_and_stack_images(self, signals):
         """
         Align and stack images.
         """
+        self.toggle_cpu_gpu()
         # Align images to reference
         # TODO: Allow option to align image stack to start, end, middle or previous images
         # ref_index=round(len(self.image_paths)/2)
@@ -78,7 +73,7 @@ class LaplacianPyramid:
             del aligned_images[0]
             # Fuse this new pyramid with the existing one
             fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
-                fused_pyr, new_pyr, self.fusion_kernel_size_pixels
+                fused_pyr, new_pyr, self.fusion_kernel_size
             )
 
             # Send progress signal
@@ -100,6 +95,7 @@ class LaplacianPyramid:
         """
         Stack images.
         """
+        self.toggle_cpu_gpu()
         # Will just load first image from path
         im0 = self.Algorithm.align_image_pair(self.image_paths[0], self.image_paths[0])
         fused_pyr = self.Algorithm.generate_laplacian_pyramid(
@@ -123,7 +119,7 @@ class LaplacianPyramid:
             del im1
             # Fuse this new pyramid with the existing one
             fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
-                fused_pyr, new_pyr, self.fusion_kernel_size_pixels
+                fused_pyr, new_pyr, self.fusion_kernel_size
             )
 
             # Send progress signal

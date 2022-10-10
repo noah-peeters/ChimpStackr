@@ -2,6 +2,7 @@
     Main pyramid stacking + image alignment algorithm(s).
 """
 import cv2
+import numba.cuda as cuda
 
 import src.algorithms.dft_imreg as dft_imreg
 import src.algorithms.pyramid as pyramid_algorithm
@@ -15,6 +16,14 @@ class Algorithm:
     def __init__(self):
         self.ImageLoadingHandler = ImageLoadingHandler.ImageLoadingHandler()
         self.DFT_Imreg = dft_imreg.im_reg()
+        self.selectedAlgo = CPU_Algos
+
+    def toggle_cpu_gpu(self, use_gpu, selected_gpu_id):
+        if use_gpu:
+            cuda.select_device(selected_gpu_id)
+            self.selectedAlgo = GPU_Algos
+        else:
+            self.selectedAlgo = CPU_Algos
 
     def align_image_pair(self, ref_im, im_to_align):
         """
@@ -57,21 +66,21 @@ class Algorithm:
         and the sharpest pixels/parts of each image will be placed in the output pyramid.
         """
         # Upscale last/largest focusmap (faster than computation)
-        threshold_index = len(pyr2) - 1
+        threshold_index = len(pyr1) - 1
         new_pyr = []
         current_focusmap = None
         # Loop through pyramid levels from smallest to largest shape, and fuse each level
-        for pyramid_level in range(len(pyr2)):
+        for pyramid_level in range(len(pyr1)):
             # Calculate what parts are more/less in focus between the pyramids
             if pyramid_level < threshold_index:
                 # Regular computation (slow; accurate)
-                current_focusmap = CPU_Algos.compute_focusmap(
+                current_focusmap = self.selectedAlgo.compute_focusmap(
                     cv2.cvtColor(pyr1[pyramid_level], cv2.COLOR_BGR2GRAY),
                     cv2.cvtColor(pyr2[pyramid_level], cv2.COLOR_BGR2GRAY),
                     kernel_size,
                 )
             else:
-                # TODO: See if upscale really provides any benefit
+                # TODO: See if upscale really provides a speed improvement
                 # Upscale previous mask (faster; less accurate)
                 s = pyr2[pyramid_level].shape
                 current_focusmap = cv2.resize(

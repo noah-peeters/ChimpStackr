@@ -2,10 +2,16 @@
 Focus stacking algorithms on GPU accelerated with Numba's cuda.
 ~100x speedup --from 5s execution time to 0.5s-- when using (6000x4000) arrays/images
 on my hardware (intel i5-11400H, nvidia rtx 3060) when CPU runtime is compared to GPU runtime.
+
+Arrays with relatively low amount of elements will be calculated on the CPU,
+as they aren't worth the copy overhead to/from the GPU.
 """
 import math
 import numpy as np
 import numba.cuda as cuda
+
+import src.algorithms.stacking_algorithms.shared as Shared_Algos
+import src.algorithms.stacking_algorithms.cpu as CPU_Algos
 
 
 ### Internal functions ###
@@ -13,7 +19,7 @@ import numba.cuda as cuda
 # Device function that can be called from within a kernel
 # We are not able to pad an array on the gpu (np.zeros) like we use on the cpu,
 # so we calculate how many zero values would be added to pad the array instead.
-@cuda.jit(device=True)
+@cuda.jit(device=True, fastmath=True)
 def get_deviation(matrix, kernel_size):
     # compute zeros to add
     y_shape = matrix.shape[0]
@@ -40,8 +46,8 @@ def get_deviation(matrix, kernel_size):
     return summed_deviation
 
 
-@cuda.jit
-def compute_focus_map(array1, array2, kernel_size, focusmap):
+@cuda.jit(fastmath=True)
+def compute_focusmap_gpu(array1, array2, kernel_size, focusmap):
     x, y = cuda.grid(2)
     # If grid index is larger than image shape, do nothing
     if x < array1.shape[0] and y < array1.shape[1]:
@@ -61,9 +67,12 @@ def compute_focus_map(array1, array2, kernel_size, focusmap):
 
 ### Exposed functions ###
 
-
-def compute_focus_map_gpu(array1, array2, kernel_size):
-    """Move arrays to device and call actual function next."""
+# TODO: Properly analyze if a further speedup could be achieved on the GPU
+def compute_focusmap(array1, array2, kernel_size):
+    """
+    Move arrays to device and call actual function next.
+    Will not wait for result to be ready. (which is what we want)
+    """
     array1 = cuda.to_device(array1)
     array2 = cuda.to_device(array2)
     # Result will be stored here
@@ -75,8 +84,8 @@ def compute_focus_map_gpu(array1, array2, kernel_size):
     blockspergrid = (blockspergrid_x, blockspergrid_y)
 
     # Start calculation
-    compute_focus_map_gpu[blockspergrid, threadsperblock](
+    compute_focusmap_gpu[blockspergrid, threadsperblock](
         array1, array2, kernel_size, focusmap
     )
-    # Will wait for completion (no need to call "cuda.synchronize()")
+    # Wait for completion
     return focusmap.copy_to_host()
