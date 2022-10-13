@@ -16,14 +16,14 @@ class Algorithm:
     def __init__(self):
         self.ImageLoadingHandler = ImageLoadingHandler.ImageLoadingHandler()
         self.DFT_Imreg = dft_imreg.im_reg()
-        self.selectedAlgo = CPU_Algos
+        self.useGpu = False
 
     def toggle_cpu_gpu(self, use_gpu, selected_gpu_id):
         if use_gpu:
             cuda.select_device(selected_gpu_id)
-            self.selectedAlgo = GPU_Algos
+            self.useGpu = True
         else:
-            self.selectedAlgo = CPU_Algos
+            self.useGpu = False
 
     def align_image_pair(self, ref_im, im_to_align):
         """
@@ -65,33 +65,37 @@ class Algorithm:
         Each pyramid level will be compared between the two pyramids,
         and the sharpest pixels/parts of each image will be placed in the output pyramid.
         """
-        # Upscale last/largest focusmap (faster than computation)
-        threshold_index = len(pyr1) - 1
-        new_pyr = []
-        current_focusmap = None
-        # Loop through pyramid levels from smallest to largest shape, and fuse each level
-        for pyramid_level in range(len(pyr1)):
-            # Calculate what parts are more/less in focus between the pyramids
-            if pyramid_level < threshold_index:
-                # Regular computation (slow; accurate)
-                current_focusmap = self.selectedAlgo.compute_focusmap(
-                    cv2.cvtColor(pyr1[pyramid_level], cv2.COLOR_BGR2GRAY),
-                    cv2.cvtColor(pyr2[pyramid_level], cv2.COLOR_BGR2GRAY),
-                    kernel_size,
-                )
-            else:
-                # TODO: See if upscale really provides a speed improvement
-                # Upscale previous mask (faster; less accurate)
-                s = pyr2[pyramid_level].shape
-                current_focusmap = cv2.resize(
-                    current_focusmap, (s[1], s[0]), interpolation=cv2.INTER_AREA
-                )
+        if self.useGpu:
+            """Use GPU."""
+            pass
+        else:
+            """Use CPU."""
+            # Upscale last/largest focusmap (faster than computation)
+            threshold_index = len(pyr1) - 1
+            new_pyr = []
+            current_focusmap = None
+            # Loop through pyramid levels from smallest to largest shape, and fuse each level
+            for pyramid_level in range(len(pyr1)):
+                # Calculate what parts are more/less in focus between the pyramids
+                if pyramid_level < threshold_index:
+                    # Regular computation (slow; accurate)
+                    current_focusmap = CPU_Algos.compute_focusmap(
+                        cv2.cvtColor(pyr1[pyramid_level], cv2.COLOR_BGR2GRAY),
+                        cv2.cvtColor(pyr2[pyramid_level], cv2.COLOR_BGR2GRAY),
+                        kernel_size,
+                    )
+                else:
+                    # Upscale previous mask (about twice as fast, but slightly less accurate.)
+                    s = pyr2[pyramid_level].shape
+                    current_focusmap = cv2.resize(
+                        current_focusmap, (s[1], s[0]), interpolation=cv2.INTER_AREA
+                    )
 
-            # Write output pyramid level using the calculated focusmap
-            new_pyr_level = Shared_Algos.fuse_pyramid_levels_using_focusmap(
-                pyr1[pyramid_level],
-                pyr2[pyramid_level],
-                current_focusmap,
-            )
-            new_pyr.append(new_pyr_level)
-        return new_pyr
+                # Write output pyramid level using the calculated focusmap
+                new_pyr_level = Shared_Algos.fuse_pyramid_levels_using_focusmap(
+                    pyr1[pyramid_level],
+                    pyr2[pyramid_level],
+                    current_focusmap,
+                )
+                new_pyr.append(new_pyr_level)
+            return new_pyr
