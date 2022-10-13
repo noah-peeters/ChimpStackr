@@ -10,10 +10,6 @@ import math
 import numpy as np
 import numba.cuda as cuda
 
-import src.algorithms.stacking_algorithms.shared as Shared_Algos
-import src.algorithms.stacking_algorithms.cpu as CPU_Algos
-
-
 ### Internal functions ###
 
 # Device function that can be called from within a kernel
