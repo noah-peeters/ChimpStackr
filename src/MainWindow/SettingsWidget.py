@@ -3,7 +3,6 @@ Settings widget that handles user changing settings.
 "__init__" functions are called on application startup,
 to initialize the saved QSettings object.
 """
-from types import new_class
 import PySide6.QtWidgets as qtw
 import PySide6.QtCore as qtc
 import qt_material
@@ -61,6 +60,7 @@ class UserInterfaceWidget(qtw.QWidget):
         self.setLayout(v_layout)
 
     def combo_box_changed(self, newIndex):
+        newIndex = int(newIndex)
         # Get and set new theme.
         newTheme = (
             list(self.themes_map_dict.keys())[
@@ -145,6 +145,7 @@ class ComputingWidget(qtw.QWidget):
         if new_id == None:
             new_id = settings.globalVars["QSettings"].value("computing/selected_gpu_id")
 
+        new_id = int(new_id)
         # Check if saved id is valid, reset to 0 otherwise
         if new_id < self.selectable_gpus_combobox.count() - 1:
             new_id = 0
