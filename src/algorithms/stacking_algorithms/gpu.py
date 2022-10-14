@@ -10,6 +10,7 @@ import math
 import numpy as np
 import numba.cuda as cuda
 
+
 ### Internal functions ###
 
 # Device function that can be called from within a kernel
@@ -61,27 +62,129 @@ def compute_focusmap_gpu(array1, array2, kernel_size, focusmap):
         focusmap[x, y] = value_to_insert
 
 
-### Exposed functions ###
+@cuda.jit(fastmath=True)
+def fuse_pyramid_levels_using_focusmap_gpu(pyr_level1, pyr_level2, focusmap):
+    x, y = cuda.grid(2)
+    # If grid index is larger than image shape, do nothing
+    if x < pyr_level1.shape[0] and y < pyr_level1.shape[1]:
+        if focusmap[x, y] != 0:
+            # Copy 3 color channels
+            for i in range(3):
+                pyr_level1[x, y, i] = pyr_level2[x, y, i]
+        # if focusmap[y, x] == 0:
+        #     pyr_level1[y, x, :] = pyr_level1[y, x, :]
+        # else:
+        #     pyr_level1[y, x, :] = pyr_level2[y, x, :]
 
-# TODO: Properly analyze if a further speedup could be achieved on the GPU
+
+@cuda.jit(fastmath=True)
+def BGR2GRAY(array_in, array_out):
+    """
+    Convert a 3D BGR image array to a 2D grayscale image.
+    According to this formula: 'Y = 0.299 R + 0.587 G + 0.114 B'.
+    Has the same effect as cv2.cvtColor(array, cv2.COLOR_BGR2GRAY), but it's all on the GPU.
+    """
+    x, y = cuda.grid(2)
+    # If grid index is larger than image shape, do nothing
+    if x < array_in.shape[0] and y < array_in.shape[1]:
+        array_out[x, y] = (
+            0.299 * array_in[x, y, 2]  # Red
+            + 0.587 * array_in[x, y, 1]  # Green
+            + 0.114 * array_in[x, y, 0]  # Blue
+        )
+
+
+### Exposed functions ###
+# TODO: Don't recalculate cuda args?
+
+
 def compute_focusmap(array1, array2, kernel_size):
     """
     Move arrays to device and call actual function next.
     Will not wait for result to be ready. (which is what we want)
     """
-    array1 = cuda.to_device(array1)
-    array2 = cuda.to_device(array2)
-    # Result will be stored here
-    focusmap = cuda.to_device(np.zeros_like(array1).astype(np.uint8))
-
     threadsperblock = (16, 16)  # Should be a multiple of 32 (max 1024)
     blockspergrid_x = math.ceil(array1.shape[0] / threadsperblock[0])
     blockspergrid_y = math.ceil(array1.shape[1] / threadsperblock[1])
     blockspergrid = (blockspergrid_x, blockspergrid_y)
 
+    # Convert BGR to grayscale
+    array1_gray = cuda.device_array(
+        shape=(array1.shape[0], array1.shape[1]), dtype=np.float32
+    )
+    array2_gray = cuda.device_array_like(array1_gray)
+
+    BGR2GRAY[blockspergrid, threadsperblock](array1, array1_gray)
+    BGR2GRAY[blockspergrid, threadsperblock](array2, array2_gray)
+
+    # Result will be stored here
+    focusmap = cuda.device_array(shape=array1_gray.shape, dtype=np.uint8)
+
     # Start calculation
     compute_focusmap_gpu[blockspergrid, threadsperblock](
-        array1, array2, kernel_size, focusmap
+        array1_gray, array2_gray, kernel_size, focusmap
     )
-    # Wait for completion
-    return focusmap.copy_to_host()
+    # Don't wait for completion
+    # TODO: Check if that actually is the case
+    return focusmap
+
+
+def fuse_pyramid_levels_using_focusmap(pyr_level1, pyr_level2, focusmap):
+    """Calculate cuda args and call kernel."""
+    threadsperblock = (16, 16)  # Should be a multiple of 32 (max 1024)
+    blockspergrid_x = math.ceil(pyr_level1.shape[0] / threadsperblock[0])
+    blockspergrid_y = math.ceil(pyr_level1.shape[1] / threadsperblock[1])
+    blockspergrid = (blockspergrid_x, blockspergrid_y)
+
+    # Start calculation
+    fuse_pyramid_levels_using_focusmap_gpu[blockspergrid, threadsperblock](
+        pyr_level1, pyr_level2, focusmap
+    )
+    return pyr_level1
+
+
+@cuda.jit(fastmath=True)
+def resize_image(array_in, array_out, width_out, height_out):
+    """
+    Algorithm src:
+    https://eng.aurelienpierre.com/2020/03/bilinear-interpolation-on-images-stored-as-python-numpy-ndarray/
+    A valid replacement for 'cv2.resize()',
+    the only (visual) difference is that the cv2 result seems a little more blocky.
+    """
+    i, j = cuda.grid(2)
+    height_in = array_in.shape[0]
+    width_in = array_in.shape[1]
+    if i < width_out and j < height_out:
+        # Relative coordinates of the pixel in output space
+        x_out = j / width_out
+        y_out = i / height_out
+
+        # Corresponding absolute coordinates of the pixel in input space
+        x_in = x_out * width_in
+        y_in = y_out * height_in
+
+        # Nearest neighbours coordinates in input space
+        x_prev = int(math.floor(x_in))
+        x_next = x_prev + 1
+        y_prev = int(math.floor(y_in))
+        y_next = y_prev + 1
+
+        # Sanitize bounds - no need to check for < 0
+        x_prev = min(x_prev, width_in - 1)
+        x_next = min(x_next, width_in - 1)
+        y_prev = min(y_prev, height_in - 1)
+        y_next = min(y_next, height_in - 1)
+
+        # Distances between neighbour nodes in input space
+        Dy_next = y_next - y_in
+        Dy_prev = 1.0 - Dy_next
+        # because next - prev = 1
+        Dx_next = x_next - x_in
+        Dx_prev = 1.0 - Dx_next
+        # because next - prev = 1
+
+        array_out[i][j] = Dy_prev * (
+            array_in[y_next][x_prev] * Dx_next + array_in[y_next][x_next] * Dx_prev
+        ) + Dy_next * (
+            array_in[y_prev][x_prev] * Dx_next + array_in[y_prev][x_next] * Dx_prev
+        )

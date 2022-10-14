@@ -1,15 +1,15 @@
 """
     Main pyramid stacking + image alignment algorithm(s).
 """
+import math
 import cv2
 import numba.cuda as cuda
 
 import src.algorithms.dft_imreg as dft_imreg
 import src.algorithms.pyramid as pyramid_algorithm
 import src.ImageLoadingHandler as ImageLoadingHandler
-import src.algorithms.stacking_algorithms.cpu as CPU_Algos
-import src.algorithms.stacking_algorithms.gpu as GPU_Algos
-import src.algorithms.stacking_algorithms.shared as Shared_Algos
+import src.algorithms.stacking_algorithms.cpu as CPU
+import src.algorithms.stacking_algorithms.gpu as GPU
 
 
 class Algorithm:
@@ -67,7 +67,80 @@ class Algorithm:
         """
         if self.useGpu:
             """Use GPU."""
-            pass
+            """
+            Fuse 2 image pyramids into one.
+            Each pyramid level will be compared between the two pyramids,
+            and the sharpest pixels/parts of each image will be placed in the output pyramid.
+            """
+            # Upscale last/largest focusmap (faster than computation)
+            threshold_index = len(pyr1) - 1
+            new_pyr = []
+            previous_focusmap = None
+
+            # Copy first array to device (only first time, as it gets reused)
+            if not cuda.is_cuda_array(pyr1[0]):
+                inter_pyr = []
+                for i in pyr1:
+                    inter_pyr.append(cuda.to_device(i))
+                pyr1 = inter_pyr.copy()
+
+            # Copy second array to device (every time)
+            inter_pyr = []
+            for i in pyr2:
+                inter_pyr.append(cuda.to_device(i))
+            pyr2 = inter_pyr.copy()
+            del inter_pyr
+
+            # Loop through pyramid levels from smallest to largest shape, and fuse each level
+            for pyramid_level in range(len(pyr1)):
+                # First pyramid level is already stored on GPU memory
+                if pyramid_level < threshold_index:
+                    previous_focusmap = GPU.compute_focusmap(
+                        pyr1[pyramid_level],
+                        pyr2[pyramid_level],
+                        kernel_size,
+                    )
+                    # Write output pyramid level using the calculated focusmap
+                    new_pyr_level = GPU.fuse_pyramid_levels_using_focusmap(
+                        pyr1[pyramid_level],
+                        pyr2[pyramid_level],
+                        previous_focusmap,
+                    )
+                else:
+                    # TODO: Already really optimized (0.5ms runtime)
+                    # Upscale previous mask (faster, but slightly less accurate)
+                    s = pyr2[pyramid_level].shape
+                    array_out = cuda.device_array(
+                        # (
+                        #     math.ceil(previous_focusmap.shape[0] * 2),
+                        #     math.ceil(previous_focusmap.shape[1] * 2),
+                        # ),
+                        (s[0], s[1]),
+                        previous_focusmap.dtype,
+                    )
+
+                    # TODO: Don't recalculate cuda args?
+                    threadsperblock = (16, 16)  # Should be a multiple of 32 (max 1024)
+                    blockspergrid_x = math.ceil(s[0] / threadsperblock[0])
+                    blockspergrid_y = math.ceil(s[1] / threadsperblock[1])
+                    blockspergrid = (blockspergrid_x, blockspergrid_y)
+
+                    GPU.resize_image[blockspergrid, threadsperblock](
+                        previous_focusmap,
+                        array_out,
+                        s[1],
+                        s[0],
+                    )
+
+                    new_pyr_level = GPU.fuse_pyramid_levels_using_focusmap(
+                        pyr1[pyramid_level],
+                        pyr2[pyramid_level],
+                        array_out,
+                    )
+
+                new_pyr.append(new_pyr_level)
+            # Return GPU array
+            return new_pyr
         else:
             """Use CPU."""
             # Upscale last/largest focusmap (faster than computation)
@@ -79,7 +152,7 @@ class Algorithm:
                 # Calculate what parts are more/less in focus between the pyramids
                 if pyramid_level < threshold_index:
                     # Regular computation (slow; accurate)
-                    current_focusmap = CPU_Algos.compute_focusmap(
+                    current_focusmap = CPU.compute_focusmap(
                         cv2.cvtColor(pyr1[pyramid_level], cv2.COLOR_BGR2GRAY),
                         cv2.cvtColor(pyr2[pyramid_level], cv2.COLOR_BGR2GRAY),
                         kernel_size,
@@ -92,7 +165,7 @@ class Algorithm:
                     )
 
                 # Write output pyramid level using the calculated focusmap
-                new_pyr_level = Shared_Algos.fuse_pyramid_levels_using_focusmap(
+                new_pyr_level = CPU.fuse_pyramid_levels_using_focusmap(
                     pyr1[pyramid_level],
                     pyr2[pyramid_level],
                     current_focusmap,

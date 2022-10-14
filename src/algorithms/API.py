@@ -61,11 +61,12 @@ class LaplacianPyramid:
 
             start_time = time.time()
             # Use previous *aligned* image instead of src image!
+            # TODO: GPU speedup here
             aligned_images.append(
                 self.Algorithm.align_image_pair(aligned_images[0], path)
             )
-
             # Generate pyramid for the (aligned) image
+            # TODO: GPU speedup here
             new_pyr = self.Algorithm.generate_laplacian_pyramid(
                 aligned_images[1], self.pyramid_num_levels
             )
@@ -86,6 +87,13 @@ class LaplacianPyramid:
                 ]
             )
 
+        if bool(settings.globalVars["QSettings"].value("computing/use_gpu")):
+            # Copy pyramid back to CPU
+            inter_pyr = []
+            for i in fused_pyr:
+                inter_pyr.append(i.copy_to_host())
+            fused_pyr = inter_pyr
+            del inter_pyr
         # Reconstruct image from Laplacian pyramid
         fused_image = pyramid_algorithm.reconstruct(fused_pyr)
         self.output_image = fused_image
