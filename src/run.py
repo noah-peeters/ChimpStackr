@@ -30,17 +30,6 @@ if os.name == "nt":
         pass  # Platform older than Windows 7
 
 
-class CustomSplashScreen(qtw.QSplashScreen):
-    def __init__(self, my_pixmap):
-        super().__init__(my_pixmap)
-        self.setWindowFlags(qtc.Qt.WindowStaysOnTopHint | qtc.Qt.FramelessWindowHint)
-
-    def mousePressEvent(self, event: qtg.QMouseEvent) -> None:
-        # Disable default "click-to-dismiss" behaviour
-        event.accept()
-        return
-
-
 def resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
     try:
@@ -67,17 +56,12 @@ def main():
         # Path to icon inside snap package
         icon_path = "meta/gui/icon.png"
 
-    # Setup splashscreen
-    splash = CustomSplashScreen(qtg.QPixmap(icon_path))
-    splash.show()
-
     window = MainWindow.Window()
 
     icon = qtg.QIcon(icon_path)
     qApp.setWindowIcon(icon)
 
     window.showMaximized()
-    splash.finish(window)
 
     try:
         qApp.exec()
