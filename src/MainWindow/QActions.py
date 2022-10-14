@@ -99,11 +99,12 @@ def setup_actions():
     align_and_stack.triggered.connect(mainWindow.align_and_stack_loaded_images)
     processing_menu.addAction(align_and_stack)
 
-    stack = qtg.QAction("&Stack images", mainWindow)
-    stack.setShortcut("Ctrl+Alt+C")
-    stack.setStatusTip("Stack loaded images.")
-    stack.triggered.connect(mainWindow.stack_loaded_images)
-    processing_menu.addAction(stack)
+    # TODO: Re-enable once fully implemented
+    # stack = qtg.QAction("&Stack images", mainWindow)
+    # stack.setShortcut("Ctrl+Alt+C")
+    # stack.setStatusTip("Stack loaded images.")
+    # stack.triggered.connect(mainWindow.stack_loaded_images)
+    # processing_menu.addAction(stack)
 
     """ Edit menu """
     edit = menubar.addMenu("&Edit")
