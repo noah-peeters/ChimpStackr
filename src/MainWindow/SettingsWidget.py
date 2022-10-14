@@ -85,6 +85,7 @@ class ComputingWidget(qtw.QWidget):
 
         # Get GPU names and place them at the correct index (corresponding to their ID)
         available_gpus_dict = {}
+        print(cuda.is_available())
         if cuda.is_available():
             for device in cuda.list_devices():
                 cc = device.compute_capability

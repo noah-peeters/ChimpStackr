@@ -11,7 +11,7 @@ grade: stable # "stable" for release or "devel" when debugging
 confinement: strict
 
 architectures:
-  - build-on: [amd64]
+  - build-on: amd64
 
 apps:
   chimpstackr:
@@ -56,4 +56,6 @@ parts:
       - libxkbfile1
       - gstreamer1.0-gl
       - libtbb2
-    after: [snapcraft-preload]
+      - libglu1-mesa
+    after:
+      - snapcraft-preload
