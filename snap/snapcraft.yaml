@@ -1,4 +1,6 @@
-# Useful resource: https://medium.com/@abulka/getting-python-and-wxpython-apps-into-the-ubuntu-app-store-ccca7ae537a3
+# Useful resources:
+# https://medium.com/@abulka/getting-python-and-wxpython-apps-into-the-ubuntu-app-store-ccca7ae537a3
+# https://github.com/om26er/opencv-cuda-snap/blob/master
 name: chimpstackr
 adopt-info: chimpstackr # Used to get version from git tags
 summary: Focus stacking software
@@ -7,7 +9,7 @@ description: |
   Focus stacking is often a necessity when working with high-magnification pictures.
 
 base: core20
-grade: stable # "stable" for release or "devel" when debugging
+grade: stable
 confinement: strict
 
 architectures:
@@ -40,6 +42,7 @@ parts:
       mkdir -p $SNAPCRAFT_PRIME/lib
       cp $SNAPCRAFT_PRIME/usr/local/lib/libsnapcraft-preload.so $SNAPCRAFT_PRIME/lib/libsnapcraft-preload.so
       if [ ${SNAP_ARCH} = "amd64" ]; then cp $SNAPCRAFT_PRIME/usr/local/lib/libsnapcraft-preload32.so $SNAPCRAFT_PRIME/lib/libsnapcraft-preload32.so; fi
+
   chimpstackr:
     plugin: python
     source: .
@@ -56,6 +59,5 @@ parts:
       - libxkbfile1
       - gstreamer1.0-gl
       - libtbb2
-      - libglu1-mesa
     after:
       - snapcraft-preload
