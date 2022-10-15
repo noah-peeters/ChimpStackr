@@ -9,6 +9,10 @@ __pycache__/
 # Snapcraft build files
 *.snap
 
+# AppImage files
+AppDir/
+appimage-build/
+
 # Distribution / packaging
 .Python
 build/
