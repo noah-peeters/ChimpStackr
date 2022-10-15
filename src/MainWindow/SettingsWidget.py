@@ -113,8 +113,8 @@ class ComputingWidget(qtw.QWidget):
         layout.addWidget(self.use_gpu_groupbox)
         self.setLayout(layout)
 
-        # First set
-        self.update_gpu_group_box()
+        # First set (important!!)
+        self.update_gpu_group_box(cuda.is_available())
         self.update_selected_gpu()
         # Update on changed
         self.use_gpu_groupbox.toggled.connect(self.update_gpu_group_box)
