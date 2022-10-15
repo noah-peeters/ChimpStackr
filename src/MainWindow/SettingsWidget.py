@@ -114,7 +114,12 @@ class ComputingWidget(qtw.QWidget):
         self.setLayout(layout)
 
         # First set (important!!)
-        self.update_gpu_group_box(cuda.is_available())
+        if not cuda.is_available():
+            # Hard reset to be False, as leaving it enabled would make an error
+            self.update_gpu_group_box(False)
+        else:
+            # Can be both enabled and disabled, just use remembered state
+            self.update_gpu_group_box()
         self.update_selected_gpu()
         # Update on changed
         self.use_gpu_groupbox.toggled.connect(self.update_gpu_group_box)
