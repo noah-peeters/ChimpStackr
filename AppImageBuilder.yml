@@ -4,21 +4,39 @@ script:
   # Remove any previous build
   - rm -rf $TARGET_APPDIR  | true
   # Make usr and icons dirs
-  - mkdir -p $TARGET_APPDIR/usr/src
-  - mkdir -p $TARGET_APPDIR/usr/share/icons
+  - mkdir -p AppDir/usr AppDir/usr/share/icons/128x128/
   # Copy icons in correct folder
-  - cp packaging/icons/icon_128x128.png $TARGET_APPDIR/usr/share/icons
-  - cp packaging/icons/icon_256x256.png $TARGET_APPDIR/usr/share/icons
-  - cp packaging/icons/icon_512x512.png $TARGET_APPDIR/usr/share/icons
+  - cp packaging/icons/icon_128x128.png AppDir/usr/share/icons
   # Copy the python application code into the AppDir
-  - cp src/  $TARGET_APPDIR/usr -r
+  - cp src AppDir/usr -r
+
   # Install application dependencies
-  - python3 -m pip install --prefix=/usr --root=AppDir -r ./requirements.txt
+  - python3 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
+
+  # - rm -rf AppDir/usr/lib/python3.8/site-packages/PySide6/Qt/qml/
+  # - rm -rf AppDir/usr/lib/python3.8/site-packages/PySide6/examples/
+  # - rm -rf AppDir/usr/lib/python3.8/site-packages/PySide6/Qt/resources/
+  # - rm -rf AppDir/usr/lib/python3.8/site-packages/PySide6/Qt/translations/qtwebengine_locales/
+  # - rm -f AppDir/usr/lib/python3.8/site-packages/PySide6/{assistant,designer,linguist,lrelease,lupdate}
+  # - rm -f AppDir/usr/lib/python3.8/site-packages/PySide6/{Qt3D*,QtBluetooth*,QtCharts*,QtConcurrent*,QtDataVisualization*,QtDBus*,QtDesigner*,QtHelp*,QtMultimedia*,QtNetwork*,QtOpenGL*,QtPositioning*,QtPrintSupport*,QtQml*,QtQuick*,QtRemoteObjects*,QtScxml*,QtSensors*,QtSerialPort*,QtSql*,QtStateMachine*,QtSvg*,QtTest*,QtWeb*,QtXml*}
+  # - shopt -s extglob
+  # - rm -rf AppDir/usr/lib/python3.8/site-packages/PySide6/Qt/lib/!(libQt6OpenGL*|libQt6XcbQpa*|libQt6Wayland*|libQt6Egl*|libicudata*|libicuuc*|libicui18n*|libQt6DBus*|libQt6Network*|libQt6Qml*|libQt6Core*|libQt6Gui*|libQt6Widgets*|libQt6Svg*|libQt6UiTools*)
+
+  #- python3 -m pip install --prefix=/usr --root=AppDir -r <(sed '/^[rawpy|pkg2]/d' requirements.txt)
+  # Install rawpy
+  #- python3 -m pip install --ignore-installed  --prefix=/usr --root=AppDir --pre rawpy
+  # - cd $TARGET_APPDIR
+  # - git clone https://github.com/letmaik/rawpy
+  # - cd rawpy
+  # - python3 -m pip install numpy cython
+  # - python3 -m pip install .
 AppDir:
+  path: ./AppDir
+
   app_info:
     id: org.noah-peeters.chimpstackr
     name: ChimpStackr
-    icon: icon_256x256
+    icon: icon_128x128
     version: latest
     # Set the python executable as entry point
     exec: usr/bin/python3
@@ -44,6 +62,9 @@ AppDir:
       # Specific dependencies for pip packages
       - python3-opencv # For opencv
       #- libraw-bin # For rawpy
+      - libraw-dev
+
+      - python3-numpy
 
       # Qt 6 dependencies
       - libcap2:amd64
@@ -92,21 +113,22 @@ AppDir:
       - libgl1-mesa-glx
       - libdrm-amdgpu1
       - libdrm-nouveau2
-
     exclude: []
 
   runtime:
-    version: "continuous"
     env:
       PATH: '${APPDIR}/usr/bin:${PATH}'
       # Set python home
       # See https://docs.python.org/3/using/cmdline.html#envvar-PYTHONHOME
       PYTHONHOME: '${APPDIR}/usr'
-      # Path to the site-packages dir or other modules dirs
+      # Path to the site-packages dir and other modules dirs
       # See https://docs.python.org/3/using/cmdline.html#envvar-PYTHONPATH
-      PYTHONPATH: '${APPDIR}/usr/lib/python3.8/site-packages'
+      PYTHONPATH: '${APPDIR}/usr/lib/python3/dist-packages:${APPDIR}/usr/lib/python3.8/site-packages'
+      GDK_BACKEND: 'x11'
+      GTK_DATA_PREFIX: "$APPDIR"
+      GTK_THEME: "Adwaita"
 
-  # test:
+  test:
   #   fedora:
   #     image: appimagecrafters/tests-env:fedora-30
   #     command: ./AppRun
@@ -119,9 +141,10 @@ AppDir:
   #   centos:
   #     image: appimagecrafters/tests-env:centos-7
   #     command: ./AppRun
-  # ubuntu:
-  #   image: appimagecrafters/tests-env:ubuntu-xenial
-  #   command: ./AppRun
+    ubuntu:
+      image: appimagecrafters/tests-env:ubuntu-xenial
+      command: ./AppRun
+      use_host_x: true
 
 AppImage:
   update-information: 'gh-releases-zsync|AppImageCrafters|python-appimage-example|latest|python-appimage-*x86_64.AppImage.zsync'
