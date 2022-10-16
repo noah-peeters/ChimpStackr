@@ -46,14 +46,14 @@ jobs:
           - os: macos-latest
             TARGET: macos
             CMD_BUILD: >
-                pyinstaller --icon=snap/gui/icon.png -F -w -n ChimpStackr src/run.py &&
+                pyinstaller --icon=packaging/icons/icon_512x512.png -F -w -n ChimpStackr src/run.py &&
                 cd dist/ &&
                 zip -r9 ChimpStackr ChimpStackr.app/
             OUT_FILE_NAME: ChimpStackr.zip
             ASSET_MIME: application/zip
           - os: windows-latest
             TARGET: windows
-            CMD_BUILD: pyinstaller --icon=snap/local/icon.ico -F -w --add-data "snap/gui/icon.png;snap/gui" -n ChimpStackr src/run.py
+            CMD_BUILD: pyinstaller --icon=packaging/icons/icon.ico -F -w --add-data "packaging/icons/icon_512x512.png;packaging/icons" -n ChimpStackr src/run.py
             OUT_FILE_NAME: ChimpStackr.exe
             ASSET_MIME: application/vnd.microsoft.portable-executable
     steps:

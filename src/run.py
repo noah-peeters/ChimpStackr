@@ -51,8 +51,9 @@ def main():
     settings.globalVars["MainApplication"] = qApp
 
     # Get icon for Windows/Mac (PyInstaller) or source code run
-    icon_path = resource_path("snap/gui/icon.png")
+    icon_path = resource_path("packaging/icons/icon_512x512.png")
     if not os.path.isfile(icon_path):
+        # TODO: Remove
         # Path to icon inside snap package
         icon_path = "meta/gui/icon.png"
 
