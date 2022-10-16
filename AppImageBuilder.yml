@@ -106,7 +106,7 @@ AppDir:
       # See https://docs.python.org/3/using/cmdline.html#envvar-PYTHONPATH
       PYTHONPATH: '${APPDIR}/usr/lib/python3.8/site-packages'
 
-  test:
+  # test:
   #   fedora:
   #     image: appimagecrafters/tests-env:fedora-30
   #     command: ./AppRun
@@ -119,9 +119,9 @@ AppDir:
   #   centos:
   #     image: appimagecrafters/tests-env:centos-7
   #     command: ./AppRun
-    # ubuntu:
-    #   image: appimagecrafters/tests-env:ubuntu-xenial
-    #   command: ./AppRun
+  # ubuntu:
+  #   image: appimagecrafters/tests-env:ubuntu-xenial
+  #   command: ./AppRun
 
 AppImage:
   update-information: 'gh-releases-zsync|AppImageCrafters|python-appimage-example|latest|python-appimage-*x86_64.AppImage.zsync'
