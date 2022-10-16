@@ -12,6 +12,9 @@ __pycache__/
 # AppImage files
 AppDir/
 appimage-build/
+*.AppImage
+*.AppImage.zsync
+
 
 # Distribution / packaging
 .Python
