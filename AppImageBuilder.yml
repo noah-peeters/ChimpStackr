@@ -121,12 +121,6 @@ AppDir:
       # Set python home
       # See https://docs.python.org/3/using/cmdline.html#envvar-PYTHONHOME
       PYTHONHOME: '${APPDIR}/usr'
-      # Path to the site-packages dir and other modules dirs
-      # See https://docs.python.org/3/using/cmdline.html#envvar-PYTHONPATH
-      PYTHONPATH: '${APPDIR}/usr/lib/python3/dist-packages:${APPDIR}/usr/lib/python3.8/site-packages'
-      GDK_BACKEND: 'x11'
-      GTK_DATA_PREFIX: "$APPDIR"
-      GTK_THEME: "Adwaita"
 
   test:
   #   fedora:
