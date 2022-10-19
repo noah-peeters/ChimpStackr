@@ -68,6 +68,7 @@ class ImageLoadingHandler:
             # Load data from ".npy" format
             return np.load(path, allow_pickle=False)
 
+    # TODO: Not used
     def get_raw_view(self, path):
         """Get RAW image view from path (uses copy() to allow usage after closing raw file)"""
         raw = rawpy.imread(path)

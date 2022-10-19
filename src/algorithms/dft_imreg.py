@@ -970,10 +970,6 @@ class im_reg:
         filter_pcorr=0,
         exponent="inf",
     ):
-        # Split channels
-        # (B1, G1, R1) = cv2.split(im0)
-        # (B2, G2, R2) = cv2.split(im1)
-
         res, bgval = compute_similarity(
             resize_image(cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY), scale_factor),
             resize_image(cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY), scale_factor),
@@ -984,26 +980,6 @@ class im_reg:
             exponent,
         )
         print(res)
-
-        # B2 = transform_img_dict(B2, res, bgval, order)
-        # # Order of mask should be always 1 - higher values produce strange results.
-        # imask = transform_img_dict(np.ones_like(B1), res, 0, 1)
-        # # This removes some weird artifacts
-        # imask[imask > 0.8] = 1.0
-        # # Framing here = just blending the im2 with its BG according to the mask
-        # B2 = frame_img(B2, imask, 10)
-
-        # G2 = transform_img_dict(G2, res, bgval, order)
-        # imask = transform_img_dict(np.ones_like(G1), res, 0, 1)
-        # imask[imask > 0.8] = 1.0
-        # G2 = frame_img(G2, imask, 10)
-
-        # R2 = transform_img_dict(R2, res, bgval, order)
-        # imask = transform_img_dict(np.ones_like(R1), res, 0, 1)
-        # imask[imask > 0.8] = 1.0
-        # R2 = frame_img(R2, imask, 10)
-
-        # result = cv2.merge([B2, G2, R2])
 
         scale = res["scale"]
         rot = res["angle"] * np.pi / 180  # Convert from degrees to radians
@@ -1026,7 +1002,6 @@ class im_reg:
                 [-np.sin(rot), np.cos(rot), 0],
             ]
         )
-        # scale_rotation = cv2.getRotationMatrix2D((0, 0), res["angle"], res["scale"])
 
         result = cv2.resize(im1, None, fx=scale, fy=scale)
         result = cv2.warpAffine(result, rotation, (width, height))

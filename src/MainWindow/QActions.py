@@ -1,8 +1,6 @@
 """
     Script that sets up QActions for mainWindow QMainWindow.
 """
-from optparse import Option
-import PySide6.QtCore as qtc
 import PySide6.QtGui as qtg
 import PySide6.QtWidgets as qtw
 
