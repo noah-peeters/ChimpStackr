@@ -7,7 +7,7 @@ opencv-python-headless==4.6.0.66 # TODO: Test if working on windows. Otherwise r
 numpy==1.23.4
 numba==0.56.3
 rawpy==0.17.2
-imageio==2.22.1
+imageio==2.22.2
 pyfftw==0.13.0
 
 # TODO: Check if really needed (used for image alignment)
