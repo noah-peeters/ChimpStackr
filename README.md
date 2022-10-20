@@ -13,7 +13,7 @@ Focus stacking is often a necessity when working with high-magnification picture
 Chimpstackr implements the laplacian pyramid fusion algorithm (see: [Sources](#sources))
 
 ## Gallery
-Following image stacks have been taken by me. Each image has been stacked using ChimpStackr and post-processed using [darktable](https://www.darktable.org/). Each image stack contains around 150 individual images. Every image in the stack was taken at around 4x magnification on a (slightly) wobbly rig. This should be a good test for both the stacking algorithm, and the alignment algorithm.
+Following image stacks have been taken by [me](https://github.com/noah-peeters). Each image has been stacked using ChimpStackr and post-processed using [darktable](https://www.darktable.org/). Each image stack contains around 150 individual images. Every image in the stack was taken at around 4x magnification on a (slightly) wobbly rig. This should be a good test for both the stacking algorithm, and the alignment algorithm.
 
 The post processing consists of these steps:
 * A minor cropping of the edges (to remove 'artifacts' created by alignment algorithm)
