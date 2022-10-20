@@ -31,8 +31,8 @@ class AboutAppWidget(qtw.QMessageBox):
     # Copy text to clipboard
     def copy_text(self):
         cb = qtw.QApplication.clipboard()
-        cb.clear(mode=cb.Clipboard)
-        cb.setText(self.text(), mode=cb.Clipboard)
+        cb.clear()
+        cb.setText(self.text())
 
 
 def setup_actions():

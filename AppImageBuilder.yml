@@ -9,7 +9,6 @@ script:
   - cp packaging/icons/icon_128x128.png AppDir/usr/share/icons
   # Copy the python application code into the AppDir
   - cp src AppDir/usr -r
-
   # Install application dependencies
   - python3 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
 AppDir:
