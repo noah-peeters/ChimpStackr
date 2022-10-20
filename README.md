@@ -1,4 +1,9 @@
 # ChimpStackr
+
+<p align="center">
+  <img src="https://user-images.githubusercontent.com/17707805/196983883-84ec7174-74d3-4833-b9f6-16b84e19280d.png" width="300"/>
+</p>
+
 ![GitHub all releases](https://img.shields.io/github/downloads/noah-peeters/ChimpStackr/total) ![GitHub release (latest by date)](https://img.shields.io/github/downloads/noah-peeters/ChimpStackr/latest/total) [![chimpstackr](https://snapcraft.io/chimpstackr/badge.svg)](https://snapcraft.io/chimpstackr) ![GitHub repo size](https://img.shields.io/github/repo-size/noah-peeters/ChimpStackr) ![GitHub](https://img.shields.io/github/license/noah-peeters/ChimpStackr) ![GitHub commits since latest release (by date)](https://img.shields.io/github/commits-since/noah-peeters/ChimpStackr/latest)
 
 Open source multi-platform program for focus stacking many images.
