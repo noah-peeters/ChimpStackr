@@ -3,6 +3,8 @@
 
 Open source multi-platform program for focus stacking many images.
 
+View the [wiki](https://github.com/noah-peeters/ChimpStackr/wiki/Basic-usage) for instructions.
+
 Focus stacking is often a necessity when working with high-magnification pictures...
 Chimpstackr implements the laplacian pyramid fusion algorithm (see: [Sources](#sources))
 ## Table of contents
