@@ -53,9 +53,8 @@ def main():
     # Get icon for Windows/Mac (PyInstaller) or source code run
     icon_path = resource_path("packaging/icons/icon_512x512.png")
     if not os.path.isfile(icon_path):
-        # TODO: Remove
-        # Path to icon inside snap package
-        icon_path = "meta/gui/icon.png"
+        # Path to icon inside AppImage
+        icon_path = "icon_128x128.png"
 
     window = MainWindow.Window()
 
