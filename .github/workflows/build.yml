@@ -59,9 +59,10 @@ jobs:
           - os: ubuntu-latest
             TARGET: ubuntu
             CMD_BUILD: >
-              cd dist/ &&
               pip install appimage-builder &&
-              appimage-builder
+              appimage-builder &&
+              cd dist/ &&
+              mv *.AppImage ..
             OUT_FILE_NAME: ChimpStackr-latest-x86_64.AppImage
             ASSET_MIME: application/ChimpStackr
     steps:
