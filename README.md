@@ -29,6 +29,7 @@ The post processing consists of these steps:
 * Install python requirements:  ``pip install -r requirements.txt``
 * Run file ``src/run.py`` to start the program
 ### Local build
+Note: you can only build for your current platform. So for example building an AppImage on Windows is not possible natively.
 * AppImage: ``appimage-builder``
 * Windows/MacOS: ``pyinstaller --icon=packaging/icons/icon_512x512.png -F -w -n ChimpStackr src/run.py``
 ## Sources
