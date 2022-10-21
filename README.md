@@ -29,8 +29,8 @@ The post processing consists of these steps:
 * Install python requirements:  ``pip install -r requirements.txt``
 * Run file ``src/run.py`` to start the program
 ### Local build
-* AppImage: 'appimage-builder'
-* Windows/MacOS: 'pyinstaller --icon=packaging/icons/icon_512x512.png -F -w -n ChimpStackr src/run.py'
+* AppImage: ``appimage-builder``
+* Windows/MacOS: ``pyinstaller --icon=packaging/icons/icon_512x512.png -F -w -n ChimpStackr src/run.py``
 ## Sources
 * Focus stacking algorithm (slightly adapted) implemented from:
 Wang, W., & Chang, F. (2011b). A Multi-focus Image Fusion Method Based on Laplacian Pyramid. _Journal of Computers_, _6_(12).
