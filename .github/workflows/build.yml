@@ -61,6 +61,7 @@ jobs:
             CMD_BUILD: >
               pip install appimage-builder &&
               appimage-builder &&
+              mkdir dist/ &&
               cd dist/ &&
               mv *.AppImage ..
             OUT_FILE_NAME: ChimpStackr-latest-x86_64.AppImage
