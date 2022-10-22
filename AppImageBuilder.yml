@@ -18,6 +18,17 @@ script:
   # Install application dependencies
   - python3 -m pip install --upgrade pip
   - python3 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
+  # - apt update
+  # - apt install software-properties-common -y
+  # - add-apt-repository ppa:deadsnakes/ppa -y
+  # - DEBIAN_FRONTEND=noninteractive apt install -y tzdata
+  # - apt install python3.9 -y
+  # - apt install python3.9-distutils -y
+  # - ls -l "$(which python3.9)"
+  # - python3.9 -m pip install --upgrade pip
+  # - python3.9 -m pip --version
+  # - python3.9 --version
+  # - python3.9 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
 AppDir:
   path: ./AppDir
 
