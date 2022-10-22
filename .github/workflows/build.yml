@@ -59,7 +59,7 @@ jobs:
           - os: ubuntu-latest
             TARGET: ubuntu
             CMD_BUILD: >
-              pip install appimage-builder &&
+              pip install appimage-builder --skip-tests &&
               appimage-builder &&
               mkdir dist/ &&
               mv *.AppImage dist/
