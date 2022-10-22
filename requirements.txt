@@ -1,6 +1,7 @@
 # Pure UI requirements
 pyside6_essentials==6.4.0
 qt-material==2.12
+MarkupSafe==2.1.1
 
 # Algorithm requirements
 opencv-python-headless==4.6.0.66 # TODO: Test if working on windows. Otherwise revert back to "opencv-python"

@@ -1,3 +1,9 @@
+# Instructions for local build:
+# Build inside docker container...
+# Follow instruction here: https://stackoverflow.com/questions/28668180/cant-install-pip-packages-inside-a-docker-container-with-ubuntu
+# 'sudo systemctl start docker'
+# 'sudo chmod 666 /var/run/docker.sock'
+# 'docker run -v ~/Documents/Code/ChimpStackr/:/ChimpStackr -w /ChimpStackr appimagecrafters/appimage-builder appimage-builder --skip-tests'
 version: 1
 
 script:
@@ -10,6 +16,7 @@ script:
   # Copy the python application code into the AppDir
   - cp src AppDir/usr -r
   # Install application dependencies
+  - python3 -m pip install --upgrade pip
   - python3 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
 AppDir:
   path: ./AppDir
