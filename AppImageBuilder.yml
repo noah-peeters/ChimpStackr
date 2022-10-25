@@ -16,7 +16,7 @@ script:
   # Copy the python application code into the AppDir
   - cp src AppDir/usr -r
   # Install application dependencies
-  - python3 -m pip install --system --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
+  - python3 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
   #- python3 -m pip install --upgrade pip
   # - apt update
   # - apt install software-properties-common -y
@@ -81,10 +81,15 @@ AppDir:
 
   runtime:
     env:
-      PATH: '${APPDIR}/usr/bin:${PATH}'
-      # Set python home
+      # PATH: '${APPDIR}/usr/bin:${PATH}'
+      # # Set python home
+      # # See https://docs.python.org/3/using/cmdline.html#envvar-PYTHONHOME
+      # PYTHONHOME: '${APPDIR}/usr'
       # See https://docs.python.org/3/using/cmdline.html#envvar-PYTHONHOME
       PYTHONHOME: '${APPDIR}/usr'
+      # Path to the site-packages dir or other modules dirs
+      # See https://docs.python.org/3/using/cmdline.html#envvar-PYTHONPATH
+      PYTHONPATH: '${APPDIR}/usr/lib/python3.9/site-packages'
 
   test:
     fedora:
