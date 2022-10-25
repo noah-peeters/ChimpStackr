@@ -16,7 +16,20 @@ script:
   # Copy the python application code into the AppDir
   - cp src AppDir/usr -r
   # Install application dependencies
-  - python3 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
+  # - python3 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
+
+  # Install python3.10 and curl (to install pip)
+  - apt update
+  - apt install -y software-properties-common curl squashfs-tools
+  - add-apt-repository ppa:deadsnakes/ppa -y
+  - env DEBIAN_FRONTEND=noninteractive apt install -y python3.10 python3.10-dev python3.10-distutils
+  # Install system dependencies (The ones needed to install pycairo and PyGObject libs for python3.10)
+  - apt install -y libgirepository1.0-dev libcairo2-dev gir1.2-gtk-3.0
+  # Install modules requests setuptools pip wheel for python3.10
+  - python3.10 <(curl https://bootstrap.pypa.io/get-pip.py)
+  - python3.10 -m pip install --upgrade requests setuptools pip wheel
+  # Install requirements of the application
+  - python3.10 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r requirements.txt
 
   # Install python 3.10
   # - apt update
@@ -39,7 +52,7 @@ AppDir:
     icon: icon_128x128
     version: latest
     # Set the python executable as entry point
-    exec: usr/bin/python3
+    exec: usr/bin/python3.10
     # Set the application main script path as argument. Use '$@' to forward CLI parameters
     exec_args: "$APPDIR/usr/src/run.py $@"
 
