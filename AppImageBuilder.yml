@@ -31,18 +31,6 @@ script:
   # Install requirements of the application
   - python3.10 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r requirements.txt
 
-  # Install python 3.10
-  # - apt update
-  # - apt install software-properties-common -y
-  # - add-apt-repository ppa:deadsnakes/ppa -y
-  # - DEBIAN_FRONTEND=noninteractive apt install -y tzdata
-  # - apt install python3.10 -y
-  # - apt install python3.10-distutils -y
-  # # - ls -l "$(which python3.9)"
-  # - python3.10 -m pip install --upgrade pip
-  # # - python3.9 -m pip --version
-  # # - python3.9 --version
-  # - python3.10 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
 AppDir:
   path: ./AppDir
 
@@ -99,6 +87,8 @@ AppDir:
       # Set python home
       # See https://docs.python.org/3/using/cmdline.html#envvar-PYTHONHOME
       PYTHONHOME: '${APPDIR}/usr'
+
+      PYTHONPATH: '${APPDIR}/usr/lib/python3.10:${APPDIR}/usr/lib/python3.10/site-packages'
 
   test:
     fedora:
