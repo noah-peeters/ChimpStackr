@@ -16,20 +16,7 @@ script:
   # Copy the python application code into the AppDir
   - cp src AppDir/usr -r
   # Install application dependencies
-  # - python3 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
-
-  # Install python3.10 and curl (to install pip)
-  - apt update
-  - apt install -y software-properties-common curl squashfs-tools
-  - add-apt-repository ppa:deadsnakes/ppa -y
-  - env DEBIAN_FRONTEND=noninteractive apt install -y python3.10 python3.10-dev python3.10-distutils
-  # Install system dependencies (The ones needed to install pycairo and PyGObject libs for python3.10)
-  - apt install -y libgirepository1.0-dev libglib2.0-dev libcairo2-dev gir1.2-gtk-3.0
-  # Install modules requests setuptools pip wheel for python3.10
-  - python3.10 <(curl https://bootstrap.pypa.io/get-pip.py)
-  - python3.10 -m pip install --upgrade requests setuptools pip wheel
-  # Install requirements of the application
-  - python3.10 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r requirements.txt
+  - python3 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
 
 AppDir:
   path: ./AppDir
@@ -40,7 +27,7 @@ AppDir:
     icon: icon_128x128
     version: latest
     # Set the python executable as entry point
-    exec: usr/bin/python3.10
+    exec: usr/bin/python3
     # Set the application main script path as argument. Use '$@' to forward CLI parameters
     exec_args: "$APPDIR/usr/src/run.py $@"
 
@@ -50,18 +37,14 @@ AppDir:
     sources:
       - sourceline: 'deb [arch=amd64] http://archive.ubuntu.com/ubuntu/ focal main restricted universe multiverse'
         key_url: 'http://keyserver.ubuntu.com/pks/lookup?op=get&search=0x3b4fe6acc0b21f32'
-      # Deadsnake PPA to install python3.10
-      - sourceline: 'deb https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu bionic main'
-        key_url: 'http://keyserver.ubuntu.com/pks/lookup?op=get&search=0xF23C5A6CF475977595C89F51BA6932366A755776'
       # Qt 6
       - sourceline: deb http://mx.archive.ubuntu.com/ubuntu/ jammy main restricted universe multiverse
       - sourceline: deb http://mx.archive.ubuntu.com/ubuntu/ jammy-updates main restricted universe multiverse
       - sourceline: deb http://mx.archive.ubuntu.com/ubuntu/ jammy-backports main restricted universe multiverse
       - sourceline: deb http://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
     include:
-      - libpython3.10-stdlib
-      - python3.10
-      #- python3-pkg-resources
+      - python3
+      - python3-pkg-resources
 
       # PySide6 dependencies
       - appmenu-gtk3-module # https://askubuntu.com/questions/1074926/failed-to-load-module-appmenu-gtk-module-canberra-gtk-module
@@ -92,7 +75,7 @@ AppDir:
       # See https://docs.python.org/3/using/cmdline.html#envvar-PYTHONHOME
       PYTHONHOME: '${APPDIR}/usr'
 
-      PYTHONPATH: '${APPDIR}/usr/lib/python3.10:${APPDIR}/usr/lib/python3.10/site-packages'
+      PYTHONPATH: '${APPDIR}/usr/lib/python3.8/site-packages'
 
   test:
     fedora:
