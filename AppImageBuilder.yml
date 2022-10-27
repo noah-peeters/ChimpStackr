@@ -17,6 +17,10 @@ script:
   - cp src AppDir/usr -r
   # Install application dependencies
   - python3 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
+  
+  # If python version is lower than 3.9, we have to use this version of markupsafe
+  # src: https://stackoverflow.com/questions/70316777/no-module-named-markupsafe-error-in-jetson-nano
+  - python3 -m pip install MarkupSafe==2.0.0
 
 AppDir:
   path: ./AppDir
