@@ -24,7 +24,7 @@ script:
   - add-apt-repository ppa:deadsnakes/ppa -y
   - env DEBIAN_FRONTEND=noninteractive apt install -y python3.10 python3.10-dev python3.10-distutils
   # Install system dependencies (The ones needed to install pycairo and PyGObject libs for python3.10)
-  - apt install -y libgirepository1.0-dev libcairo2-dev gir1.2-gtk-3.0
+  - apt install -y libgirepository1.0-dev libglib2.0-dev libcairo2-dev gir1.2-gtk-3.0
   # Install modules requests setuptools pip wheel for python3.10
   - python3.10 <(curl https://bootstrap.pypa.io/get-pip.py)
   - python3.10 -m pip install --upgrade requests setuptools pip wheel
@@ -59,6 +59,7 @@ AppDir:
       - sourceline: deb http://mx.archive.ubuntu.com/ubuntu/ jammy-backports main restricted universe multiverse
       - sourceline: deb http://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
     include:
+      - libpython3.10-stdlib
       - python3.10
       #- python3-pkg-resources
 
