@@ -44,7 +44,7 @@ def setup_actions():
             mainWindow,
             "Select images to load.",
             mainWindow.current_image_directory,
-            options=qtw.QFileDialog.DontUseNativeDialog,  # Required fix for snap
+            #options=qtw.QFileDialog.DontUseNativeDialog,  # Required fix for snap
         )
         mainWindow.set_new_loaded_image_files(fileNames)
 
