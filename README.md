@@ -20,7 +20,7 @@ The post processing consists of these steps:
 * Sharpening
 * Contrast, saturation improvements
 
-The stacking of all the images took around three minutes on my hardware.
+The alignment/stacking process for ~150 images took about three minutes on my hardware.
 
 ![Bij_TranslationAlignment](https://user-images.githubusercontent.com/17707805/196990942-413ea35c-2abb-4bce-9807-3f3d6b3de3c5.jpg)
 ![Edited](https://user-images.githubusercontent.com/17707805/196991117-dc4f1c76-cc87-4ef1-92ee-9a7484c7ff07.jpg)
