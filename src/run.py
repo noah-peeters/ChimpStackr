@@ -63,13 +63,7 @@ def main():
     qApp.setWindowIcon(icon)
 
     window.showMaximized()
-
-    try:
-        qApp.exec()
-        sys.exit()
-    finally:
-        # Cleanup temporary diretory, even if an exception occured in the app
-        ROOT_TEMP_DIRECTORY.cleanup()
+    qApp.exec()
 
 
 if __name__ == "__main__":

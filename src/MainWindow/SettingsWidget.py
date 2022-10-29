@@ -10,8 +10,12 @@ import numba.cuda as cuda
 
 import src.settings as settings
 
-# Settings under "User interface" tab
+
 class UserInterfaceWidget(qtw.QWidget):
+    """
+    Settings under "User interface" tab.
+    """
+
     themes_map_dict = {
         "dark_amber": 0,
         "dark_blue": 1,
@@ -51,12 +55,9 @@ class UserInterfaceWidget(qtw.QWidget):
         h_layout.addWidget(qtw.QLabel("Application theme:"))
         h_layout.addWidget(self.combobox)
 
-        self.current_config = qtw.QTextEdit()
-
         v_layout = qtw.QVBoxLayout()
         v_layout.addLayout(h_layout)
-        v_layout.addWidget(self.current_config)
-
+        v_layout.setAlignment(qtc.Qt.AlignTop)
         self.setLayout(v_layout)
 
     def combo_box_changed(self, newIndex):
@@ -77,6 +78,10 @@ class UserInterfaceWidget(qtw.QWidget):
 
 
 class ComputingWidget(qtw.QWidget):
+    """
+    Settings under "Computing" tab.
+    """
+
     # TODO: Test if behaving correctly on pc with no CUDA GPU, and with multiple GPUs
     def __init__(self, settings_widget):
         super().__init__()
@@ -93,7 +98,7 @@ class ComputingWidget(qtw.QWidget):
                 name = name[2 : len(name) - 1]
                 available_gpus_dict[f"{name}, CC: {cc[0]}.{cc[1]}"] = device.id
 
-        layout = qtw.QHBoxLayout()
+        layout = qtw.QVBoxLayout()
 
         # QGroupBox
         self.use_gpu_groupbox = qtw.QGroupBox("Use CUDA GPU")
@@ -107,10 +112,12 @@ class ComputingWidget(qtw.QWidget):
         self.selectable_gpus_combobox.addItems(available_gpus_dict)
         sub_layout.addWidget(self.selectable_gpus_combobox)
 
-        sub_layout.setAlignment(qtc.Qt.AlignTop)
         self.use_gpu_groupbox.setLayout(sub_layout)
 
         layout.addWidget(self.use_gpu_groupbox)
+
+        sub_layout.setAlignment(qtc.Qt.AlignTop)
+        layout.setAlignment(qtc.Qt.AlignTop)
         self.setLayout(layout)
 
         # First set (important!!)

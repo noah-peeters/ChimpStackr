@@ -8,7 +8,7 @@ import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 
 
-# Quality selection dialog (depends on type of img)
+# Quality selection dialog (depends on type of exported img)
 class SelectQualityDialog(qtw.QDialog):
     selectedQuality = None
 
@@ -46,8 +46,10 @@ class SelectQualityDialog(qtw.QDialog):
 
         self.setLayout(verticalLayout)
 
-    # Shorthand for QSlider/QSpinBox setup
     def setup_slider(self, low, high, val):
+        """
+        Shorthand for QSlider/QSpinBox setup.
+        """
         self.slider.setMinimum(low)
         self.slider.setMaximum(high)
         self.slider.setValue(val)
@@ -56,13 +58,17 @@ class SelectQualityDialog(qtw.QDialog):
         self.spinBox.setMaximum(high)
         self.spinBox.setValue(val)
 
-    # Apply current settings and close dialog
     def apply_settings(self):
+        """
+        Apply current settings and close dialog.
+        """
         self.selectedQuality = self.slider.value()
         self.close()
 
-    # Value of slider or spinbox changed; update them both
     def value_changed(self, newValue):
+        """
+        Value of slider or spinbox changed; update them both.
+        """
         if self.slider.value() != newValue:
             self.slider.setValue(newValue)
         elif self.spinBox.value() != newValue:
@@ -99,11 +105,12 @@ class ResultDialog(qtw.QMessageBox):
 
 
 def createDialog(imageArray, imType, chosenPath):
-    imgPath = None
-    errorStackTrace = None
-
+    # Something went wrong
     if imType == None:
         return
+
+    imgPath = None
+    errorStackTrace = None
 
     compressionFactor = None
     if imType == "JPG" or imType == "PNG":
@@ -120,30 +127,20 @@ def createDialog(imageArray, imType, chosenPath):
     imageArray[imageArray < 0] = 0
     imageArray = imageArray.astype(np.uint8)
 
-    # Try saving image to disk
+    # Get compression/quality for JPG and PNG (don't compress tiff)
+    compression_list = None
     if imType == "JPG":
-        try:
-            # 0-100 quality
-            cv2.imwrite(
-                chosenPath, imageArray, [cv2.IMWRITE_JPEG_QUALITY, compressionFactor]
-            )
-            imgPath = chosenPath
-        except Exception as e:
-            errorStackTrace = e
+        # 0->100 quality (JPG)
+        compression_list = [cv2.IMWRITE_JPEG_QUALITY, compressionFactor]
     elif imType == "PNG":
-        try:
-            # 9-0 compression
-            cv2.imwrite(
-                chosenPath, imageArray, [cv2.IMWRITE_PNG_COMPRESSION, compressionFactor]
-            )
-            imgPath = chosenPath
-        except Exception as e:
-            errorStackTrace = e
-    elif imType == "TIFF":
-        try:
-            cv2.imwrite(chosenPath, imageArray)
-            imgPath = chosenPath
-        except Exception as e:
-            errorStackTrace = e
+        # 9->0 compression (PNG)
+        compression_list = [cv2.IMWRITE_PNG_COMPRESSION, compressionFactor]
+
+    # Try saving image to disk
+    try:
+        cv2.imwrite(chosenPath, imageArray, compression_list)
+        imgPath = chosenPath
+    except Exception as e:
+        errorStackTrace = e
 
     ResultDialog(imgPath, errorStackTrace).exec()
