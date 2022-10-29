@@ -1,35 +1,27 @@
+# Instructions for local build:
+# Build inside docker container...
+# Follow instruction here: https://stackoverflow.com/questions/28668180/cant-install-pip-packages-inside-a-docker-container-with-ubuntu
+# 'sudo systemctl start docker'
+# 'sudo chmod 666 /var/run/docker.sock'
+# 'docker run -v ~/Documents/Code/ChimpStackr/:/ChimpStackr -w /ChimpStackr appimagecrafters/appimage-builder appimage-builder --skip-tests'
 version: 1
 
 script:
   # Remove any previous build
   - rm -rf $TARGET_APPDIR  | true
   # Make usr and icons dirs
-  - mkdir -p AppDir/usr AppDir/usr/share/icons/128x128/
+  - mkdir -p AppDir/usr AppDir/usr/share/icons/
   # Copy icons in correct folder
   - cp packaging/icons/icon_128x128.png AppDir/usr/share/icons
   # Copy the python application code into the AppDir
   - cp src AppDir/usr -r
-
   # Install application dependencies
   - python3 -m pip install --ignore-installed --prefix=/usr --root=AppDir -r ./requirements.txt
+  
+  # If python version is lower than 3.9, we have to use this version of markupsafe
+  # src: https://stackoverflow.com/questions/70316777/no-module-named-markupsafe-error-in-jetson-nano
+  - python3 -m pip install MarkupSafe==2.0.0
 
-  # - rm -rf AppDir/usr/lib/python3.8/site-packages/PySide6/Qt/qml/
-  # - rm -rf AppDir/usr/lib/python3.8/site-packages/PySide6/examples/
-  # - rm -rf AppDir/usr/lib/python3.8/site-packages/PySide6/Qt/resources/
-  # - rm -rf AppDir/usr/lib/python3.8/site-packages/PySide6/Qt/translations/qtwebengine_locales/
-  # - rm -f AppDir/usr/lib/python3.8/site-packages/PySide6/{assistant,designer,linguist,lrelease,lupdate}
-  # - rm -f AppDir/usr/lib/python3.8/site-packages/PySide6/{Qt3D*,QtBluetooth*,QtCharts*,QtConcurrent*,QtDataVisualization*,QtDBus*,QtDesigner*,QtHelp*,QtMultimedia*,QtNetwork*,QtOpenGL*,QtPositioning*,QtPrintSupport*,QtQml*,QtQuick*,QtRemoteObjects*,QtScxml*,QtSensors*,QtSerialPort*,QtSql*,QtStateMachine*,QtSvg*,QtTest*,QtWeb*,QtXml*}
-  # - shopt -s extglob
-  # - rm -rf AppDir/usr/lib/python3.8/site-packages/PySide6/Qt/lib/!(libQt6OpenGL*|libQt6XcbQpa*|libQt6Wayland*|libQt6Egl*|libicudata*|libicuuc*|libicui18n*|libQt6DBus*|libQt6Network*|libQt6Qml*|libQt6Core*|libQt6Gui*|libQt6Widgets*|libQt6Svg*|libQt6UiTools*)
-
-  #- python3 -m pip install --prefix=/usr --root=AppDir -r <(sed '/^[rawpy|pkg2]/d' requirements.txt)
-  # Install rawpy
-  #- python3 -m pip install --ignore-installed  --prefix=/usr --root=AppDir --pre rawpy
-  # - cd $TARGET_APPDIR
-  # - git clone https://github.com/letmaik/rawpy
-  # - cd rawpy
-  # - python3 -m pip install numpy cython
-  # - python3 -m pip install .
 AppDir:
   path: ./AppDir
 
@@ -57,62 +49,34 @@ AppDir:
     include:
       - python3
       - python3-pkg-resources
-      # Use "appmenu-gtk3-module:amd64"??
-      - appmenu-gtk2-module # https://askubuntu.com/questions/1074926/failed-to-load-module-appmenu-gtk-module-canberra-gtk-module
-      # Specific dependencies for pip packages
-      - python3-opencv # For opencv
-      #- libraw-bin # For rawpy
-      - libraw-dev
 
-      - python3-numpy
-
-      # Qt 6 dependencies
-      - libcap2:amd64
-      - libcom-err2:amd64
-      - libdbus-1-3:amd64
-      - libgpg-error0:amd64
-      - libgtk-3-common
-      - libkeyutils1:amd64
-      - libllvm13
-      - liblzma5:amd64
-      - libpcre3:amd64
-      - libqt6gui6
-      - libqt6qml6
-      - libqt6qmlworkerscript6
-      - libqt6quick6
-      - libselinux1:amd64
-      - libtinfo6:amd64
-      - qml6-module-qtqml-workerscript:amd64
-      - qml6-module-qtquick:amd64
-      - qt6-gtk-platformtheme:amd64
-      - qt6-qpa-plugins:amd64
-      # x11
-      - libx11-6
-      - libx11-xcb1
-      - libxcb1
-      - libxcb-render0
-      - libxcb-xfixes0
-      - libxcb-shape0
-      - libxcb-dri2-0
-      - libxcb-shm0
-      - libxcb-glx0
-      - libxcb-present0
-      - libxcb-dri3-0
-      # graphic libraries interface (safe graphics bundle including drivers, acceleration may not work in some systems)
-      - libglvnd0
+      # PySide6 dependencies
+      - appmenu-gtk3-module # https://askubuntu.com/questions/1074926/failed-to-load-module-appmenu-gtk-module-canberra-gtk-module
+      - libcanberra-gtk3-module
       - libglx0
-      - libglapi-mesa
-      - libgl1
-      - libegl1
-      - libgbm1
-      - libdrm2
-      - libglx-mesa0
-      - libgl1-amber-dri
-      - libgl1-mesa-dri
-      - mesa-utils
-      - libgl1-mesa-glx
-      - libdrm-amdgpu1
-      - libdrm-nouveau2
+
+      # Qt linux dependencies: https://doc.qt.io/qt-5/linux-requirements.html
+      - libfontconfig1-dev
+      - libfreetype6-dev
+      - libx11-dev
+      - libx11-xcb-dev
+      - libxext-dev
+      - libxfixes-dev
+      - libxi-dev
+      - libxrender-dev
+      - libxcb1-dev
+      - libxcb-glx0-dev
+      - libxcb-keysyms1-dev
+      - libxcb-image0-dev
+      - libxcb-shm0-dev
+      - libxcb-icccm4-dev
+      - libxcb-sync-dev
+      - libxcb-xfixes0-dev
+      - libxcb-shape0-dev
+      - libxcb-randr0-dev
+      - libxcb-render-util0-dev
+      - libxkbcommon-dev
+      - libxkbcommon-x11-dev
     exclude: []
 
   runtime:
@@ -121,24 +85,29 @@ AppDir:
       # Set python home
       # See https://docs.python.org/3/using/cmdline.html#envvar-PYTHONHOME
       PYTHONHOME: '${APPDIR}/usr'
+      PYTHONPATH: '${APPDIR}/usr/lib/python3.8/site-packages'
 
   test:
-  #   fedora:
-  #     image: appimagecrafters/tests-env:fedora-30
-  #     command: ./AppRun
-  #   debian:
-  #     image: appimagecrafters/tests-env:debian-stable
-  #     command: ./AppRun
-  #   arch:
-  #     image: appimagecrafters/tests-env:archlinux-latest
-  #     command: ./AppRun
-  #   centos:
-  #     image: appimagecrafters/tests-env:centos-7
-  #     command: ./AppRun
+    fedora:
+      image: appimagecrafters/tests-env:fedora-30
+      command: ./AppRun
+      use_host_x: True
+    debian:
+      image: appimagecrafters/tests-env:debian-stable
+      command: ./AppRun
+      use_host_x: True
+    arch:
+      image: appimagecrafters/tests-env:archlinux-latest
+      command: ./AppRun
+      use_host_x: True
+    centos:
+      image: appimagecrafters/tests-env:centos-7
+      command: ./AppRun
+      use_host_x: True
     ubuntu:
       image: appimagecrafters/tests-env:ubuntu-xenial
       command: ./AppRun
-      use_host_x: true
+      use_host_x: True
 
 AppImage:
   update-information: 'gh-releases-zsync|AppImageCrafters|python-appimage-example|latest|python-appimage-*x86_64.AppImage.zsync'

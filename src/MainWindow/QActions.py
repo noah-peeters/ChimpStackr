@@ -31,8 +31,8 @@ class AboutAppWidget(qtw.QMessageBox):
     # Copy text to clipboard
     def copy_text(self):
         cb = qtw.QApplication.clipboard()
-        cb.clear(mode=cb.Clipboard)
-        cb.setText(self.text(), mode=cb.Clipboard)
+        cb.clear()
+        cb.setText(self.text())
 
 
 def setup_actions():
@@ -44,7 +44,7 @@ def setup_actions():
             mainWindow,
             "Select images to load.",
             mainWindow.current_image_directory,
-            options=qtw.QFileDialog.DontUseNativeDialog,  # Required fix for snap
+            #options=qtw.QFileDialog.DontUseNativeDialog,  # Required fix for snap
         )
         mainWindow.set_new_loaded_image_files(fileNames)
 
