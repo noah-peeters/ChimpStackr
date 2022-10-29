@@ -3,6 +3,7 @@ Focus stacking algorithms on CPU accelerated with Numba's njit.
 """
 import numpy as np
 import numba as nb
+import cv2
 
 ### Internal functions ###
 
@@ -43,6 +44,18 @@ def get_deviation(matrix):
         for x in range(matrix.shape[1]):
             summed_deviation += (matrix[y, x] - average_value) ** 2 / kernel_area
     return summed_deviation
+
+
+def gaussian_pyramid(img, num_levels):
+    """Calculate Gaussian pyramid."""
+    lower = img.copy()
+    gaussian_pyr = []
+    gaussian_pyr.append(lower.astype(np.float32))  # Use same dtype
+    # Compute all required pyramid levels
+    for _ in range(num_levels):
+        lower = cv2.pyrDown(lower)
+        gaussian_pyr.append(lower.astype(np.float32))  # convert_to_memmap
+    return gaussian_pyr
 
 
 ### Exposed functions ###
@@ -104,3 +117,37 @@ def fuse_pyramid_levels_using_focusmap(pyr_level1, pyr_level2, focusmap):
             else:
                 pyr_level1[y, x, :] = pyr_level2[y, x, :]
     return pyr_level1
+
+
+def generate_laplacian_pyramid(img, num_levels):
+    """Generate Laplacian pyramid (from Gaussian pyramid)"""
+    # Create gaussian pyramid
+    gaussian_pyr = gaussian_pyramid(img, num_levels)
+
+    laplacian_top = gaussian_pyr[-1]
+
+    laplacian_pyr = []
+    # Insert smallest pyramid level (with color)
+    laplacian_pyr.append(laplacian_top)
+    # Loop through pyramid levels from smallest to largest shape
+    for i in range(num_levels, 0, -1):
+        size = (gaussian_pyr[i - 1].shape[1], gaussian_pyr[i - 1].shape[0])
+        gaussian_expanded = cv2.pyrUp(gaussian_pyr[i], dstsize=size)
+
+        laplacian = np.subtract(gaussian_pyr[i - 1], gaussian_expanded)
+        laplacian_pyr.append(laplacian)
+    return laplacian_pyr
+
+
+def reconstruct_pyramid(laplacian_pyr):
+    """Reconstruct original image (highest resolution) from Laplacian pyramid."""
+    laplacian_top = laplacian_pyr[0]
+    laplacian_lst = [laplacian_top]
+    num_levels = len(laplacian_pyr) - 1
+    for i in range(num_levels):
+        size = (laplacian_pyr[i + 1].shape[1], laplacian_pyr[i + 1].shape[0])
+        laplacian_expanded = cv2.pyrUp(laplacian_top, dstsize=size)
+        laplacian_top = cv2.add(laplacian_pyr[i + 1], laplacian_expanded)
+
+        laplacian_lst.append(laplacian_top)
+    return laplacian_lst[num_levels]

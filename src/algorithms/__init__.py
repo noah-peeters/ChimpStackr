@@ -6,7 +6,6 @@ import cv2
 import numba.cuda as cuda
 
 import src.algorithms.dft_imreg as dft_imreg
-import src.algorithms.pyramid as pyramid_algorithm
 import src.ImageLoadingHandler as ImageLoadingHandler
 import src.algorithms.stacking_algorithms.cpu as CPU
 import src.algorithms.stacking_algorithms.gpu as GPU
@@ -54,10 +53,23 @@ class Algorithm:
         'im1' can be an image array (np.ndarray), or an image path (str).
         In the latter case, the image will be loaded into memory first.
         """
+        # TODO: Remove if str? shouldn't be needed anymore
         if type(im1) == str:
             im1 = self.ImageLoadingHandler.read_image_from_path(im1)
 
-        return pyramid_algorithm.laplacian_pyramid(im1, num_levels)
+        if self.useGpu:
+            return GPU.generate_laplacian_pyramid(im1, num_levels)
+        else:
+            return CPU.generate_laplacian_pyramid(im1, num_levels)
+
+    def reconstruct_pyramid(self, laplacian_pyr):
+        """
+        Call CPU/GPU function to reconstruct the original image from a laplacian pyramid.
+        """
+        if self.useGpu:
+            return GPU.reconstruct_pyramid(laplacian_pyr)
+        else:
+            return CPU.reconstruct_pyramid(laplacian_pyr)
 
     def focus_fuse_pyramid_pair(self, pyr1, pyr2, kernel_size):
         """

@@ -4,7 +4,6 @@
 import time
 
 import src.utilities as utilities
-import src.algorithms.pyramid as pyramid_algorithm
 import src.algorithms as algorithms
 import src.settings as settings
 
@@ -19,6 +18,8 @@ class LaplacianPyramid:
         # Parameters
         self.fusion_kernel_size = fusion_kernel_size
         self.pyramid_num_levels = pyramid_num_levels
+
+        self.UseGPU = False
 
     def toggle_cpu_gpu(self):
         """
@@ -62,20 +63,26 @@ class LaplacianPyramid:
             start_time = time.time()
             # Use previous *aligned* image instead of src image!
             # TODO: GPU speedup here
+            time0 = time.perf_counter()
             aligned_images.append(
                 self.Algorithm.align_image_pair(aligned_images[0], path)
             )
+            print(f"Align image pair: {time.perf_counter() - time0}")
             # Generate pyramid for the (aligned) image
             # TODO: GPU speedup here
+            time0 = time.perf_counter()
             new_pyr = self.Algorithm.generate_laplacian_pyramid(
                 aligned_images[1], self.pyramid_num_levels
             )
+            print(f"Generate 1 laplacian pyramid: {time.perf_counter() - time0}")
             # Remove first aligned image array from list (lower memory usage)
             del aligned_images[0]
             # Fuse this new pyramid with the existing one
+            time0 = time.perf_counter()
             fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
                 fused_pyr, new_pyr, self.fusion_kernel_size
             )
+            print(f"Fuse pyramid pair: {time.perf_counter() - time0}")
 
             # Send progress signal
             signals.finished_inter_task.emit(
@@ -87,7 +94,8 @@ class LaplacianPyramid:
                 ]
             )
 
-        if bool(settings.globalVars["QSettings"].value("computing/use_gpu")):
+        # Check the value used by algorithm, not the current value (might have been toggled during stacking operation)
+        if self.Algorithm.useGpu:
             # Copy pyramid back to CPU
             inter_pyr = []
             for i in fused_pyr:
@@ -95,7 +103,7 @@ class LaplacianPyramid:
             fused_pyr = inter_pyr
             del inter_pyr
         # Reconstruct image from Laplacian pyramid
-        fused_image = pyramid_algorithm.reconstruct(fused_pyr)
+        fused_image = self.Algorithm.reconstruct_pyramid(fused_pyr)
         self.output_image = fused_image
 
     # TODO: Rewrite for easy stopping of task (using signals??)
@@ -141,5 +149,5 @@ class LaplacianPyramid:
             )
 
         # Reconstruct image from Laplacian pyramid
-        fused_image = pyramid_algorithm.reconstruct(fused_pyr)
+        fused_image = self.Algorithm.reconstruct_pyramid(fused_pyr)
         self.output_image = fused_image
