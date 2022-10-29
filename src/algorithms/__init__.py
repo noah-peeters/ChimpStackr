@@ -123,10 +123,6 @@ class Algorithm:
                     # Upscale previous mask (faster, but slightly less accurate)
                     s = pyr2[pyramid_level].shape
                     array_out = cuda.device_array(
-                        # (
-                        #     math.ceil(previous_focusmap.shape[0] * 2),
-                        #     math.ceil(previous_focusmap.shape[1] * 2),
-                        # ),
                         (s[0], s[1]),
                         previous_focusmap.dtype,
                     )

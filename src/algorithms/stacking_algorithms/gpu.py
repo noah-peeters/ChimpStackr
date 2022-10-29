@@ -1,10 +1,7 @@
 """
 Focus stacking algorithms on GPU accelerated with Numba's cuda.
-~100x speedup --from 5s execution time to 0.5s-- when using (6000x4000) arrays/images
-on my hardware (intel i5-11400H, nvidia rtx 3060) when CPU runtime is compared to GPU runtime.
-
-Arrays with relatively low amount of elements will be calculated on the CPU,
-as they aren't worth the copy overhead to/from the GPU.
+~2x speedup when using (6000x4000) images on my hardware (intel i5-11400H, nvidia rtx 3060),
+when CPU runtime is compared to GPU runtime.
 """
 import math
 import numpy as np
@@ -12,12 +9,14 @@ import numba.cuda as cuda
 
 
 ### Internal functions ###
-
-# Device function that can be called from within a kernel
-# We are not able to pad an array on the gpu (np.zeros) like we use on the cpu,
-# so we calculate how many zero values would be added to pad the array instead.
 @cuda.jit(device=True, fastmath=True)
 def get_deviation(matrix, kernel_size):
+    """
+    Get deviation of a matrix using kernel_size for 'padding' zeros.
+    This is a device function that is called from within a CUDA kernel.
+    We are not able to pad an array on the gpu (np.zeros) like we do on the cpu,
+    so we calculate how many zero values would be added to pad the array instead.
+    """
     # compute zeros to add
     y_shape = matrix.shape[0]
     x_shape = matrix.shape[1]
@@ -45,6 +44,14 @@ def get_deviation(matrix, kernel_size):
 
 @cuda.jit(fastmath=True)
 def compute_focusmap_gpu(array1, array2, kernel_size, focusmap):
+    """
+    Computes which pixel is more in focus between 'array1' and 'array2'.
+    Uses a (standard) deviation of the surrounding area according to the 'kernel_size'.
+    Saves the result in a 2D focusmap array where a '0' means the first image's pixel is more in focus.
+    A '1' means the second image's pixel is more in focus.
+
+    CUDA will execute this function in parallel, so it should be faster than the serial CPU calculation.
+    """
     x, y = cuda.grid(2)
     # If grid index is larger than image shape, do nothing
     if x < array1.shape[0] and y < array1.shape[1]:
@@ -64,6 +71,12 @@ def compute_focusmap_gpu(array1, array2, kernel_size, focusmap):
 
 @cuda.jit(fastmath=True)
 def fuse_pyramid_levels_using_focusmap_gpu(pyr_level1, pyr_level2, focusmap):
+    """
+    Choose which pixel to use between 'pyr_level1' and 'pyr_level2',
+    based on the corresponding value in the focusmap.
+    Values are saved in 'pyr_level1'.
+    This is safe, because each kernel only works on a single pixel.
+    """
     x, y = cuda.grid(2)
     # If grid index is larger than image shape, do nothing
     if x < pyr_level1.shape[0] and y < pyr_level1.shape[1]:
@@ -71,10 +84,6 @@ def fuse_pyramid_levels_using_focusmap_gpu(pyr_level1, pyr_level2, focusmap):
             # Copy 3 color channels
             for i in range(3):
                 pyr_level1[x, y, i] = pyr_level2[x, y, i]
-        # if focusmap[y, x] == 0:
-        #     pyr_level1[y, x, :] = pyr_level1[y, x, :]
-        # else:
-        #     pyr_level1[y, x, :] = pyr_level2[y, x, :]
 
 
 @cuda.jit(fastmath=True)
@@ -95,6 +104,7 @@ def BGR2GRAY(array_in, array_out):
 
 
 # TODO: Accelerate using gpu
+# Plan of action: use gpu for blurring images
 def gaussian_pyramid(img, num_levels):
     """Calculate Gaussian pyramid."""
     import cv2
@@ -110,7 +120,7 @@ def gaussian_pyramid(img, num_levels):
 
 
 ### Exposed functions ###
-# TODO: Don't recalculate cuda args?
+# TODO: Don't recalculate cuda args? And call most functions directly from parent script?
 
 
 def compute_focusmap(array1, array2, kernel_size):
@@ -145,7 +155,7 @@ def compute_focusmap(array1, array2, kernel_size):
 
 
 def fuse_pyramid_levels_using_focusmap(pyr_level1, pyr_level2, focusmap):
-    """Calculate cuda args and call kernel."""
+    # Calculate cuda args
     threadsperblock = (16, 16)  # Should be a multiple of 32 (max 1024)
     blockspergrid_x = math.ceil(pyr_level1.shape[0] / threadsperblock[0])
     blockspergrid_y = math.ceil(pyr_level1.shape[1] / threadsperblock[1])
