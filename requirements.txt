@@ -9,6 +9,7 @@ numba==0.56.3
 rawpy==0.17.2
 imageio==2.22.2
 pyfftw==0.13.0
+MarkupSafe==2.1.1
 
 # TODO: Check if really needed (used for image alignment)
 scipy==1.9.3 # 1.8.0 gives error on mac pyinstaller build
