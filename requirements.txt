@@ -1,5 +1,5 @@
 # Pure UI requirements
-pyside6_essentials==6.4.1
+pyside6_essentials==6.4.2
 qt-material==2.12
 
 # Algorithm requirements
