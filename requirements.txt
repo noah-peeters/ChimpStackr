@@ -7,7 +7,7 @@ opencv-python-headless==4.7.0.68 # TODO: Test if working on windows. Otherwise r
 numpy==1.23.5
 numba==0.56.4
 rawpy==0.17.3
-imageio==2.23.0
+imageio==2.24.0
 pyfftw==0.13.1
 MarkupSafe==2.1.1
 
