@@ -16,10 +16,6 @@ src.settings.init()
 import src.utilities
 from src.algorithms.API import LaplacianPyramid
 
-src.settings.globalVars["SupportedImageReadFormats"]
-
-
-
 def do_focus_stack(img_path, out_path):
     stacker = LaplacianPyramid(use_pyqt=False)
 
