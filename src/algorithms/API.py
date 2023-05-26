@@ -9,9 +9,12 @@ import src.settings as settings
 
 
 class LaplacianPyramid:
-    def __init__(self, fusion_kernel_size=6, pyramid_num_levels=8):
+    def __init__(self, fusion_kernel_size=6, pyramid_num_levels=8, use_pyqt=True, use_gpu=False, selected_gpu_id = 0):
         self.output_image = None
         self.image_paths = []
+        self.use_pyqt = use_pyqt
+        self.use_gpu = use_gpu
+        self.selected_gpu_id = selected_gpu_id
 
         self.Algorithm = algorithms.Algorithm()
 
@@ -27,16 +30,28 @@ class LaplacianPyramid:
         This function will be called every time the algorithm starts (before start),
         so prevent changes mid-way are not possible.
         """
-        self.Algorithm.toggle_cpu_gpu(
-            bool(settings.globalVars["QSettings"].value("computing/use_gpu")),
-            int(settings.globalVars["QSettings"].value("computing/selected_gpu_id")),
-        )
+        if self.use_pyqt:
+            self.Algorithm.toggle_cpu_gpu(
+                bool(settings.globalVars["QSettings"].value("computing/use_gpu")),
+                int(settings.globalVars["QSettings"].value("computing/selected_gpu_id")),
+            )
+
+        else:
+            self.Algorithm.toggle_cpu_gpu(
+                self.use_gpu,
+                int(self.selected_gpu_id)
+            )
+            
 
     def update_image_paths(self, new_image_paths):
         """
         Set new image paths (sorted by name).
         """
-        self.image_paths = sorted(new_image_paths, key=utilities.int_string_sorting)
+        if self.use_pyqt:
+            self.image_paths = sorted(new_image_paths, key=utilities.int_string_sorting)
+
+        else:
+            self.image_paths = new_image_paths
 
     # TODO: Rewrite for easy stopping of task (using signals??)
     def align_and_stack_images(self, signals):
@@ -85,14 +100,16 @@ class LaplacianPyramid:
             print(f"Fuse pyramid pair: {time.perf_counter() - time0}")
 
             # Send progress signal
-            signals.finished_inter_task.emit(
-                [
-                    "finished_image",
-                    i + 1,
-                    len(self.image_paths),
-                    time.time() - start_time,
-                ]
-            )
+            if self.use_pyqt:
+                # Send progress signal
+                signals.finished_inter_task.emit(
+                    [
+                        "finished_image",
+                        i + 1,
+                        len(self.image_paths),
+                        time.time() - start_time,
+                    ]
+                )            
 
         # Check the value used by algorithm, not the current value (might have been toggled during stacking operation)
         if self.Algorithm.useGpu:
@@ -105,6 +122,8 @@ class LaplacianPyramid:
         # Reconstruct image from Laplacian pyramid
         fused_image = self.Algorithm.reconstruct_pyramid(fused_pyr)
         self.output_image = fused_image
+
+        return self.output_image
 
     # TODO: Rewrite for easy stopping of task (using signals??)
     def stack_images(self, signals):
@@ -139,15 +158,17 @@ class LaplacianPyramid:
             )
 
             # Send progress signal
-            signals.finished_inter_task.emit(
-                [
-                    "finished_image",
-                    i + 1,
-                    len(self.image_paths),
-                    time.time() - start_time,
-                ]
-            )
-
+            if self.use_pyqt:
+                signals.finished_inter_task.emit(
+                    [
+                        "finished_image",
+                        i + 1,
+                        len(self.image_paths),
+                        time.time() - start_time,
+                    ]
+                )
         # Reconstruct image from Laplacian pyramid
         fused_image = self.Algorithm.reconstruct_pyramid(fused_pyr)
         self.output_image = fused_image
+
+        return self.output_image
