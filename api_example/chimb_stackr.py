@@ -36,7 +36,6 @@ def do_focus_stack(img_path, out_path):
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(description='Description of your program')
     parser.add_argument('-i','--img_dir', help='input images path', required=True)
     parser.add_argument('-o','--out_path', help='output path', required=False)
