@@ -5,7 +5,7 @@ qt-material==2.14
 # Algorithm requirements
 opencv-python-headless==4.7.0.68 # TODO: Test if working on windows. Otherwise revert back to "opencv-python"
 numpy==1.23.5
-numba==0.56.4
+numba==0.57.1
 rawpy==0.18.1
 imageio==2.29.0
 pyfftw==0.13.1
