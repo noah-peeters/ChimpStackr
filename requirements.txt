@@ -3,7 +3,7 @@ pyside6_essentials==6.4.2
 qt-material==2.14
 
 # Algorithm requirements
-opencv-python-headless==4.7.0.68 # TODO: Test if working on windows. Otherwise revert back to "opencv-python"
+opencv-python-headless==4.8.0.74 # TODO: Test if working on windows. Otherwise revert back to "opencv-python"
 numpy==1.23.5
 numba==0.56.4
 rawpy==0.18.1
