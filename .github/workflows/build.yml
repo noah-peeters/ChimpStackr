@@ -6,6 +6,9 @@
 # git push
 # git push origin --tags
 
+# TODO: Change 'pip install git+https://github.com/AppImageCrafters/appimage-builder.git' to 'pip install appimage-builder'
+# TODO: once 'https://github.com/AppImageCrafters/appimage-builder/issues/324' is fixed
+
 name: Build releases
 
 on:
@@ -59,7 +62,7 @@ jobs:
           - os: ubuntu-latest
             TARGET: ubuntu
             CMD_BUILD: >
-              pip install appimage-builder &&
+              pip install git+https://github.com/AppImageCrafters/appimage-builder.git &&
               appimage-builder --skip-tests &&
               mkdir dist/ &&
               mv *.AppImage dist/
