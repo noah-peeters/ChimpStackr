@@ -1,4 +1,4 @@
-import os, sys, tempfile
+import os, sys, tempfile, argparse
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 import PySide6.QtGui as qtg
@@ -8,26 +8,6 @@ import PySide6.QtGui as qtg
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
 sys.path.insert(0, parentdir)  # Insert at first place
-
-import src.settings as settings
-import src.MainWindow as MainWindow
-
-# Directory for storing tempfiles. Automatically deletes on program exit.
-ROOT_TEMP_DIRECTORY = tempfile.TemporaryDirectory(prefix="ChimpStackr_")
-settings.init()
-settings.globalVars["RootTempDir"] = ROOT_TEMP_DIRECTORY
-
-
-# Taskbar icon fix for Windows
-# Src: https://stackoverflow.com/questions/1551605/how-to-set-applications-taskbar-icon-in-windows-7S
-if os.name == "nt":
-    import ctypes
-
-    myappid = "test.application"  # arbitrary string
-    try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-    except Exception:
-        pass  # Platform older than Windows 7
 
 
 def resource_path(relative_path):
@@ -41,7 +21,26 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 
-def main():
+def main_ui():
+    import src.settings as settings
+    import src.MainWindow as MainWindow
+
+    # Directory for storing tempfiles. Automatically deletes on program exit.
+    ROOT_TEMP_DIRECTORY = tempfile.TemporaryDirectory(prefix="ChimpStackr_")
+    settings.init()
+    settings.globalVars["RootTempDir"] = ROOT_TEMP_DIRECTORY
+
+    # Taskbar icon fix for Windows
+    # Src: https://stackoverflow.com/questions/1551605/how-to-set-applications-taskbar-icon-in-windows-7S
+    if os.name == "nt":
+        import ctypes
+
+        myappid = "test.application"  # arbitrary string
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception:
+            pass  # Platform older than Windows 7
+
     qApp = qtw.QApplication([])
     # Needed for saving QSettings
     qApp.setApplicationName("ChimpStackr")
@@ -65,5 +64,19 @@ def main():
     qApp.exec()
 
 
+def main_cmd_line():
+    import src.command_line as cmd_line
+
+    parser = argparse.ArgumentParser(description="Description of your program")
+    parser.add_argument("-i", "--img_dir", help="input images path", required=True)
+    parser.add_argument("-o", "--out_path", help="output path", required=False)
+    args = vars(parser.parse_args())
+
+    cmd_line.do_focus_stack(img_path=args["img_dir"], out_path=args["out_path"])
+
+
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) - 1 <= 0:  # First parameter is this file name
+        main_ui()  # Show UI when no cmdline arguments passed
+    else:
+        main_cmd_line()  # Don't show UI when no cmdline arguments passed
