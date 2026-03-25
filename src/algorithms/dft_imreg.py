@@ -718,7 +718,7 @@ def translation(im0, im1, filter_pcorr=0, odds=1, constraints=None):
     # doesn't distinguish rotation of x vs x + 180deg).
     ret = np.rot90(im1, 2)  # Rotate the input array over 180°
     tvec2, succ2 = _phase_correlation(
-        im0, im1, argmax_translation, filter_pcorr, constraints
+        im0, ret, argmax_translation, filter_pcorr, constraints
     )
 
     pick_rotated = False

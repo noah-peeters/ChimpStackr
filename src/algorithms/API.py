@@ -142,39 +142,52 @@ class LaplacianPyramid:
         self.Algorithm.reset_cancel()
         self.Algorithm.alignment_shifts = []
 
-        aligned_images = [
-            self.Algorithm.align_image_pair(self.image_paths[0], self.image_paths[0])
-        ]
+        ref_image = self.Algorithm.align_image_pair(self.image_paths[0], self.image_paths[0])
         fused_pyr = self.Algorithm.generate_laplacian_pyramid(
-            aligned_images[0], self.pyramid_num_levels
+            ref_image, self.pyramid_num_levels
         )
+        new_pyr = None
 
-        for i, path in enumerate(self.image_paths):
-            if i == 0:
-                continue
-            self.Algorithm.wait_if_paused()
-            if self.Algorithm.is_cancelled:
-                logger.info("Stacking cancelled")
-                return
+        try:
+            for i, path in enumerate(self.image_paths):
+                if i == 0:
+                    continue
+                self.Algorithm.wait_if_paused()
+                if self.Algorithm.is_cancelled:
+                    logger.info("Stacking cancelled")
+                    return
 
-            start_time = time.time()
-            aligned_images.append(self._load_and_align(aligned_images[0], path))
-            new_pyr = self.Algorithm.generate_laplacian_pyramid(
-                aligned_images[1], self.pyramid_num_levels
-            )
-            del aligned_images[0]
-            fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
-                fused_pyr, new_pyr, self.fusion_kernel_size,
-                self.config.contrast_threshold, self.config.feather_radius,
-            )
-            elapsed = time.time() - start_time
-            self._emit_progress(signals, progress_callback, i + 1, len(self.image_paths), elapsed)
+                start_time = time.time()
+                aligned = self._load_and_align(ref_image, path)
+                new_pyr = self.Algorithm.generate_laplacian_pyramid(
+                    aligned, self.pyramid_num_levels
+                )
+                del aligned
+                fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
+                    fused_pyr, new_pyr, self.fusion_kernel_size,
+                    self.config.contrast_threshold, self.config.feather_radius,
+                )
+                del new_pyr
+                new_pyr = None
+                elapsed = time.time() - start_time
+                self._emit_progress(signals, progress_callback, i + 1, len(self.image_paths), elapsed)
+        finally:
+            # Ensure intermediate arrays are freed even on cancel/error
+            del new_pyr, ref_image
 
         if self.Algorithm.is_cancelled:
             return
 
-        if self.Algorithm.useGpu:
-            fused_pyr = [level.copy_to_host() for level in fused_pyr]
+        # GPU module now returns numpy arrays (transfers happen internally),
+        # so no copy_to_host() needed. Handle legacy device arrays gracefully.
+        try:
+            import numba.cuda as cuda
+            fused_pyr = [
+                level.copy_to_host() if cuda.is_cuda_array(level) else level
+                for level in fused_pyr
+            ]
+        except (ImportError, AttributeError):
+            pass
 
         self.output_image = self.Algorithm.reconstruct_pyramid(fused_pyr)
         # Local tone-mapping to compensate for PMax contrast boost
@@ -184,25 +197,32 @@ class LaplacianPyramid:
         self.apply_gpu_settings()
         self.Algorithm.reset_cancel()
 
-        im0 = self.Algorithm.align_image_pair(self.image_paths[0], self.image_paths[0])
+        im0 = self.Algorithm.load_image(self.image_paths[0])
         fused_pyr = self.Algorithm.generate_laplacian_pyramid(im0, self.pyramid_num_levels)
+        del im0
+        new_pyr = None
 
-        for i, path in enumerate(self.image_paths):
-            if i == 0:
-                continue
-            self.Algorithm.wait_if_paused()
-            if self.Algorithm.is_cancelled:
-                return
-            start_time = time.time()
-            im1 = self.Algorithm.align_image_pair(path, path)
-            new_pyr = self.Algorithm.generate_laplacian_pyramid(im1, self.pyramid_num_levels)
-            del im1
-            fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
-                fused_pyr, new_pyr, self.fusion_kernel_size,
-                self.config.contrast_threshold, self.config.feather_radius,
-            )
-            elapsed = time.time() - start_time
-            self._emit_progress(signals, progress_callback, i + 1, len(self.image_paths), elapsed)
+        try:
+            for i, path in enumerate(self.image_paths):
+                if i == 0:
+                    continue
+                self.Algorithm.wait_if_paused()
+                if self.Algorithm.is_cancelled:
+                    return
+                start_time = time.time()
+                im1 = self.Algorithm.load_image(path)
+                new_pyr = self.Algorithm.generate_laplacian_pyramid(im1, self.pyramid_num_levels)
+                del im1
+                fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
+                    fused_pyr, new_pyr, self.fusion_kernel_size,
+                    self.config.contrast_threshold, self.config.feather_radius,
+                )
+                del new_pyr
+                new_pyr = None
+                elapsed = time.time() - start_time
+                self._emit_progress(signals, progress_callback, i + 1, len(self.image_paths), elapsed)
+        finally:
+            del new_pyr
 
         if self.Algorithm.is_cancelled:
             return

@@ -21,6 +21,13 @@ class ImageLoadingHandler:
         self.supported_formats = SUPPORTED_IMAGE_READ_FORMATS if supported_formats is None else supported_formats
         self.supported_raw = SUPPORTED_RAW_FORMATS if supported_raw is None else supported_raw
 
+    def is_supported(self, path):
+        """Check if a file path has a supported image extension."""
+        _, ext = os.path.splitext(path)
+        ext = ext.lstrip(".")
+        return (ext.lower() in self.supported_formats
+                or ext.upper() in self.supported_raw)
+
     def read_image_from_path(self, path):
         """
         Load src image from path to BGR 2D numpy array.

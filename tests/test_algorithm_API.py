@@ -526,3 +526,196 @@ class TestLaplacianEnhancements:
         lp.update_image_paths(test_image_paths[:3])
         lp.stack_images()
         assert lp.output_image is not None
+
+
+# -- Exposure Fusion Tests --
+
+class TestExposureFusion:
+    def test_mertens_fuse_batch(self):
+        """Mertens fusion of a small batch should produce valid output."""
+        images = [np.random.randint(0, 255, (50, 50, 3), dtype=np.uint8).astype(np.float32)
+                  for _ in range(3)]
+        result = CPU.mertens_fuse_batch(images)
+        assert result.shape == images[0].shape
+        assert result.dtype == np.float32
+        assert result.min() >= 0
+        assert result.max() <= 255.0
+
+    def test_mertens_single_image(self):
+        """Mertens with a single image should still work."""
+        img = np.random.randint(0, 255, (50, 50, 3), dtype=np.uint8).astype(np.float32)
+        result = CPU.mertens_fuse_batch([img])
+        assert result is not None
+        assert result.shape == img.shape
+
+    def test_exposure_fusion_stack(self, test_image_paths):
+        """Full exposure fusion stacking pipeline."""
+        config = AlgorithmConfig(stacking_method="exposure_fusion")
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:4])
+        lp.stack_images()
+        assert lp.output_image is not None
+        assert lp.output_image.dtype == np.float32
+
+
+# -- Auto-crop Tests --
+
+class TestAutoCrop:
+    def test_crop_bounds_from_shifts(self, test_image_paths):
+        """Auto-crop should compute bounds from alignment shifts."""
+        config = AlgorithmConfig(fusion_kernel_size=6, pyramid_num_levels=4)
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:3])
+        lp.align_and_stack_images()
+        assert lp.output_image is not None
+
+        bounds = lp.get_crop_bounds()
+        if bounds is not None:
+            top, bottom, left, right = bounds
+            assert all(v >= 0 for v in bounds)
+
+    def test_crop_bounds_no_alignment(self, test_image_paths):
+        """Auto-crop with no alignment shifts should return None."""
+        config = AlgorithmConfig(fusion_kernel_size=6, pyramid_num_levels=4)
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:3])
+        lp.stack_images()  # stack without alignment
+        bounds = lp.get_crop_bounds()
+        assert bounds is None  # no shifts → nothing to crop
+
+    def test_auto_crop_output(self, test_image_paths):
+        """auto_crop_output should reduce image dimensions."""
+        config = AlgorithmConfig(fusion_kernel_size=6, pyramid_num_levels=4)
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:3])
+        lp.align_and_stack_images()
+        assert lp.output_image is not None
+        original_shape = lp.output_image.shape
+
+        bounds = lp.auto_crop_output()
+        if bounds is not None:
+            # Cropped image should be smaller or equal
+            assert lp.output_image.shape[0] <= original_shape[0]
+            assert lp.output_image.shape[1] <= original_shape[1]
+
+
+# -- Pause/Cancel Tests --
+
+class TestPauseCancel:
+    def test_pause_and_resume(self):
+        """Pause/resume flags should toggle correctly."""
+        algo = Algorithm()
+        assert not algo.is_paused
+        algo.pause()
+        assert algo.is_paused
+        algo.resume()
+        assert not algo.is_paused
+
+    def test_cancel_clears_on_reset(self):
+        """reset_cancel should clear both cancel and pause states."""
+        algo = Algorithm()
+        algo.cancel()
+        assert algo.is_cancelled
+        algo.reset_cancel()
+        assert not algo.is_cancelled
+        assert not algo.is_paused
+
+    def test_cancel_during_alignment(self, test_image_paths):
+        """Cancel during align+stack should leave output None."""
+        config = AlgorithmConfig(fusion_kernel_size=6, pyramid_num_levels=4)
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths)
+
+        def cancel_early(current, total, time_taken):
+            if current >= 2:
+                lp.cancel()
+
+        lp.align_and_stack_images(progress_callback=cancel_early)
+        assert lp.output_image is None
+
+
+# -- Memory Safety Tests --
+
+class TestMemorySafety:
+    def test_stack_cleanup_after_cancel(self, test_image_paths):
+        """After cancel, the API should be reusable for a new stack."""
+        config = AlgorithmConfig(fusion_kernel_size=6, pyramid_num_levels=4)
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:3])
+
+        # Cancel immediately
+        def cancel_now(current, total, time_taken):
+            lp.cancel()
+        lp.stack_images(progress_callback=cancel_now)
+        assert lp.output_image is None
+
+        # Now stack again — should succeed
+        lp.stack_images()
+        assert lp.output_image is not None
+
+    def test_reuse_api_different_method(self, test_image_paths):
+        """Switching stacking method and re-running should work."""
+        config = AlgorithmConfig(fusion_kernel_size=6, pyramid_num_levels=4)
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:3])
+
+        lp.stack_images()
+        assert lp.output_image is not None
+        first_output = lp.output_image.copy()
+
+        lp.configure(stacking_method="weighted_average")
+        lp.stack_images()
+        assert lp.output_image is not None
+        # Should be a different result
+        assert not np.array_equal(first_output, lp.output_image)
+
+
+# -- GPU Fallback Tests --
+
+class TestGPUFallback:
+    def test_gpu_module_imports(self):
+        """GPU module should import without crashing even without CUDA."""
+        from src.algorithms.stacking_algorithms import gpu as GPU
+        assert hasattr(GPU, 'compute_focusmap')
+        assert hasattr(GPU, 'fuse_pyramid_levels_using_focusmap')
+        assert hasattr(GPU, 'generate_laplacian_pyramid')
+        assert hasattr(GPU, 'reconstruct_pyramid')
+
+    def test_gpu_focusmap_fallback(self):
+        """GPU compute_focusmap should fall back to CPU when CUDA unavailable."""
+        from src.algorithms.stacking_algorithms import gpu as GPU
+        gray1 = np.random.rand(30, 30).astype(np.float32)
+        gray2 = np.random.rand(30, 30).astype(np.float32)
+        # This should work regardless of CUDA availability (falls back to CPU)
+        fm = GPU.compute_focusmap(gray1, gray2, 4)
+        assert fm.shape == gray1.shape
+        assert fm.dtype == np.uint8
+
+
+# -- DFT Alignment Regression Tests --
+
+class TestDFTAlignment:
+    def test_translation_detection(self):
+        """A known translation should be detected approximately."""
+        img = np.random.rand(100, 100).astype(np.float32) * 255
+        # Create shifted version
+        shifted = np.zeros_like(img)
+        shifted[5:, 3:] = img[:-5, :-3]  # shift down 5, right 3
+
+        from src.algorithms.dft_imreg import translation
+        result = translation(img, shifted)
+        assert 'tvec' in result
+        assert 'success' in result
+        # Translation vector should be approximately (-5, -3) or (5, 3)
+        tvec = result['tvec']
+        assert abs(abs(tvec[0]) - 5) < 2, f"Y shift {tvec[0]} not close to 5"
+        assert abs(abs(tvec[1]) - 3) < 2, f"X shift {tvec[1]} not close to 3"
+
+    def test_identical_images_no_shift(self):
+        """Identical images should have near-zero translation."""
+        img = np.random.rand(80, 80).astype(np.float32) * 255
+        from src.algorithms.dft_imreg import translation
+        result = translation(img, img.copy())
+        tvec = result['tvec']
+        assert abs(tvec[0]) < 1.0, f"Y shift {tvec[0]} should be ~0"
+        assert abs(tvec[1]) < 1.0, f"X shift {tvec[1]} should be ~0"

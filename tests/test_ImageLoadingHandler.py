@@ -95,3 +95,46 @@ def test_custom_supported_formats():
     img = custom_loader.read_image_from_path("tests/ref_img.nef")
     # With custom empty raw list, NEF should not be recognized
     assert img is None, "NEF should not load when supported_raw is empty"
+
+
+def test_float32_loading():
+    """Float32 loading should return float32 array in 0-255 range."""
+    img = loader.read_image_as_float32("tests/low_res_images/DSC_0356.jpg")
+    assert img is not None
+    assert img.dtype == np.float32
+    assert img.max() <= 255.0
+    assert img.min() >= 0.0
+
+
+def test_float32_loading_nonexistent():
+    """Float32 loading of nonexistent file should return None."""
+    img = loader.read_image_as_float32("tests/nonexistent.jpg")
+    assert img is None
+
+
+def test_sharpness_flat_image():
+    """Flat image should have very low sharpness."""
+    flat = np.full((100, 100, 3), 128, dtype=np.uint8)
+    sharpness = ImageLoadingHandler.compute_sharpness(flat)
+    assert sharpness < 1.0
+
+
+def test_sharpness_noisy_image():
+    """Noisy image should have higher sharpness than flat."""
+    flat = np.full((100, 100, 3), 128, dtype=np.uint8)
+    noisy = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+    flat_sharp = ImageLoadingHandler.compute_sharpness(flat)
+    noisy_sharp = ImageLoadingHandler.compute_sharpness(noisy)
+    assert noisy_sharp > flat_sharp
+
+
+def test_is_supported_format():
+    """Format checking should handle case insensitivity."""
+    assert loader.is_supported("photo.JPG")
+    assert loader.is_supported("photo.jpg")
+    assert loader.is_supported("photo.PNG")
+    assert loader.is_supported("photo.tiff")
+    assert loader.is_supported("photo.NEF")
+    assert not loader.is_supported("photo.txt")
+    assert not loader.is_supported("photo.pdf")
+    assert not loader.is_supported(".DS_Store")

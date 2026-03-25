@@ -192,7 +192,14 @@ class CenterWidget(qtw.QWidget):
             item.setText(f"{datetime.today().strftime('%Y%m%d')}_{method_short}{align_tag}{rst_tag}")
             item.setData(qtc.Qt.UserRole, tmp_file)
 
-            cv2.imwrite(tmp_file, new_image_array)
+            if not cv2.imwrite(tmp_file, new_image_array):
+                os.close(file_handle)
+                try:
+                    settings.globalVars["MainWindow"].statusBar().showMessage(
+                        "Error: Failed to save output image", 5000)
+                except (KeyError, AttributeError):
+                    pass
+                return
             os.close(file_handle)
 
             # Add thumbnail to output item

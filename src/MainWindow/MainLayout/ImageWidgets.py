@@ -115,6 +115,7 @@ class LoadedImagesWidget(qtw.QWidget):
         self.setLayout(v_layout)
 
         self._threadpool = qtc.QThreadPool()
+        self._threadpool.setMaxThreadCount(4)
         self._thumbnail_map = {}
         self._default_style = self.styleSheet()
 

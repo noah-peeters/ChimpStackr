@@ -307,17 +307,20 @@ class Window(qtw.QMainWindow):
         )
 
         def finished_inter_task(result_list):
-            task_key, num_processed, num_to_process_total, time_taken = result_list
-            if task_key == "finished_image":
-                percentage_finished = num_processed / num_to_process_total * 100
-                self.progress_widget.update_value(
-                    percentage_finished,
-                    self.TimeRemainingHandler.calculate_time_remaining(
-                        1 / num_to_process_total * 100,
-                        100 - percentage_finished,
-                        time_taken,
-                    ),
-                )
+            try:
+                task_key, num_processed, num_to_process_total, time_taken = result_list
+                if task_key == "finished_image" and num_to_process_total > 0:
+                    percentage_finished = num_processed / num_to_process_total * 100
+                    self.progress_widget.update_value(
+                        percentage_finished,
+                        self.TimeRemainingHandler.calculate_time_remaining(
+                            1 / num_to_process_total * 100,
+                            100 - percentage_finished,
+                            time_taken,
+                        ),
+                    )
+            except (AttributeError, RuntimeError, ZeroDivisionError):
+                pass  # Widget may be destroyed during shutdown
 
         fn = getattr(self.LaplacianAlgorithm, method_name)
         worker = QThreading.Worker(fn)

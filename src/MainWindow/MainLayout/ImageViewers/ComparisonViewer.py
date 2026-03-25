@@ -22,7 +22,10 @@ class ComparisonSlider(qtw.QWidget):
         """Set the 'before' image (numpy RGB array or None)."""
         if image is None:
             self.before_pixmap = None
+            self._before_ref = None
         else:
+            image = np.ascontiguousarray(image)
+            self._before_ref = image  # prevent GC while QImage references data
             h, w, ch = image.shape
             qimg = qtg.QImage(image.data, w, h, w * ch, qtg.QImage.Format_RGB888)
             self.before_pixmap = qtg.QPixmap.fromImage(qimg)
@@ -32,7 +35,10 @@ class ComparisonSlider(qtw.QWidget):
         """Set the 'after' image (numpy RGB array or None)."""
         if image is None:
             self.after_pixmap = None
+            self._after_ref = None
         else:
+            image = np.ascontiguousarray(image)
+            self._after_ref = image  # prevent GC while QImage references data
             h, w, ch = image.shape
             qimg = qtg.QImage(image.data, w, h, w * ch, qtg.QImage.Format_RGB888)
             self.after_pixmap = qtg.QPixmap.fromImage(qimg)
