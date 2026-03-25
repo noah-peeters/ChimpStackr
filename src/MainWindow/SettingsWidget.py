@@ -1,203 +1,234 @@
 """
-Settings widget that handles user changing settings.
-"__init__" functions are called on application startup,
-to initialize the saved QSettings object.
+Settings panel — docked on the right side of the main window.
+Modern macOS-style grouped settings with sections.
 """
 import PySide6.QtWidgets as qtw
 import PySide6.QtCore as qtc
-import qt_material
-import numba.cuda as cuda
+import PySide6.QtGui as qtg
+
+try:
+    import numba.cuda as cuda
+    HAS_CUDA = cuda.is_available()
+except ImportError:
+    HAS_CUDA = False
 
 import src.settings as settings
 
 
-class UserInterfaceWidget(qtw.QWidget):
-    """
-    Settings under "User interface" tab.
-    """
-
-    themes_map_dict = {
-        "dark_amber": 0,
-        "dark_blue": 1,
-        "dark_cyan": 2,
-        "dark_lightgreen": 3,
-        "dark_pink": 4,
-        "dark_purple": 5,
-        "dark_red": 6,
-        "dark_teal": 7,
-        "dark_yellow": 8,
-        "light_amber": 9,
-        "light_blue": 10,
-        "light_cyan": 11,
-        "light_cyan_500": 12,
-        "light_lightgreen": 13,
-        "light_pink": 14,
-        "light_purple": 15,
-        "light_red": 16,
-        "light_teal": 17,
-        "light_yellow": 18,
-    }
-
-    def __init__(self, settings_widget):
+class SettingRow(qtw.QWidget):
+    """A single label + control row."""
+    def __init__(self, label_text, control, tooltip=None):
         super().__init__()
-        self.settings_widget = settings_widget
+        layout = qtw.QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        self.hide()
-        self.combobox = qtw.QComboBox(self)
-        self.combobox.addItems(self.themes_map_dict)
-        # First set
-        self.combo_box_changed(
-            settings.globalVars["QSettings"].value("user_interface/theme")
-        )
-        self.combobox.currentIndexChanged.connect(self.combo_box_changed)
+        label = qtw.QLabel(label_text)
+        label.setStyleSheet("color: #ececec; font-size: 12px; background: transparent;")
+        layout.addWidget(label)
+        layout.addStretch()
 
-        h_layout = qtw.QHBoxLayout()
-        h_layout.addWidget(qtw.QLabel("Application theme:"))
-        h_layout.addWidget(self.combobox)
+        control.setFixedWidth(120)
+        layout.addWidget(control)
 
-        v_layout = qtw.QVBoxLayout()
-        v_layout.addLayout(h_layout)
-        v_layout.setAlignment(qtc.Qt.AlignTop)
-        self.setLayout(v_layout)
-
-    def combo_box_changed(self, newIndex):
-        newIndex = int(newIndex)
-        # Get and set new theme.
-        newTheme = (
-            list(self.themes_map_dict.keys())[
-                list(self.themes_map_dict.values()).index(newIndex)
-            ]
-            + ".xml"
-        )
-        qt_material.apply_stylesheet(
-            settings.globalVars["MainApplication"], theme=newTheme
-        )
-        self.combobox.setCurrentIndex(newIndex)
-        # Save new theme
-        self.settings_widget.change_setting("user_interface/theme", newIndex)
+        if tooltip:
+            self.setToolTip(tooltip)
 
 
-class ComputingWidget(qtw.QWidget):
-    """
-    Settings under "Computing" tab.
-    """
-
-    # TODO: Test if behaving correctly on pc with no CUDA GPU, and with multiple GPUs
-    def __init__(self, settings_widget):
+class SettingSection(qtw.QWidget):
+    """A titled group of settings (macOS-style grouped section)."""
+    def __init__(self, title):
         super().__init__()
-        self.settings_widget = settings_widget
-        self.current_gpu_id = settings.globalVars["QSettings"].value("computing/gpu_id")
+        self._layout = qtw.QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 12)
+        self._layout.setSpacing(0)
 
-        # Get GPU names and place them at the correct index (corresponding to their ID)
-        available_gpus_dict = {}
-        if cuda.is_available():
-            for device in cuda.list_devices():
-                cc = device.compute_capability
-                name = str(device.name)
-                name = name[2 : len(name) - 1]
-                available_gpus_dict[f"{name}, CC: {cc[0]}.{cc[1]}"] = device.id
-
-        layout = qtw.QVBoxLayout()
-
-        # QGroupBox
-        self.use_gpu_groupbox = qtw.QGroupBox("Use CUDA GPU")
-        sub_layout = qtw.QVBoxLayout()
-
-        # Only allow enable if cuda is available
-        self.use_gpu_groupbox.setEnabled(cuda.is_available())
-        self.use_gpu_groupbox.setCheckable(cuda.is_available())
-
-        self.selectable_gpus_combobox = qtw.QComboBox()
-        self.selectable_gpus_combobox.addItems(available_gpus_dict)
-        sub_layout.addWidget(self.selectable_gpus_combobox)
-
-        self.use_gpu_groupbox.setLayout(sub_layout)
-
-        layout.addWidget(self.use_gpu_groupbox)
-
-        sub_layout.setAlignment(qtc.Qt.AlignTop)
-        layout.setAlignment(qtc.Qt.AlignTop)
-        self.setLayout(layout)
-
-        # First set (important!!)
-        if not cuda.is_available():
-            # Hard reset to be False, as leaving it enabled would make an error
-            self.update_gpu_group_box(False)
-        else:
-            # Can be both enabled and disabled, just use remembered state
-            self.update_gpu_group_box()
-        self.update_selected_gpu()
-        # Update on changed
-        self.use_gpu_groupbox.toggled.connect(self.update_gpu_group_box)
-        self.selectable_gpus_combobox.currentIndexChanged.connect(
-            self.update_selected_gpu
+        # Section title
+        title_label = qtw.QLabel(title)
+        title_label.setStyleSheet(
+            "color: #999999; font-size: 11px; font-weight: 600; "
+            "text-transform: uppercase; padding: 8px 0 4px 0; background: transparent;"
         )
+        self._layout.addWidget(title_label)
 
-    def update_gpu_group_box(self, new_bool=None):
-        """
-        Toggle usage of GPU.
-        Will only be available if "cuda.is_available()" returns True.
-        When no new value is passed, the widget will be updated to the last saved value in QSettings.
-        """
-        if new_bool != None:
-            # Save new value to QSettings
-            self.settings_widget.change_setting("computing/use_gpu", int(new_bool))
-        else:
-            # Only update visuals
-            self.use_gpu_groupbox.setChecked(
-                bool(settings.globalVars["QSettings"].value("computing/use_gpu"))
-            )
+        # Container for rows
+        self.container = qtw.QWidget()
+        self.container.setStyleSheet(
+            "QWidget { background: #2a2a2a; border-radius: 8px; }"
+        )
+        self.container_layout = qtw.QVBoxLayout(self.container)
+        self.container_layout.setContentsMargins(12, 6, 12, 6)
+        self.container_layout.setSpacing(0)
+        self._row_count = 0
+        self._layout.addWidget(self.container)
 
-    def update_selected_gpu(self, new_id=None):
-        """
-        Toggle the currently chosen GPU's index.
-        Will check if the new index is still valid,
-        as the available GPU's might have changed.
-        """
-        if new_id == None:
-            new_id = settings.globalVars["QSettings"].value("computing/selected_gpu_id")
+    def add_row(self, label_text, control, tooltip=None):
+        if self._row_count > 0:
+            sep = qtw.QFrame()
+            sep.setFrameShape(qtw.QFrame.HLine)
+            sep.setStyleSheet("background: #3d3d3d; max-height: 1px;")
+            self.container_layout.addWidget(sep)
 
-        new_id = int(new_id)
-        # Check if saved id is valid, reset to 0 otherwise
-        if new_id < self.selectable_gpus_combobox.count() - 1:
-            new_id = 0
-
-        # Save new id to QSettings
-        self.settings_widget.change_setting("computing/selected_gpu_id", new_id)
-        # Update visuals
-        self.selectable_gpus_combobox.setCurrentIndex(new_id)
+        row = SettingRow(label_text, control, tooltip)
+        row.setStyleSheet("background: transparent;")
+        self.container_layout.addWidget(row)
+        self._row_count += 1
 
 
-class SettingsWidget(qtw.QTabWidget):
-    default_settings = {
-        "user_interface": {
-            "theme": 2,
-        },
-        "computing": {
-            "use_gpu": 0,  # Bool: 0 is False; 1 is True
-            "selected_gpu_id": 0,
-        },
-    }
+class SettingsPanel(qtw.QWidget):
+    """Right-side settings panel (replaces the old floating window)."""
     setting_updated = qtc.Signal(tuple)
+
+    default_settings = {
+        "user_interface": {"theme": 2},
+        "computing": {"use_gpu": 0, "selected_gpu_id": 0},
+        "algorithm": {
+            "kernel_size": 6,
+            "pyramid_levels": 8,
+            "scale_factor": 10,
+            "alignment_ref": "first",
+        },
+    }
 
     def __init__(self):
         super().__init__()
+        self.setFixedWidth(300)
+        self.setStyleSheet("background: #1e1e1e;")
 
-        # Use default settings if not yet saved
-        for key, dict in self.default_settings.items():
-            for name, value in dict.items():
-                str1 = f"{key}/{name}"
-                if settings.globalVars["QSettings"].contains(str1):
-                    value = settings.globalVars["QSettings"].value(str1)
-                self.change_setting(str1, value)
+        # Initialize default QSettings values
+        for key, dict_val in self.default_settings.items():
+            for name, value in dict_val.items():
+                path = f"{key}/{name}"
+                if settings.globalVars["QSettings"].contains(path):
+                    value = settings.globalVars["QSettings"].value(path)
+                self.change_setting(path, value)
 
-        self.setWindowTitle("Edit settings")
-        self.addTab(UserInterfaceWidget(self), "User interface")
-        self.addTab(ComputingWidget(self), "Processing")
+        scroll = qtw.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(qtc.Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { border: none; background: #1e1e1e; }")
+
+        content = qtw.QWidget()
+        content.setStyleSheet("background: #1e1e1e;")
+        layout = qtw.QVBoxLayout(content)
+        layout.setContentsMargins(16, 8, 16, 16)
+        layout.setSpacing(4)
+
+        # Header
+        header = qtw.QLabel("Settings")
+        header.setStyleSheet(
+            "font-size: 16px; font-weight: 700; color: #ececec; "
+            "padding: 4px 0 8px 0; background: transparent;"
+        )
+        layout.addWidget(header)
+
+        # ── Algorithm Section ──
+        algo_section = SettingSection("ALGORITHM")
+
+        self.kernel_spin = qtw.QSpinBox()
+        self.kernel_spin.setRange(2, 20)
+        self.kernel_spin.setValue(int(settings.globalVars["QSettings"].value("algorithm/kernel_size") or 6))
+        self.kernel_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/kernel_size", v))
+        algo_section.add_row("Kernel size", self.kernel_spin,
+            "Focus comparison kernel. Larger = smoother transitions, slower")
+
+        self.pyramid_spin = qtw.QSpinBox()
+        self.pyramid_spin.setRange(2, 16)
+        self.pyramid_spin.setValue(int(settings.globalVars["QSettings"].value("algorithm/pyramid_levels") or 8))
+        self.pyramid_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/pyramid_levels", v))
+        algo_section.add_row("Pyramid levels", self.pyramid_spin,
+            "Laplacian pyramid depth. More = finer detail, slower")
+
+        self.scale_spin = qtw.QSpinBox()
+        self.scale_spin.setRange(1, 50)
+        self.scale_spin.setValue(int(settings.globalVars["QSettings"].value("algorithm/scale_factor") or 10))
+        self.scale_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/scale_factor", v))
+        algo_section.add_row("Align precision", self.scale_spin,
+            "DFT alignment scale factor. Higher = more precise, slower")
+
+        self.ref_combo = qtw.QComboBox()
+        self.ref_combo.addItems(["first", "middle", "previous"])
+        saved = settings.globalVars["QSettings"].value("algorithm/alignment_ref") or "first"
+        idx = self.ref_combo.findText(saved)
+        if idx >= 0:
+            self.ref_combo.setCurrentIndex(idx)
+        self.ref_combo.currentTextChanged.connect(lambda v: self.change_setting("algorithm/alignment_ref", v))
+        algo_section.add_row("Align reference", self.ref_combo,
+            "first: align all to first image\n"
+            "middle: align all to middle image\n"
+            "previous: chain-align to previous")
+
+        layout.addWidget(algo_section)
+
+        # ── GPU Section ──
+        gpu_section = SettingSection("GPU ACCELERATION")
+
+        self.gpu_checkbox = qtw.QCheckBox()
+        self.gpu_checkbox.setEnabled(HAS_CUDA)
+        self.gpu_checkbox.setChecked(
+            bool(int(settings.globalVars["QSettings"].value("computing/use_gpu") or 0)) and HAS_CUDA
+        )
+        self.gpu_checkbox.toggled.connect(lambda v: self.change_setting("computing/use_gpu", int(v)))
+        gpu_control = qtw.QWidget()
+        gpu_control.setStyleSheet("background: transparent;")
+        gpu_layout = qtw.QHBoxLayout(gpu_control)
+        gpu_layout.setContentsMargins(0, 0, 0, 0)
+        gpu_layout.addStretch()
+        gpu_layout.addWidget(self.gpu_checkbox)
+        gpu_section.add_row(
+            "Use CUDA" if HAS_CUDA else "CUDA (not available)",
+            gpu_control
+        )
+
+        if HAS_CUDA:
+            self.gpu_combo = qtw.QComboBox()
+            for device in cuda.list_devices():
+                cc = device.compute_capability
+                name = str(device.name)[2:-1]
+                self.gpu_combo.addItem(f"{name} ({cc[0]}.{cc[1]})")
+            saved_id = int(settings.globalVars["QSettings"].value("computing/selected_gpu_id") or 0)
+            self.gpu_combo.setCurrentIndex(min(saved_id, self.gpu_combo.count() - 1))
+            self.gpu_combo.currentIndexChanged.connect(
+                lambda v: self.change_setting("computing/selected_gpu_id", v)
+            )
+            gpu_section.add_row("GPU device", self.gpu_combo)
+
+        layout.addWidget(gpu_section)
+
+        layout.addStretch()
+
+        scroll.setWidget(content)
+
+        outer = qtw.QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        # Left border separator
+        wrapper = qtw.QHBoxLayout()
+        wrapper.setContentsMargins(0, 0, 0, 0)
+        wrapper.setSpacing(0)
+        sep = qtw.QFrame()
+        sep.setFrameShape(qtw.QFrame.VLine)
+        sep.setStyleSheet("background: #3d3d3d; max-width: 1px;")
+        wrapper.addWidget(sep)
+        wrapper.addWidget(scroll)
+
+        outer.addLayout(wrapper)
 
     def change_setting(self, key, value):
-        """
-        Change setting to new value and notify of change with a signal.
-        """
         settings.globalVars["QSettings"].setValue(key, value)
         self.setting_updated.emit((key, value))
+
+    def get_algorithm_config(self):
+        from src.config import AlgorithmConfig
+        qs = settings.globalVars["QSettings"]
+        return AlgorithmConfig(
+            fusion_kernel_size=int(qs.value("algorithm/kernel_size") or 6),
+            pyramid_num_levels=int(qs.value("algorithm/pyramid_levels") or 8),
+            alignment_scale_factor=int(qs.value("algorithm/scale_factor") or 10),
+            use_gpu=bool(int(qs.value("computing/use_gpu") or 0)),
+            selected_gpu_id=int(qs.value("computing/selected_gpu_id") or 0),
+            alignment_reference=str(qs.value("algorithm/alignment_ref") or "first"),
+        )
+
+
+# Keep backward compatibility name
+SettingsWidget = SettingsPanel

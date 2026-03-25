@@ -1,10 +1,10 @@
 """
-    Class that houses a QWidget displaying a progressbar + progress text.
-    Progressbar is used to display progress on a task;
-    Progress text is used to display "time left until completed" messages.
+    Progress bar widget with task description, animated bar, time remaining, and cancel button.
 """
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
+
+import src.settings as settings
 
 
 class ProgressBar(qtw.QWidget):
@@ -13,31 +13,61 @@ class ProgressBar(qtw.QWidget):
     def __init__(self):
         super().__init__()
 
-        # Setup layout
-        layout = qtw.QHBoxLayout(self)
+        main_layout = qtw.QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 4, 8, 4)
+        main_layout.setSpacing(4)
 
+        # Task description
+        self.task_label = qtw.QLabel("Processing...")
+        self.task_label.setStyleSheet("font-weight: bold; font-size: 12px;")
+        main_layout.addWidget(self.task_label)
+
+        # Progress bar
         self.progressbar = qtw.QProgressBar(self)
         self.progressbar.setFormat("%p%")
         self.progressbar.setTextVisible(True)
         self.progressbar.setAlignment(qtc.Qt.AlignCenter)
-        layout.addWidget(self.progressbar)
+        self.progressbar.setFixedHeight(22)
+        main_layout.addWidget(self.progressbar)
 
-        self.progress_label = qtw.QLabel("Please wait while the task is beginning...")
-        layout.addWidget(self.progress_label)
+        # Bottom row: time remaining + cancel button
+        bottom_layout = qtw.QHBoxLayout()
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.progress_label = qtw.QLabel("Starting...")
+        self.progress_label.setStyleSheet("color: #999999; font-size: 11px;")
+        bottom_layout.addWidget(self.progress_label)
+
+        bottom_layout.addStretch()
+
+        self.cancel_btn = qtw.QPushButton("Cancel")
+        self.cancel_btn.setFixedWidth(70)
+        self.cancel_btn.setStyleSheet(
+            "QPushButton { background: #ff6961; color: white; border: none; "
+            "border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: 600; }"
+            "QPushButton:hover { background: #ff8580; }"
+        )
+        self.cancel_btn.clicked.connect(self._on_cancel)
+        bottom_layout.addWidget(self.cancel_btn)
+
+        main_layout.addLayout(bottom_layout)
 
         self.setVisible(False)
-        self.setLayout(layout)
+        self.setLayout(main_layout)
 
-    # Update progressbar value and/or label text
+    def _on_cancel(self):
+        try:
+            settings.globalVars["MainWindow"].cancel_stacking()
+        except (KeyError, AttributeError):
+            pass
+
     def update_value(self, value=None, text=None):
         """
         Update progressbar value and/or label text.
-        Will smoothly animate progressbar slider.
-
-        If both values are none (default), this widget will be hidden.
+        Smoothly animates the progressbar slider.
+        If both values are None (default), this widget will be hidden.
         """
         if value:
-            # Smoothly animate progressbar movement
             if hasattr(self, "animation"):
                 self.animation.stop()
             else:
@@ -52,7 +82,10 @@ class ProgressBar(qtw.QWidget):
             self.progress_label.setText(text)
 
         if not value and not text:
-            # Hide and reset
             self.setVisible(False)
             self.progressbar.reset()
-            self.progress_label.setText("Please wait while the task is beginning...")
+            self.progress_label.setText("Starting...")
+            self.task_label.setText("Processing...")
+
+    def set_task_description(self, text):
+        self.task_label.setText(text)

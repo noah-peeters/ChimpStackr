@@ -80,17 +80,17 @@ class ResultDialog(qtw.QMessageBox):
     def __init__(self, imgPath=None, errorStackTrace=None):
         super().__init__()
 
-        if imgPath == None:
+        if imgPath is None:
             # Error msg
             self.setStandardButtons(qtw.QMessageBox.Ok)
             self.setIcon(qtw.QMessageBox.Critical)
             self.setWindowTitle("Export failed")
             self.setText("Failed to export!\n")
-            if errorStackTrace != None:
+            if errorStackTrace is not None:
                 self.setInformativeText("Error stack trace:")
                 self.setDetailedText(str(errorStackTrace))
 
-        elif imgPath != None and errorStackTrace == None:
+        elif imgPath is not None and errorStackTrace is None:
             # Success msg
             self.setStandardButtons(qtw.QMessageBox.Ok)
             self.setIcon(qtw.QMessageBox.Information)
@@ -106,7 +106,7 @@ class ResultDialog(qtw.QMessageBox):
 
 def createDialog(imageArray, imType, chosenPath):
     # Something went wrong
-    if imType == None:
+    if imType is None:
         return
 
     imgPath = None
@@ -116,7 +116,7 @@ def createDialog(imageArray, imType, chosenPath):
     if imType == "JPG" or imType == "PNG":
         qualityDialog = SelectQualityDialog(imType)
         qualityDialog.exec()
-        if qualityDialog.selectedQuality != None:
+        if qualityDialog.selectedQuality is not None:
             compressionFactor = qualityDialog.selectedQuality
         else:
             return

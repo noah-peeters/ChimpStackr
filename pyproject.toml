@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "chimpstackr"
+version = "0.0.25"
+description = "Open-source focus stacking application"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+requires-python = ">=3.9"
+dependencies = [
+    "pyside6-essentials>=6.4.2,<7.0",
+    "qt-material>=2.14",
+    "opencv-python-headless>=4.7,<5.0",
+    "numpy>=1.23,<3.0",
+    "numba>=0.56",
+    "rawpy>=0.18",
+    "imageio>=2.29",
+    "pyfftw>=0.13",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.scripts]
+chimpstackr = "src.run:main"
+chimpstackr-cli = "src.cli:main"
+
+[project.gui-scripts]
+chimpstackr-gui = "src.run:main"
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.png", "*.svg", "*.xml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

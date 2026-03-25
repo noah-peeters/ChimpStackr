@@ -1,76 +1,23 @@
 """
 Global variables shared between all scripts.
-Consts van be created be set by other scripts.
-Consts (obviously) shouldn't be changed after they have been set once. 
+Consts can be set by other scripts.
+Consts (obviously) shouldn't be changed after they have been set once.
+
+NOTE: globalVars is legacy. New code should prefer passing references
+through constructors or Qt parent-child relationships. The config module
+(src.config) provides structured configuration without globals.
 """
+
+from src.config import SUPPORTED_IMAGE_READ_FORMATS, SUPPORTED_RAW_FORMATS
 
 
 def init():
     global globalVars
     globalVars = {}
-    # Opencv imread/imwrite supported formats;
-    # src: https://docs.opencv.org/4.x/d4/da8/group__imgcodecs.html#ga288b8b3da0892bd651fce07b3bbd3a56
-    globalVars["SupportedImageReadFormats"] = [
-        "jpg",
-        "jpeg",
-        "jpe",
-        "jp2",
-        "png",
-        "bmp",
-        "dib",
-        "webp",
-        "pbm",
-        "pgm",
-        "ppm",
-        "pxm",
-        "pnm",
-        "pfm",
-        "sr",
-        "ras",
-        "tiff",
-        "tif",
-        "exr",
-        "hdr",
-        "pic",
-    ]
-    # Supported RAW formats (rawpy); src: https://fileinfo.com/filetypes/camera_raw
-    globalVars["SupportedRAWFormats"] = [
-        "RWZ",
-        "RW2",
-        "CR2",
-        "DNG",
-        "ERF",
-        "NRW",
-        "RAF",
-        "ARW",
-        "NEF",
-        "K25",
-        "DNG",
-        "SRF",
-        "EIP",
-        "DCR",
-        "RAW",
-        "CRW",
-        "3FR",
-        "BAY",
-        "MEF",
-        "CS1",
-        "KDC",
-        "ORF",
-        "ARI",
-        "SR2",
-        "MOS",
-        "MFW",
-        "CR3",
-        "FFF",
-        "SRW",
-        "J6I",
-        "X3F",
-        "KC2",
-        "RWL",
-        "MRW",
-        "PEF",
-        "IIQ",
-        "CXI",
-        "MDC",
-    ]
+    globalVars["SupportedImageReadFormats"] = SUPPORTED_IMAGE_READ_FORMATS
+    globalVars["SupportedRAWFormats"] = SUPPORTED_RAW_FORMATS
+
+
+def get(key, default=None):
+    """Safer accessor for globalVars."""
+    return globalVars.get(key, default)

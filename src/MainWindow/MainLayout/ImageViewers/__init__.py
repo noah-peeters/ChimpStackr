@@ -1,25 +1,24 @@
 """
-Exposes viewer objects.
-These should be used by external scripts.
+Image viewer with smooth zoom (pinch + scroll), pan (trackpad + mouse), and touch support.
+Uses QNativeGestureEvent for macOS trackpad pinch-to-zoom (QPinchGesture is broken on macOS).
 """
 import PySide6.QtWidgets as qtw
 import PySide6.QtCore as qtc
 import PySide6.QtGui as qtg
 
+import src.settings as settings
 import src.MainWindow.MainLayout.ImageViewers.ImageScene as image_scene
 import src.MainWindow.MainLayout.ImageViewers.ImageRetouchScene as image_retouch_scene
 
-# Regular viewer
+
 class ImageViewer(qtw.QGraphicsView):
     sendWheelEvent = qtc.Signal(qtg.QWheelEvent)
-    current_zoom = 1
-    zoom_in_factor = 1.15  # zoom out is derived as: 1/zoom_in
-    max_zoom_in = 10  # x100 to get percentage
-    tooltip_displaytime_ms = 750
+    current_zoom = 1.0
+    min_zoom = 0.1
+    max_zoom = 20.0
 
     def __init__(self, viewerScene=None):
         super().__init__()
-        # Scene setup
         if not viewerScene:
             self.viewerScene = image_scene.ImageScene(self)
         else:
@@ -29,127 +28,187 @@ class ImageViewer(qtw.QGraphicsView):
         self.setTransformationAnchor(qtw.QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(qtw.QGraphicsView.AnchorUnderMouse)
 
-        self.setVerticalScrollBarPolicy(qtc.Qt.ScrollBarAsNeeded)
-        self.setHorizontalScrollBarPolicy(qtc.Qt.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(qtc.Qt.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(qtc.Qt.ScrollBarAlwaysOff)
 
         self.setBackgroundBrush(qtg.QBrush(qtg.QColor(30, 30, 30)))
         self.setFrameShape(qtw.QFrame.NoFrame)
         self.setDragMode(qtw.QGraphicsView.ScrollHandDrag)
+        self.setCacheMode(qtw.QGraphicsView.CacheBackground)
+        self.setViewportUpdateMode(qtw.QGraphicsView.SmartViewportUpdate)
+        self.setOptimizationFlag(qtw.QGraphicsView.DontAdjustForAntialiasing, True)
+        self.setRenderHint(qtg.QPainter.SmoothPixmapTransform, True)
 
-        # Tooltip hovering next to mouse (used for info like zoom percentage)
-        self.mouse_tooltip = qtw.QToolTip()
-        self.zoom_out_factor = 1 / self.zoom_in_factor
+        # Empty state overlay
+        self.empty_state = qtw.QWidget(self)
+        self.empty_state.setAttribute(qtc.Qt.WA_TransparentForMouseEvents)
+        empty_layout = qtw.QVBoxLayout(self.empty_state)
+        empty_layout.setAlignment(qtc.Qt.AlignCenter)
 
-    # Convenience for parent script (no need to call through "viewerScene")
+        title = qtw.QLabel("No Image Selected")
+        title.setStyleSheet("font-size: 18px; font-weight: 600; color: #999999; background: transparent;")
+        title.setAlignment(qtc.Qt.AlignCenter)
+
+        subtitle = qtw.QLabel("Load images from File menu or drag and drop")
+        subtitle.setStyleSheet("font-size: 12px; color: #666666; background: transparent;")
+        subtitle.setAlignment(qtc.Qt.AlignCenter)
+
+        empty_layout.addWidget(title)
+        empty_layout.addWidget(subtitle)
+        self.empty_state.setVisible(True)
+
     def set_image(self, image):
         self.viewerScene.set_image(image)
+        self.empty_state.setVisible(image is None)
 
-    # Fit image to view (internal use; uses parent QGraphicsViewer)
+    def _apply_zoom(self, factor):
+        """Apply a zoom factor. Cannot zoom out past fit-to-view (1.0)."""
+        new_zoom = self.current_zoom * factor
+        new_zoom = max(1.0, min(self.max_zoom, new_zoom))
+        actual = new_zoom / self.current_zoom
+        if abs(actual - 1.0) < 0.001:
+            return
+        self.current_zoom = new_zoom
+        self.scale(actual, actual)
+        self._update_zoom_label()
+
+    def zoom_in(self):
+        if self.viewerScene.hasImage:
+            self._apply_zoom(1.25)
+
+    def zoom_out(self):
+        if self.viewerScene.hasImage:
+            self._apply_zoom(1 / 1.25)
+
+    def _update_zoom_label(self):
+        label = settings.globalVars.get("ZoomLabel")
+        if label:
+            label.setText(f" {round(self.current_zoom * 100)}% ")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.empty_state.setGeometry(self.viewport().geometry())
+
     def fitInView(self):
         rect = qtc.QRectF(self.viewerScene.pixmapPicture.pixmap().rect())
-        if not rect.isNull():
+        if not rect.isNull() and self.viewerScene.hasImage:
             self.setSceneRect(rect)
-            if self.viewerScene.hasImage:
-                unity = self.transform().mapRect(qtc.QRectF(0, 0, 1, 1))
-                self.scale(1 / unity.width(), 1 / unity.height())
-                viewrect = self.viewport().rect()
-                scenerect = self.transform().mapRect(rect)
-                factor = min(
-                    viewrect.width() / scenerect.width(),
-                    viewrect.height() / scenerect.height(),
-                )
-                self.scale(factor, factor)
-                self.current_zoom = 1
+            unity = self.transform().mapRect(qtc.QRectF(0, 0, 1, 1))
+            self.scale(1 / unity.width(), 1 / unity.height())
+            viewrect = self.viewport().rect()
+            scenerect = self.transform().mapRect(rect)
+            factor = min(
+                viewrect.width() / scenerect.width(),
+                viewrect.height() / scenerect.height(),
+            )
+            self.scale(factor, factor)
+            self.current_zoom = 1.0
+            self._update_zoom_label()
 
-    # Separate to prevent infinite recursion signal call
-    def handleWheelEvent(self, event: qtg.QWheelEvent) -> None:
-        # Only zoom when Ctrl is pressed
-        if event.modifiers() & qtc.Qt.ControlModifier:
-            if self.viewerScene.hasImage:
-                if event.angleDelta().y() > 0:
-                    # Zoom in
-                    if self.current_zoom * self.zoom_in_factor <= self.max_zoom_in + 1:
-                        self.current_zoom *= self.zoom_in_factor
-                        self.scale(self.zoom_in_factor, self.zoom_in_factor)
-                    else:
-                        new_zoom = (self.max_zoom_in + 1) / self.current_zoom
-                        self.current_zoom *= new_zoom
-                        self.scale(new_zoom, new_zoom)
-                else:
-                    # Zoom out
-                    if self.current_zoom * self.zoom_out_factor >= 1:
-                        self.current_zoom *= self.zoom_out_factor
-                        self.scale(self.zoom_out_factor, self.zoom_out_factor)
-                    else:
-                        self.fitInView()
+    # --- Input: macOS native gestures (pinch-to-zoom) ---
 
-                self.mouse_tooltip.showText(
-                    qtg.QCursor.pos(),
-                    str(round((self.current_zoom - 1) * 100, 2)) + "% zoom",
-                    msecShowTime=self.tooltip_displaytime_ms,
-                )
-                return True
+    def event(self, ev):
+        """Catch QNativeGestureEvent for macOS trackpad pinch-to-zoom."""
+        if ev.type() == qtc.QEvent.Type.NativeGesture:
+            return self._handle_native_gesture(ev)
+        return super().event(ev)
 
-    """
-        Overridden signals
-    """
+    def _handle_native_gesture(self, ev):
+        """Handle macOS native gesture events."""
+        if not self.viewerScene.hasImage:
+            return False
 
-    # Zoom in/out on mousewheel scroll
-    def wheelEvent(self, event: qtg.QWheelEvent) -> None:
+        gesture_type = ev.gestureType()
+
+        if gesture_type == qtc.Qt.NativeGestureType.ZoomNativeGesture:
+            # ev.value() is an incremental factor (small, e.g. 0.02)
+            # Formula: scale *= (1 + value)
+            factor = 1.0 + ev.value()
+            self._apply_zoom(factor)
+            ev.accept()
+            return True
+
+        elif gesture_type == qtc.Qt.NativeGestureType.SmartZoomNativeGesture:
+            # Double-tap with two fingers — toggle fit/100%
+            if self.current_zoom < 1.5:
+                self._apply_zoom(2.0 / self.current_zoom)
+            else:
+                self.fitInView()
+            ev.accept()
+            return True
+
+        return False
+
+    # --- Input: mouse wheel + trackpad scroll ---
+
+    def wheelEvent(self, event: qtg.QWheelEvent):
         self.sendWheelEvent.emit(event)
-        if self.handleWheelEvent(event) == True:
-            event.accept()
+
+        if not self.viewerScene.hasImage:
             return
-        super().wheelEvent(event)
+
+        # Detect trackpad vs mouse:
+        # Trackpad sends pixelDelta, mouse sends only angleDelta
+        has_pixel = event.pixelDelta() != qtc.QPoint(0, 0)
+
+        if has_pixel:
+            # Trackpad two-finger scroll = pan
+            delta = event.pixelDelta()
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - delta.x()
+            )
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() - delta.y()
+            )
+        else:
+            # Mouse wheel = zoom
+            angle = event.angleDelta().y()
+            if angle != 0:
+                factor = 1.0 + angle / 480.0
+                factor = max(0.8, min(1.25, factor))
+                self._apply_zoom(factor)
+
+        event.accept()
+
+    # --- Input: mouse ---
+
+    def mouseDoubleClickEvent(self, event):
+        """Double-click to fit image to view."""
+        if self.viewerScene.hasImage:
+            self.fitInView()
+        super().mouseDoubleClickEvent(event)
+
+    def handleWheelEvent(self, event: qtg.QWheelEvent):
+        """External wheel event handler (for synced viewers)."""
+        if not self.viewerScene.hasImage:
+            return
+        angle = event.angleDelta().y()
+        if angle != 0:
+            factor = 1.0 + angle / 480.0
+            self._apply_zoom(max(0.8, min(1.25, factor)))
+            return True
 
 
 # Retouching viewer
 class ImageRetouchViewer(ImageViewer):
     def __init__(self):
-        # Scene setup
         viewerScene = image_retouch_scene.ImageRetouchScene(self)
         super().__init__(viewerScene)
 
 
-# Top widget for retouching settings
 class RetouchingTopWidget(qtw.QWidget):
     def __init__(self):
         super().__init__()
         combobox = qtw.QComboBox()
-        combobox.addItems(
-            {
-                "Direct copy": 0,
-                "Lighten": 1,
-                "Darken": 2,
-            }
-        )
-        combobox.setToolTip("Method used for copying.")
-        combobox.setItemData(
-            0, "Directly copy masked pixels to output.", qtc.Qt.ToolTipRole
-        )
-        combobox.setItemData(
-            1,
-            "Copy masked pixels if higher luminance (lighter) than output.",
-            qtc.Qt.ToolTipRole,
-        )
-        combobox.setItemData(
-            2,
-            "Copy masked pixels if lower luminance (darker) than output.",
-            qtc.Qt.ToolTipRole,
-        )
-        button = qtw.QPushButton()
-        button.setText("Save output image.")
-
+        combobox.addItems({"Direct copy": 0, "Lighten": 1, "Darken": 2})
+        button = qtw.QPushButton("Save output image.")
         self.setMaximumHeight(50)
-        # print(button.size().height())  # TODO: Use button size, but height returns large value (480px)???
-
         hLayout = qtw.QHBoxLayout()
         hLayout.addWidget(combobox)
         hLayout.addWidget(button)
         self.setLayout(hLayout)
 
 
-# Widget that displays a retouching viewer, and a regular image viewer
 class ImageRetouchingWidget(qtw.QWidget):
     def __init__(self):
         super().__init__()
@@ -160,65 +219,43 @@ class ImageRetouchingWidget(qtw.QWidget):
         vSplitter.setChildrenCollapsible(False)
         vSplitter.addWidget(self.retouch_viewer)
         vSplitter.addWidget(self.image_viewer)
-
-        width = int(self.size().width() / 2)
-        vSplitter.setSizes([width, width])
+        vSplitter.setSizes([400, 400])
 
         vLayout = qtw.QVBoxLayout()
         vLayout.addWidget(RetouchingTopWidget())
         vLayout.addWidget(vSplitter)
-
         self.setLayout(vLayout)
 
-        # Sync movement between viewers
         self.retouch_viewer.verticalScrollBar().valueChanged.connect(
-            self.image_viewer.verticalScrollBar().setValue
-        )
+            self.image_viewer.verticalScrollBar().setValue)
         self.retouch_viewer.horizontalScrollBar().valueChanged.connect(
-            self.image_viewer.horizontalScrollBar().setValue
-        )
+            self.image_viewer.horizontalScrollBar().setValue)
         self.image_viewer.verticalScrollBar().valueChanged.connect(
-            self.retouch_viewer.verticalScrollBar().setValue
-        )
+            self.retouch_viewer.verticalScrollBar().setValue)
         self.image_viewer.horizontalScrollBar().valueChanged.connect(
-            self.retouch_viewer.horizontalScrollBar().setValue
-        )
-        # Sync zoom between viewers
+            self.retouch_viewer.horizontalScrollBar().setValue)
         self.retouch_viewer.sendWheelEvent.connect(self.image_viewer.handleWheelEvent)
         self.image_viewer.sendWheelEvent.connect(self.retouch_viewer.handleWheelEvent)
 
-    # Set image to retouch output with
     def set_retouch_image(self, image):
         self.retouch_viewer.set_image(image)
 
-    # Set output image
     def set_output_image(self, image):
         if image is None:
             self.image_viewer.set_image(None)
             return
-
-        # Convert here to see if image has actually been changed
         qImage = qtg.QImage(
-            image,
-            image.shape[1],
-            image.shape[0],
-            image.shape[1] * 3,
-            qtg.QImage.Format_RGB888,
+            image, image.shape[1], image.shape[0],
+            image.shape[1] * 3, qtg.QImage.Format_RGB888,
         )
-        if (
-            self.image_viewer.viewerScene.hasImage
-            and qImage != self.image_viewer.viewerScene.currentQImage
-        ):
-            # Ask user first before changing image
+        if (self.image_viewer.viewerScene.hasImage
+                and qImage != self.image_viewer.viewerScene.currentQImage):
             reply = qtw.QMessageBox.question(
-                self,
-                "Change output?",
-                "Are you sure you want to select a new output image for retouching? Some changes might not be saved.",
-                qtw.QMessageBox.Cancel,
-                qtw.QMessageBox.Ok,
+                self, "Change output?",
+                "Select a new output image for retouching?",
+                qtw.QMessageBox.Cancel, qtw.QMessageBox.Ok,
             )
             if reply == qtw.QMessageBox.Ok:
                 self.image_viewer.set_image(image)
         else:
-            # Instantly set new (no previous image)
             self.image_viewer.set_image(image)

@@ -325,7 +325,7 @@ def argmax_angscale(array, log_base, exponent, constraints=None):
 
 
 def _get_log_base(shape, new_r):
-    """
+    r"""
     Basically common functionality of :func:`_logpolar`
     and :func:`_get_ang_scale`
 
@@ -954,6 +954,9 @@ class im_reg:
             ]
         )
         result = cv2.warpAffine(im1, translation_matrix, (width, height))
+
+        # Store last computed shift for external access
+        self.last_shift = (float(x_shift), float(y_shift))
 
         return result.astype(np.uint8)
 

@@ -18,6 +18,7 @@ import src.MainWindow.ImageSavingDialog as ImageSavingDialog
 import src.MainWindow.SettingsWidget as SettingsWidget
 
 import src.algorithms.API as algorithm_API
+from src.config import AlgorithmConfig
 
 if os.name == "nt":
     current_image_directory = os.path.expanduser("~")
@@ -38,6 +39,9 @@ class Window(qtw.QMainWindow):
         settings.globalVars["MainWindow"] = self
         settings.globalVars["LoadedImagePaths"] = []
 
+        # Session state: track whether the stacked output has been exported
+        self._output_exported = False
+
         self.statusbar_msg_display_time = 2000  # (ms)
         self.supportedReadFormats = []
         for ext in settings.globalVars["SupportedImageReadFormats"]:
@@ -45,30 +49,52 @@ class Window(qtw.QMainWindow):
         for ext in settings.globalVars["SupportedRAWFormats"]:
             self.supportedReadFormats.append("." + str.lower(ext))
 
-        self.setWindowTitle("ChimpStackr")
+        self.setWindowTitle("chimpstackr")
         geometry = self.screen().availableGeometry()
         self.setMinimumSize(int(geometry.width() * 0.6), int(geometry.height() * 0.6))
 
-        self.SettingsWidget = SettingsWidget.SettingsWidget()
+        self.SettingsWidget = SettingsWidget.SettingsPanel()
+        self.SettingsWidget.setVisible(False)
+
+        # Setup algorithm API (before actions so menu can reference it)
+        self.algorithm_config = AlgorithmConfig()
+        self.LaplacianAlgorithm = algorithm_API.LaplacianPyramid(config=self.algorithm_config)
+        self.TimeRemainingHandler = TimeRemainingHandler.TimeRemainingHandler()
+        self.threadpool = qtc.QThreadPool()
 
         # Setup actions
         qt_actions_setup.setup_actions()
-        # Set center widget
-        self.setCentralWidget(MainLayout.CenterWidget())
+
+        # Main content + settings panel side by side
+        main_content = MainLayout.CenterWidget()
+        content_wrapper = qtw.QWidget()
+        content_layout = qtw.QHBoxLayout(content_wrapper)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+        content_layout.addWidget(main_content)
+        content_layout.addWidget(self.SettingsWidget)
+        self.setCentralWidget(content_wrapper)
+        self._main_content = main_content
+
+        # Image info label in status bar
+        self.image_info_label = qtw.QLabel("No image loaded")
+        self.image_info_label.setStyleSheet("color: #999999; padding: 0 8px; font-size: 11px;")
+        self.statusBar().addWidget(self.image_info_label)
 
         # Permanent progressbar inside statusbar
         self.progress_widget = ProgressBar.ProgressBar()
         self.statusBar().addPermanentWidget(self.progress_widget)
 
-        # Setup algorithm API
-        # TODO: Allow user to change program settings
-        self.LaplacianAlgorithm = algorithm_API.LaplacianPyramid(6, 8)
-        self.TimeRemainingHandler = TimeRemainingHandler.TimeRemainingHandler()
+        # (algorithm, timer, threadpool already initialized above)
 
-        # Threadpool for multi-threading (prevent UI freezing)
-        self.threadpool = qtc.QThreadPool()
+    @property
+    def has_unsaved_work(self):
+        """True only if there's an unexported stacked result."""
+        return (
+            self.LaplacianAlgorithm.output_image is not None
+            and not self._output_exported
+        )
 
-    # Export output image to file on disk
     def export_output_image(self):
         if self.LaplacianAlgorithm.output_image is not None:
             outputFilePath, usedFilter = qtw.QFileDialog.getSaveFileName(
@@ -86,7 +112,6 @@ class Window(qtw.QMainWindow):
                     "Exporting output image...", self.statusbar_msg_display_time
                 )
 
-                # Get used image type from filter
                 imgType = None
                 if usedFilter == "JPEG (*.jpg *.jpeg)":
                     imgType = "JPG"
@@ -95,21 +120,65 @@ class Window(qtw.QMainWindow):
                 elif usedFilter == "TIFF (*.tiff *.tif)":
                     imgType = "TIFF"
 
-                # Attach extension as per selected filter, if not there
                 if not os.path.splitext(outputFilePath)[1]:
                     outputFilePath = outputFilePath + "." + imgType.lower()
 
                 ImageSavingDialog.createDialog(
                     self.LaplacianAlgorithm.output_image, imgType, outputFilePath
                 )
+                self._output_exported = True
         else:
-            # Display Error message
             msg = qtw.QMessageBox(self)
             msg.setStandardButtons(qtw.QMessageBox.Ok)
             msg.setIcon(qtw.QMessageBox.Critical)
             msg.setWindowTitle("Export failed")
             msg.setText("Failed to export!\nPlease load images first.\n")
             msg.show()
+
+    def batch_export_output_image(self):
+        """Export output image in multiple formats at once."""
+        if self.LaplacianAlgorithm.output_image is None:
+            msg = qtw.QMessageBox(self)
+            msg.setStandardButtons(qtw.QMessageBox.Ok)
+            msg.setIcon(qtw.QMessageBox.Critical)
+            msg.setWindowTitle("Export failed")
+            msg.setText("Failed to export!\nPlease stack images first.\n")
+            msg.show()
+            return
+
+        directory = qtw.QFileDialog.getExistingDirectory(
+            self,
+            "Select output directory for batch export",
+            self.current_image_directory,
+            options=qtw.QFileDialog.DontUseNativeDialog,
+        )
+        if directory:
+            import numpy as np
+            image = np.clip(np.around(self.LaplacianAlgorithm.output_image), 0, 255).astype(np.uint8)
+            import cv2
+            base = os.path.join(directory, "stacked_output")
+            exported = []
+            try:
+                cv2.imwrite(base + ".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                exported.append(base + ".jpg")
+                cv2.imwrite(base + ".png", image, [cv2.IMWRITE_PNG_COMPRESSION, 4])
+                exported.append(base + ".png")
+                cv2.imwrite(base + ".tif", image)
+                exported.append(base + ".tif")
+
+                msg = qtw.QMessageBox(self)
+                msg.setStandardButtons(qtw.QMessageBox.Ok)
+                msg.setIcon(qtw.QMessageBox.Information)
+                msg.setWindowTitle("Batch export success")
+                msg.setText(f"Exported {len(exported)} files to:\n{directory}")
+                msg.show()
+            except Exception as e:
+                msg = qtw.QMessageBox(self)
+                msg.setStandardButtons(qtw.QMessageBox.Ok)
+                msg.setIcon(qtw.QMessageBox.Critical)
+                msg.setWindowTitle("Batch export failed")
+                msg.setText(f"Error during batch export:\n{e}")
+                msg.show()
 
     # Clear all loaded images
     def clear_all_images(self):
@@ -118,7 +187,7 @@ class Window(qtw.QMainWindow):
             reply = qtw.QMessageBox.question(
                 self,
                 "Clear images?",
-                "Are you sure you want to clear all loaded images? Output image(s) will be cleared to!",
+                "Are you sure you want to clear all loaded images? Output images will be cleared too!",
                 qtw.QMessageBox.Cancel,
                 qtw.QMessageBox.Ok,
             )
@@ -128,13 +197,13 @@ class Window(qtw.QMainWindow):
                 )
                 # Clear loaded and processed images from list
                 settings.globalVars["LoadedImagePaths"] = []
-                self.centralWidget().set_loaded_images(
+                self._main_content.set_loaded_images(
                     settings.globalVars["LoadedImagePaths"]
                 )
                 self.LaplacianAlgorithm.update_image_paths(
                     settings.globalVars["LoadedImagePaths"]
                 )
-                self.centralWidget().add_processed_image(None)
+                self._main_content.add_processed_image(None)
                 return True
         else:
             # No images were originally loaded
@@ -187,43 +256,36 @@ class Window(qtw.QMainWindow):
             )
             if len(validPaths) > 0:
                 self.current_image_directory = os.path.dirname(validPaths[0])
-                self.centralWidget().set_loaded_images(validPaths)
+                self._main_content.set_loaded_images(validPaths)
                 self.LaplacianAlgorithm.update_image_paths(validPaths)
                 settings.globalVars["LoadedImagePaths"] = validPaths
+                self._output_exported = False
 
-    # Save project file to disk
-    def save_project_to_file(self):
-        self.statusBar().showMessage(
-            "Saving project file to disk...", self.statusbar_msg_display_time
-        )
-        # Display success message
-        qtw.QMessageBox.information(
-            self,
-            "Save completed",
-            "Successfully saved project to disk.",
-            qtw.QMessageBox.Ok,
-        )
+    def _sync_algorithm_config(self):
+        """Sync algorithm config from settings widget before stacking."""
+        new_config = self.SettingsWidget.get_algorithm_config()
+        self.LaplacianAlgorithm.config = new_config
 
-    # TODO: re-implement (with QThread + timing percentages)
-    def align_and_stack_loaded_images(self):
+    def _start_stacking(self, method_name):
+        """Common logic for starting align+stack or stack-only. Returns True if started."""
         if len(settings.globalVars["LoadedImagePaths"]) == 0:
-            # Display Error message
             msg = qtw.QMessageBox(self)
             msg.setStandardButtons(qtw.QMessageBox.Ok)
             msg.setIcon(qtw.QMessageBox.Critical)
             msg.setWindowTitle("Stacking failed")
             msg.setText("Failed to stack images.\nPlease load images first.\n")
             msg.show()
-            return
+            return False
+
+        self._sync_algorithm_config()
 
         self.statusBar().showMessage(
-            "Started aligning & stacking images...", self.statusbar_msg_display_time
+            f"Started {method_name}...", self.statusbar_msg_display_time
         )
 
         def finished_inter_task(result_list):
             task_key, num_processed, num_to_process_total, time_taken = result_list
             if task_key == "finished_image":
-                # Update progressbar slider and "time remaining" text
                 percentage_finished = num_processed / num_to_process_total * 100
                 self.progress_widget.update_value(
                     percentage_finished,
@@ -234,78 +296,103 @@ class Window(qtw.QMainWindow):
                     ),
                 )
 
-        worker = QThreading.Worker(self.LaplacianAlgorithm.align_and_stack_images)
+        fn = getattr(self.LaplacianAlgorithm, method_name)
+        worker = QThreading.Worker(fn)
         worker.signals.finished.connect(self.finished_stack)
         worker.signals.finished_inter_task.connect(finished_inter_task)
 
-        # Execute
         self.threadpool.start(worker)
         self.progress_widget.setVisible(True)
+        return True
+
+    def align_and_stack_loaded_images(self):
+        return self._start_stacking("align_and_stack_images")
 
     def stack_loaded_images(self):
-        if len(settings.globalVars["LoadedImagePaths"]) == 0:
-            # Display Error message
-            msg = qtw.QMessageBox(self)
-            msg.setStandardButtons(qtw.QMessageBox.Ok)
-            msg.setIcon(qtw.QMessageBox.Critical)
-            msg.setWindowTitle("Stacking failed")
-            msg.setText("Failed to stack images.\nPlease load images first.\n")
-            msg.show()
+        return self._start_stacking("stack_images")
+
+    def cancel_stacking(self):
+        """Cancel the currently running stacking operation."""
+        self.LaplacianAlgorithm.cancel()
+        self.statusBar().showMessage("Cancelling...", self.statusbar_msg_display_time)
+
+    def auto_crop_result(self):
+        """Manually trigger auto-crop on the current output."""
+        if self.LaplacianAlgorithm.output_image is None:
+            self.statusBar().showMessage("No output to crop", self.statusbar_msg_display_time)
+            return
+        bounds = self.LaplacianAlgorithm.auto_crop_output()
+        if bounds:
+            top, bottom, left, right = bounds
+            self._main_content.add_processed_image(self.LaplacianAlgorithm.output_image)
+            self.statusBar().showMessage(
+                f"Cropped: {top}px top, {bottom}px bottom, {left}px left, {right}px right",
+                self.statusbar_msg_display_time
+            )
+        else:
+            self.statusBar().showMessage("No alignment shifts to crop", self.statusbar_msg_display_time)
+
+    def toggle_settings_panel(self):
+        """Toggle the settings sidebar visibility."""
+        self.SettingsWidget.setVisible(not self.SettingsWidget.isVisible())
+
+    def export_comparison(self):
+        """Export the current comparison view as an image."""
+        path, _ = qtw.QFileDialog.getSaveFileName(
+            self, "Export comparison", self.current_image_directory,
+            "PNG (*.png);; JPEG (*.jpg)",
+        )
+        if path:
+            self._main_content.ComparisonViewer.export_comparison(path)
+            self.statusBar().showMessage(f"Comparison exported to {path}", self.statusbar_msg_display_time)
+
+    def finished_stack(self):
+        self.progress_widget.update_value()
+
+        # Offer auto-crop if alignment was performed and shifts were detected
+        bounds = self.LaplacianAlgorithm.get_crop_bounds()
+        if bounds and self.LaplacianAlgorithm.output_image is not None:
+            top, bottom, left, right = bounds
+            total_crop = max(top, bottom, left, right)
+            if total_crop > 1:
+                reply = qtw.QMessageBox.question(
+                    self,
+                    "Auto-crop edges?",
+                    f"Alignment caused shifts of up to {total_crop}px.\n"
+                    f"Crop: {top}px top, {bottom}px bottom, {left}px left, {right}px right\n\n"
+                    "Auto-crop to remove black edges?",
+                    qtw.QMessageBox.Yes | qtw.QMessageBox.No,
+                    qtw.QMessageBox.Yes,
+                )
+                if reply == qtw.QMessageBox.Yes:
+                    self.LaplacianAlgorithm.auto_crop_output()
+
+        self._main_content.add_processed_image(self.LaplacianAlgorithm.output_image)
+        self._output_exported = False
+
+        run_btn = settings.globalVars.get("RunButton")
+        if run_btn:
+            run_btn.on_finished()
+
+    def closeEvent(self, event):
+        if not self.has_unsaved_work:
+            self.LaplacianAlgorithm.cancel()
+            event.accept()
+            settings.globalVars["MainApplication"].closeAllWindows()
             return
 
-        self.statusBar().showMessage(
-            "Started stacking images...", self.statusbar_msg_display_time
-        )
-
-        def finished_inter_task(result_list):
-            task_key, num_processed, num_to_process_total, time_taken = result_list
-            if task_key == "finished_image":
-                # Update progressbar slider and "time remaining" text
-                percentage_finished = num_processed / num_to_process_total * 100
-                self.progress_widget.update_value(
-                    percentage_finished,
-                    self.TimeRemainingHandler.calculate_time_remaining(
-                        1 / num_to_process_total * 100,
-                        100 - percentage_finished,
-                        time_taken,
-                    ),
-                )
-
-        worker = QThreading.Worker(self.LaplacianAlgorithm.stack_images)
-        worker.signals.finished.connect(self.finished_stack)
-        worker.signals.finished_inter_task.connect(finished_inter_task)
-
-        # Execute
-        self.threadpool.start(worker)
-        self.progress_widget.setVisible(True)
-
-    # Handle stack finish
-    def finished_stack(self):  # , data_dictionary
-        # Display stack info dialog
-        # TODO: Properly implement
-        # StackFinishedDialog.Message()
-
-        # Reset progressbar and add selectable stack result image
-        self.progress_widget.update_value()
-        self.centralWidget().add_processed_image(self.LaplacianAlgorithm.output_image)
-
-    """
-        Overridden signals
-    """
-    # Display dialog to confirm if user wants to quit
-    def closeEvent(self, event):
-        # TODO: Only ask confirmation if any unsaved progress
-        reply = qtw.QMessageBox.question(
+        # Only case: unexported stacked image
+        reply = qtw.QMessageBox.warning(
             self,
-            "Exit program?",
-            "Are you sure you want to exit the program? You might lose unsaved work!",
-            qtw.QMessageBox.Yes,
-            qtw.QMessageBox.No,
+            "Unexported result",
+            "You have a stacked image that hasn't been exported.\n"
+            "Close anyway and lose the result?",
+            qtw.QMessageBox.Discard | qtw.QMessageBox.Cancel,
+            qtw.QMessageBox.Cancel,
         )
-        if reply == qtw.QMessageBox.Yes:
-            # TODO: Tell possibly running tasks to quit
+        if reply == qtw.QMessageBox.Discard:
+            self.LaplacianAlgorithm.cancel()
             event.accept()
-            # Close other windows
             settings.globalVars["MainApplication"].closeAllWindows()
         else:
             event.ignore()
