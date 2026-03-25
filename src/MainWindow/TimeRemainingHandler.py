@@ -1,30 +1,54 @@
 """
-    Utility class for getting the remaining time until program finishes.
-    Uses average of time spent computing each image.
+    Time remaining estimator.
+    Simple and reliable: tracks time per image, predicts from rolling average.
 """
-import time, statistics
+import time
+from collections import deque
 
 
 class TimeRemainingHandler:
-    num_to_keep_cached = 5  # Number of items to keep in cache
+    def __init__(self, window_size=10):
+        self._times = deque(maxlen=window_size)
 
-    def __init__(self):
-        self.cached_time_taken = []  # List of cached time taken
+    def reset(self):
+        self._times.clear()
 
-    # Return remaining time of algorithm (hh:mm:ss)
-    def calculate_time_remaining(
-        self, percentage_increment, percentage_left, time_taken
-    ):
+    def calculate_time_remaining(self, percentage_increment, percentage_left, time_taken):
+        """
+        Args:
+            percentage_increment: percentage each image represents (100/total)
+            percentage_left: percentage remaining to 100%
+            time_taken: seconds this image took
+        Returns:
+            Formatted string like "Time left: ~1m 23s"
+        """
+        self._times.append(time_taken)
 
-        self.cached_time_taken.append(time_taken)
-        mean_time_taken = statistics.mean(self.cached_time_taken)
+        # Skip first sample (often inflated by JIT warmup / cold cache)
+        if len(self._times) <= 1:
+            return "Time left: estimating..."
 
-        # Remove last item
-        if len(self.cached_time_taken) >= self.num_to_keep_cached:
-            self.cached_time_taken.pop(len(self.cached_time_taken) - 1)
+        # Use median of recent times (robust to outliers)
+        sorted_times = sorted(self._times)
+        median = sorted_times[len(sorted_times) // 2]
 
-        # Time left to 100% completion of current operation
-        time_left = percentage_left / percentage_increment * mean_time_taken
+        # How many images remain
+        if percentage_increment > 0:
+            images_left = percentage_left / percentage_increment
+        else:
+            images_left = 0
 
-        formatted = time.strftime("%H:%M:%S", time.gmtime(time_left * 1.75))
-        return "Time left: " + formatted
+        time_left = max(0, images_left * median)
+
+        if time_left < 2:
+            return "Time left: finishing..."
+        elif time_left < 60:
+            return f"Time left: ~{int(time_left)}s"
+        elif time_left < 3600:
+            mins = int(time_left // 60)
+            secs = int(time_left % 60)
+            return f"Time left: ~{mins}m {secs:02d}s"
+        else:
+            hrs = int(time_left // 3600)
+            mins = int((time_left % 3600) // 60)
+            return f"Time left: ~{hrs}h {mins:02d}m"

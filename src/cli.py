@@ -20,7 +20,7 @@ currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
 sys.path.insert(0, parentdir)
 
-from src.config import AlgorithmConfig, AppConfig
+from src.config import AlgorithmConfig, AppConfig, auto_detect_params
 import src.settings as settings
 from src.algorithms.API import LaplacianPyramid
 from src.ImageLoadingHandler import ImageLoadingHandler
@@ -73,6 +73,18 @@ def parse_args():
         help="Alignment reference strategy (default: first)",
     )
     parser.add_argument(
+        "--method",
+        choices=["laplacian", "weighted_average", "depth_map"],
+        default="laplacian",
+        help="Stacking method (default: laplacian)",
+    )
+    parser.add_argument(
+        "--rotation-scale",
+        action="store_true",
+        default=False,
+        help="Enable rotation + scale alignment (focus breathing correction)",
+    )
+    parser.add_argument(
         "--gpu",
         action="store_true",
         default=False,
@@ -96,6 +108,18 @@ def parse_args():
         default=False,
         help="Print sharpness metrics for input and output images",
     )
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        default=False,
+        help="Auto-detect optimal parameters based on image size",
+    )
+    parser.add_argument(
+        "--auto-crop",
+        action="store_true",
+        default=False,
+        help="Auto-crop black edges from alignment shifts",
+    )
     return parser.parse_args()
 
 
@@ -113,12 +137,32 @@ def expand_input_paths(patterns):
     return sorted(set(paths))
 
 
-def progress_printer(current, total, time_taken):
-    """Print progress to stderr."""
-    pct = current / total * 100
-    print(f"\r  Processing: {current}/{total} ({pct:.0f}%) - {time_taken:.2f}s", end="", file=sys.stderr)
-    if current == total:
-        print(file=sys.stderr)
+class ProgressTracker:
+    """CLI progress display with bar, ETA, and speed."""
+    def __init__(self):
+        self.times = []
+        self.start_time = time.time()
+
+    def __call__(self, current, total, time_taken):
+        self.times.append(time_taken)
+        pct = current / total * 100
+        remaining = total - current
+        avg_time = sum(self.times) / len(self.times)
+        eta = avg_time * remaining
+
+        # Progress bar
+        bar_width = 30
+        filled = int(bar_width * current / total)
+        bar = "█" * filled + "░" * (bar_width - filled)
+
+        elapsed = time.time() - self.start_time
+        speed = f"{time_taken:.1f}s/img"
+        eta_str = f"ETA {eta:.0f}s" if remaining > 0 else "done"
+
+        print(f"\r  {bar} {pct:5.1f}% [{current}/{total}] {speed} {eta_str}   ",
+              end="", file=sys.stderr)
+        if current == total:
+            print(f"\n  Completed in {elapsed:.1f}s (avg {avg_time:.2f}s/image)", file=sys.stderr)
 
 
 def main():
@@ -137,18 +181,39 @@ def main():
     print(f"  Input: {len(input_paths)} images")
     print(f"  Output: {args.output}")
     print(f"  Mode: {'Align + Stack' if args.align else 'Stack only'}")
-    print(f"  Kernel size: {args.kernel_size}, Pyramid levels: {args.pyramid_levels}")
+    # Auto-detect parameters from first image if requested
+    kernel_size = args.kernel_size
+    pyramid_levels = args.pyramid_levels
+    scale_factor = args.scale_factor
+
+    if args.auto:
+        loader = ImageLoadingHandler()
+        sample = loader.read_image_from_path(input_paths[0])
+        if sample is not None:
+            auto = auto_detect_params(sample.shape, len(input_paths))
+            kernel_size = auto["fusion_kernel_size"]
+            pyramid_levels = auto["pyramid_num_levels"]
+            scale_factor = auto["alignment_scale_factor"]
+            print(f"  Auto-detected: kernel={kernel_size}, levels={pyramid_levels}, scale={scale_factor}")
+            del sample
+
+    print(f"  Method: {args.method}")
+    print(f"  Kernel size: {kernel_size}, Pyramid levels: {pyramid_levels}")
     if args.align:
-        print(f"  Alignment: ref={args.alignment_ref}, scale={args.scale_factor}")
+        print(f"  Alignment: ref={args.alignment_ref}, scale={scale_factor}")
+        if args.rotation_scale:
+            print(f"  Rotation + Scale correction: enabled")
 
     # Configure algorithm
     config = AlgorithmConfig(
-        fusion_kernel_size=args.kernel_size,
-        pyramid_num_levels=args.pyramid_levels,
-        alignment_scale_factor=args.scale_factor,
+        stacking_method=args.method,
+        fusion_kernel_size=kernel_size,
+        pyramid_num_levels=pyramid_levels,
+        alignment_scale_factor=scale_factor,
         use_gpu=args.gpu,
         selected_gpu_id=args.gpu_id,
         alignment_reference=args.alignment_ref,
+        align_rotation_scale=args.rotation_scale,
     )
 
     algo = LaplacianPyramid(config=config)
@@ -166,18 +231,26 @@ def main():
 
     # Run stacking
     print()
+    progress = ProgressTracker()
     total_start = time.time()
 
     if args.align:
-        algo.align_and_stack_images(progress_callback=progress_printer)
+        algo.align_and_stack_images(progress_callback=progress)
     else:
-        algo.stack_images(progress_callback=progress_printer)
+        algo.stack_images(progress_callback=progress)
 
     total_elapsed = time.time() - total_start
 
     if algo.output_image is None:
         print("Error: Stacking failed or was cancelled", file=sys.stderr)
         sys.exit(1)
+
+    # Auto-crop if requested
+    if args.auto_crop and args.align:
+        bounds = algo.auto_crop_output()
+        if bounds:
+            top, bottom, left, right = bounds
+            print(f"  Auto-cropped: {top}px top, {bottom}px bottom, {left}px left, {right}px right")
 
     # Save output
     result = np.clip(np.around(algo.output_image), 0, 255).astype(np.uint8)

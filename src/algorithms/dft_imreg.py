@@ -958,7 +958,7 @@ class im_reg:
         # Store last computed shift for external access
         self.last_shift = (float(x_shift), float(y_shift))
 
-        return result.astype(np.uint8)
+        return result.astype(np.float32)
 
     # TODO: Implement with option of selecting what method to use (not yet successfully implemented)
     # Register im1 to im0 for Rotation, Scale, Translation (RST)
@@ -1010,4 +1010,4 @@ class im_reg:
         result = cv2.warpAffine(result, rotation, (width, height))
         result = cv2.warpAffine(result, translation, (width, height))
 
-        return result.astype(np.uint8)
+        return result.astype(np.float32)

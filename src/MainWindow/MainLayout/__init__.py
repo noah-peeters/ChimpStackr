@@ -178,7 +178,18 @@ class CenterWidget(qtw.QWidget):
                 suffix=".jpg", dir=settings.globalVars["RootTempDir"].name
             )
             item = qtw.QListWidgetItem()
-            item.setText(datetime.today().strftime("%Y%m%d") + "_LaplacianStacked")
+            # Build descriptive name from current algorithm config
+            mainWin = settings.globalVars.get("MainWindow")
+            method = "laplacian"
+            aligned = False
+            if mainWin and hasattr(mainWin, 'LaplacianAlgorithm'):
+                cfg = mainWin.LaplacianAlgorithm.config
+                method = cfg.stacking_method
+                aligned = bool(mainWin.LaplacianAlgorithm.Algorithm.alignment_shifts)
+            method_short = {"laplacian": "Lap", "weighted_average": "WAvg", "depth_map": "DMap", "exposure_fusion": "HDR"}.get(method, method)
+            align_tag = "+Aligned" if aligned else ""
+            rst_tag = "+RST" if (mainWin and mainWin.LaplacianAlgorithm.config.align_rotation_scale and aligned) else ""
+            item.setText(f"{datetime.today().strftime('%Y%m%d')}_{method_short}{align_tag}{rst_tag}")
             item.setData(qtc.Qt.UserRole, tmp_file)
 
             cv2.imwrite(tmp_file, new_image_array)
@@ -195,7 +206,13 @@ class CenterWidget(qtw.QWidget):
                              thumb.shape[1] * 3, qtg.QImage.Format_RGB888)
             item.setIcon(qtg.QIcon(qtg.QPixmap.fromImage(qimg)))
 
-            settings.globalVars["ProcessedImagesWidget"].list.addItem(item)
+            # Clear selection on loaded images list so only output is highlighted
+            self.ImageWidgets.loaded_images_widget.list.clearSelection()
+
+            proc_list = settings.globalVars["ProcessedImagesWidget"].list
+            proc_list.addItem(item)
+            # Auto-select the new output for immediate preview
+            proc_list.setCurrentItem(item)
 
             # Update comparison viewer
             self.ComparisonViewer.set_after_image(result_rgb)

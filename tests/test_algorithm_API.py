@@ -316,3 +316,213 @@ class TestConfig:
         assert config.fusion_kernel_size == 10
         assert config.pyramid_num_levels == 4
         assert config.alignment_reference == "middle"
+
+    def test_new_config_fields(self):
+        config = AlgorithmConfig()
+        assert config.stacking_method == "laplacian"
+        assert config.align_rotation_scale is False
+
+        config2 = AlgorithmConfig(stacking_method="depth_map", align_rotation_scale=True)
+        assert config2.stacking_method == "depth_map"
+        assert config2.align_rotation_scale is True
+
+
+# -- Weighted Average Tests --
+
+class TestWeightedAverage:
+    def test_focus_weights(self):
+        """Focus weights should be non-negative and highlight edges."""
+        img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8).astype(np.float32)
+        weights = CPU.compute_focus_weights(img)
+        assert weights.shape == (100, 100)
+        assert weights.min() >= 0
+
+    def test_weighted_average_fuse_pair(self):
+        """Fusing two images should produce same-shape output."""
+        img1 = np.random.rand(50, 50, 3).astype(np.float32) * 255
+        img2 = np.random.rand(50, 50, 3).astype(np.float32) * 255
+        result = CPU.weighted_average_fuse_pair(img1, img2)
+        assert result.shape == img1.shape
+        assert result.dtype == np.float32
+
+    def test_weighted_average_fuse_multi(self):
+        """Fusing multiple images should produce valid output."""
+        images = [np.random.rand(50, 50, 3).astype(np.float32) * 255 for _ in range(5)]
+        result = CPU.weighted_average_fuse_multi(images)
+        assert result.shape == images[0].shape
+        assert result.dtype == np.float32
+
+    def test_weighted_average_stack(self, test_image_paths):
+        """Full weighted average stacking pipeline."""
+        config = AlgorithmConfig(stacking_method="weighted_average", fusion_kernel_size=6)
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:3])
+        lp.stack_images()
+        assert lp.output_image is not None
+        assert lp.output_image.dtype == np.float32
+
+    def test_weighted_average_align_and_stack(self, test_image_paths):
+        """Weighted average with alignment."""
+        config = AlgorithmConfig(stacking_method="weighted_average", fusion_kernel_size=6)
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:3])
+        lp.align_and_stack_images()
+        assert lp.output_image is not None
+
+
+# -- Depth Map Tests --
+
+class TestDepthMap:
+    def test_depthmap_index(self):
+        """Depth map should return valid indices for each pixel."""
+        images = [np.random.rand(50, 50, 3).astype(np.float32) * 255 for _ in range(4)]
+        depth_idx = CPU.compute_depthmap_index(images)
+        assert depth_idx.shape == (50, 50)
+        assert depth_idx.min() >= 0
+        assert depth_idx.max() < 4
+
+    def test_depthmap_fuse_multi(self):
+        """Depth map fusion should produce valid output with index map."""
+        images = [np.random.rand(50, 50, 3).astype(np.float32) * 255 for _ in range(3)]
+        result, depth_idx = CPU.depthmap_fuse_multi(images)
+        assert result.shape == images[0].shape
+        assert result.dtype == np.float32
+        assert depth_idx.shape == (50, 50)
+
+    def test_depthmap_stack(self, test_image_paths):
+        """Full depth map stacking pipeline."""
+        config = AlgorithmConfig(stacking_method="depth_map", fusion_kernel_size=11)
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:3])
+        lp.stack_images()
+        assert lp.output_image is not None
+
+    def test_depthmap_align_and_stack(self, test_image_paths):
+        """Depth map with alignment."""
+        config = AlgorithmConfig(stacking_method="depth_map", fusion_kernel_size=11)
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:3])
+        lp.align_and_stack_images()
+        assert lp.output_image is not None
+
+
+# -- 16-bit Pipeline Tests --
+
+class TestFloat32Pipeline:
+    def test_load_image_as_float32(self):
+        """Loading via float32 path should return float32 array."""
+        loader = ImageLoadingHandler()
+        img = loader.read_image_as_float32("tests/low_res_images/DSC_0356.jpg")
+        assert img is not None
+        assert img.dtype == np.float32
+        assert img.ndim == 3
+
+    def test_alignment_preserves_float32(self):
+        """Aligned images should stay float32."""
+        algo = Algorithm()
+        img = algo.load_image("tests/low_res_images/DSC_0356.jpg")
+        assert img.dtype == np.float32
+        # Align to self
+        result = algo.align_image_pair(img, img.copy(), scale_factor=5)
+        assert result.dtype == np.float32
+
+    def test_stacking_output_float32(self, test_image_paths):
+        """Stacking output should be float32."""
+        config = AlgorithmConfig(fusion_kernel_size=6, pyramid_num_levels=4)
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:3])
+        lp.stack_images()
+        assert lp.output_image is not None
+        assert lp.output_image.dtype == np.float32
+
+
+# -- Rotation + Scale Alignment Tests --
+
+class TestRSTAlignment:
+    def test_rst_alignment_same_image(self):
+        """RST aligning an image to itself should produce similar output."""
+        algo = Algorithm()
+        img = algo.load_image("tests/low_res_images/DSC_0356.jpg")
+        result = algo.align_image_pair(img, img.copy(), scale_factor=5, use_rst=True)
+        assert result is not None
+        assert result.shape == img.shape
+        assert result.dtype == np.float32
+
+    def test_rst_config_flag(self, test_image_paths):
+        """align_rotation_scale config should enable RST in the API."""
+        config = AlgorithmConfig(
+            fusion_kernel_size=6, pyramid_num_levels=4,
+            align_rotation_scale=True
+        )
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:2])
+        lp.align_and_stack_images()
+        assert lp.output_image is not None
+
+
+# -- Laplacian Enhancement Tests --
+
+class TestLaplacianEnhancements:
+    def test_contrast_threshold(self):
+        """Thresholded focusmap should mostly not switch in flat areas."""
+        flat1 = np.full((40, 40), 128.0, dtype=np.float32)
+        flat2 = np.full((40, 40), 130.0, dtype=np.float32)
+        # With high threshold, both are below it → interior should be all 0
+        fm = CPU.compute_focusmap_thresholded(flat1, flat2, 4, np.float32(100.0))
+        # Interior (away from edges) should have no switching
+        interior = fm[4:-4, 4:-4]
+        assert interior.sum() == 0
+
+    def test_feather_focusmap(self):
+        """Feathered focusmap should be float in [0, 1]."""
+        fm = np.zeros((50, 50), dtype=np.uint8)
+        fm[20:30, 20:30] = 255
+        soft = CPU.feather_focusmap(fm, radius=3)
+        assert soft.dtype == np.float32
+        assert soft.min() >= 0
+        assert soft.max() <= 1.0
+        # Should have values between 0 and 1 (smooth transitions)
+        assert 0 < soft[19, 25] < 1.0  # Edge should be feathered
+
+    def test_soft_fusion(self):
+        """Soft fusion should blend, not hard-select."""
+        img1 = np.full((20, 20, 3), 100.0, dtype=np.float32)
+        img2 = np.full((20, 20, 3), 200.0, dtype=np.float32)
+        soft_map = np.full((20, 20), 0.5, dtype=np.float32)
+        result = CPU.fuse_pyramid_levels_soft(img1, img2, soft_map)
+        # 50/50 blend should give ~150
+        assert abs(result[10, 10, 0] - 150.0) < 1.0
+
+    def test_laplacian_with_threshold_and_feather(self, test_image_paths):
+        """Full pipeline with contrast threshold and feathering."""
+        config = AlgorithmConfig(
+            fusion_kernel_size=6, pyramid_num_levels=4,
+            contrast_threshold=2.0, feather_radius=3,
+        )
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:3])
+        lp.stack_images()
+        assert lp.output_image is not None
+
+    def test_multires_sharpness(self):
+        """Multi-res sharpness should produce valid output."""
+        img = np.random.rand(50, 50, 3).astype(np.float32) * 255
+        sharpness = CPU.compute_multires_sharpness(img)
+        assert sharpness.shape == (50, 50)
+        assert sharpness.min() >= 0
+
+    def test_depthmap_smoothing(self):
+        """Higher smoothing should produce smoother sharpness maps."""
+        img = np.random.rand(50, 50, 3).astype(np.float32) * 255
+        sharp_low = CPU.compute_multires_sharpness(img, smoothing=0)
+        sharp_high = CPU.compute_multires_sharpness(img, smoothing=10)
+        # Higher smoothing should have lower variance (smoother)
+        assert sharp_high.var() < sharp_low.var()
+
+    def test_depthmap_with_smoothing(self, test_image_paths):
+        """Depth map with smoothing via API."""
+        config = AlgorithmConfig(stacking_method="depth_map", depthmap_smoothing=8)
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:3])
+        lp.stack_images()
+        assert lp.output_image is not None

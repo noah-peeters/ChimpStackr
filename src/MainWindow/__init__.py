@@ -182,6 +182,9 @@ class Window(qtw.QMainWindow):
 
     # Clear all loaded images
     def clear_all_images(self):
+        if self.is_stacking:
+            self.statusBar().showMessage("Cannot clear while stacking", self.statusbar_msg_display_time)
+            return False
         if len(self.LaplacianAlgorithm.image_paths) > 0:
             # Ask confirmation (if there are loaded images)
             reply = qtw.QMessageBox.question(
@@ -222,44 +225,62 @@ class Window(qtw.QMainWindow):
 
     # Update loaded image files
     def set_new_loaded_image_files(self, new_loaded_images):
+        if self.is_stacking:
+            self.statusBar().showMessage("Cannot load images while stacking", self.statusbar_msg_display_time)
+            return
         if len(new_loaded_images) > 0:
             if self.clear_all_images() == False:
                 return
 
-            # TODO: Check if same format?
-            # Check if valid format; discard unsupported formats + show warning saying what images were discarded
-            validPaths = []
-            invalidPaths = []
+            # Filter out hidden/system files silently
+            IGNORED_FILES = {
+                "thumbs.db", ".ds_store", "desktop.ini", ".thumbs",
+                ".picasa.ini", ".bridgesort", ".bridgelabelsandratings",
+            }
+            filtered = []
             for path in new_loaded_images:
+                basename = os.path.basename(path).lower()
+                # Skip hidden files (start with .)
+                if basename.startswith("."):
+                    continue
+                # Skip known system files
+                if basename in IGNORED_FILES:
+                    continue
+                filtered.append(path)
+
+            # Check supported formats
+            validPaths = []
+            skipped = 0
+            for path in filtered:
                 if str.lower(path).endswith(tuple(self.supportedReadFormats)):
                     validPaths.append(path)
                 else:
-                    invalidPaths.append(path)
+                    skipped += 1
 
-            if len(invalidPaths) > 0:
-                # Display Error message
-                msg = qtw.QMessageBox(self)
-                msg.setStandardButtons(qtw.QMessageBox.Ok)
-                msg.setIcon(qtw.QMessageBox.Critical)
-                msg.setWindowTitle("Failed to load {} files!".format(len(invalidPaths)))
-                msg.setText(
-                    "Failed to load certain files.\nThey have automatically been excluded.\nPlease ensure a supported format is used.\n"
+            # Show skip count in status bar (no popup)
+            if skipped > 0:
+                self.statusBar().showMessage(
+                    f"Skipped {skipped} unsupported file{'s' if skipped > 1 else ''}",
+                    self.statusbar_msg_display_time * 2,
                 )
-                text = ""
-                for path in invalidPaths:
-                    text += path + "\n"
-                msg.setDetailedText(text)
-                msg.show()
-
-            self.statusBar().showMessage(
-                "Loading images...", self.statusbar_msg_display_time
-            )
+            else:
+                self.statusBar().showMessage(
+                    "Loading images...", self.statusbar_msg_display_time
+                )
             if len(validPaths) > 0:
                 self.current_image_directory = os.path.dirname(validPaths[0])
                 self._main_content.set_loaded_images(validPaths)
                 self.LaplacianAlgorithm.update_image_paths(validPaths)
                 settings.globalVars["LoadedImagePaths"] = validPaths
                 self._output_exported = False
+
+                # Auto-detect optimal parameters from first image
+                self.SettingsWidget._auto_detect_params()
+
+    @property
+    def is_stacking(self):
+        """True if a stacking operation is currently running or paused."""
+        return getattr(self, '_stacking_active', False)
 
     def _sync_algorithm_config(self):
         """Sync algorithm config from settings widget before stacking."""
@@ -278,6 +299,8 @@ class Window(qtw.QMainWindow):
             return False
 
         self._sync_algorithm_config()
+        self._stacking_active = True
+        self.SettingsWidget.setEnabled(False)  # Lock settings during stacking
 
         self.statusBar().showMessage(
             f"Started {method_name}...", self.statusbar_msg_display_time
@@ -314,6 +337,8 @@ class Window(qtw.QMainWindow):
     def cancel_stacking(self):
         """Cancel the currently running stacking operation."""
         self.LaplacianAlgorithm.cancel()
+        self._stacking_active = False
+        self.SettingsWidget.setEnabled(True)  # Unlock settings
         self.statusBar().showMessage("Cancelling...", self.statusbar_msg_display_time)
 
     def auto_crop_result(self):
@@ -347,32 +372,33 @@ class Window(qtw.QMainWindow):
             self.statusBar().showMessage(f"Comparison exported to {path}", self.statusbar_msg_display_time)
 
     def finished_stack(self):
+        self._stacking_active = False
+        self.SettingsWidget.setEnabled(True)  # Unlock settings
         self.progress_widget.update_value()
-
-        # Offer auto-crop if alignment was performed and shifts were detected
-        bounds = self.LaplacianAlgorithm.get_crop_bounds()
-        if bounds and self.LaplacianAlgorithm.output_image is not None:
-            top, bottom, left, right = bounds
-            total_crop = max(top, bottom, left, right)
-            if total_crop > 1:
-                reply = qtw.QMessageBox.question(
-                    self,
-                    "Auto-crop edges?",
-                    f"Alignment caused shifts of up to {total_crop}px.\n"
-                    f"Crop: {top}px top, {bottom}px bottom, {left}px left, {right}px right\n\n"
-                    "Auto-crop to remove black edges?",
-                    qtw.QMessageBox.Yes | qtw.QMessageBox.No,
-                    qtw.QMessageBox.Yes,
-                )
-                if reply == qtw.QMessageBox.Yes:
-                    self.LaplacianAlgorithm.auto_crop_output()
-
-        self._main_content.add_processed_image(self.LaplacianAlgorithm.output_image)
-        self._output_exported = False
 
         run_btn = settings.globalVars.get("RunButton")
         if run_btn:
             run_btn.on_finished()
+
+        # If cancelled or no output produced, discard everything
+        if self.LaplacianAlgorithm.output_image is None:
+            self.LaplacianAlgorithm.Algorithm.alignment_shifts = []
+            self.statusBar().showMessage("Stacking cancelled", self.statusbar_msg_display_time)
+            return
+
+        # Auto-crop black edges if enabled in settings
+        auto_crop = bool(int(settings.globalVars["QSettings"].value("algorithm/auto_crop") or 1))
+        if auto_crop:
+            bounds = self.LaplacianAlgorithm.auto_crop_output()
+            if bounds:
+                top, bottom, left, right = bounds
+                self.statusBar().showMessage(
+                    f"Auto-cropped: {top}px top, {bottom}px bottom, {left}px left, {right}px right",
+                    self.statusbar_msg_display_time
+                )
+
+        self._main_content.add_processed_image(self.LaplacianAlgorithm.output_image)
+        self._output_exported = False
 
     def closeEvent(self, event):
         if not self.has_unsaved_work:
