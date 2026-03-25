@@ -1,8 +1,9 @@
 import os, sys, tempfile, logging
 
-# Enable logging so GPU timing info is visible
+# Only show warnings+ in production; set CHIMPSTACKR_DEBUG=1 for full logs
+_log_level = logging.DEBUG if os.environ.get("CHIMPSTACKR_DEBUG") else logging.WARNING
 logging.basicConfig(
-    level=logging.INFO,
+    level=_log_level,
     format="%(asctime)s [%(name)s] %(message)s",
     datefmt="%H:%M:%S",
 )
