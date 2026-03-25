@@ -252,6 +252,7 @@ class LaplacianPyramid:
             for j in range(1, n):
                 futures[j] = pool.submit(self._load_and_align, ref_image, paths[j])
 
+            t_last = time.time()
             for i in range(1, n):
                 self.Algorithm.wait_if_paused()
                 if self.Algorithm.is_cancelled:
@@ -262,9 +263,13 @@ class LaplacianPyramid:
 
                 aligned = futures[i].result()
                 aligned_images.append(aligned)
-                elapsed = time.time() - t_align
-                logger.info(f"[CuPy GPU] Aligned {i+1}/{n} ({elapsed:.1f}s elapsed)")
-                self._emit_progress(signals, progress_callback, i + 1, n * 2, elapsed)
+                t_now = time.time()
+                per_image_time = t_now - t_last
+                t_last = t_now
+                logger.info(f"[CuPy GPU] Aligned {i+1}/{n} ({t_now - t_align:.1f}s elapsed)")
+                # Report progress over total pipeline (n items align + n items fuse)
+                # Pass per-image time so TimeRemainingHandler estimates correctly
+                self._emit_progress(signals, progress_callback, i + 1, n * 2, per_image_time)
 
         align_time = time.time() - t_align
         logger.info(f"[CuPy GPU] Phase 1 (align): {align_time:.2f}s "
@@ -282,6 +287,7 @@ class LaplacianPyramid:
         fused_pyr = GPU._cupy_laplacian_pyramid(img0_gpu, self.pyramid_num_levels)
         del img0_gpu
 
+        t_last_gpu = time.time()
         for i in range(1, n):
             if self.Algorithm.is_cancelled:
                 return
@@ -294,8 +300,10 @@ class LaplacianPyramid:
                 self.config.contrast_threshold, self.config.feather_radius
             )
             del new_pyr
+            t_now = time.time()
             self._emit_progress(signals, progress_callback, n + i, n * 2,
-                                time.time() - t_gpu)
+                                t_now - t_last_gpu)
+            t_last_gpu = t_now
 
         cp.cuda.Stream.null.synchronize()
         del aligned_images

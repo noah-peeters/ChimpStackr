@@ -86,6 +86,13 @@ def _apply_app_icon(qApp, icon_path):
     # Build QIcon with all available sizes for sharpest rendering everywhere
     icon = qtg.QIcon()
     icons_dir = os.path.dirname(icon_path)
+
+    # On Windows, add .ico first (contains all sizes for taskbar/titlebar)
+    if sys.platform == "win32":
+        ico = os.path.join(icons_dir, "icon.ico")
+        if os.path.isfile(ico):
+            icon.addFile(ico)
+
     for name in ["icon_128x128.png", "icon_256x256.png", "icon_512x512.png", "chimpstackr_icon.png"]:
         p = os.path.join(icons_dir, name)
         if os.path.isfile(p):
@@ -127,6 +134,9 @@ def main():
     qApp.setStyleSheet(get_stylesheet())
 
     _apply_app_icon(qApp, icon_path)
+    # Also set on the window directly (Windows taskbar needs this)
+    if icon_path and os.path.isfile(icon_path):
+        window.setWindowIcon(qApp.windowIcon())
 
     window.showMaximized()
 
