@@ -8,10 +8,9 @@ version = "0.0.25"
 description = "Open-source focus stacking application"
 readme = "README.md"
 license = "GPL-3.0-or-later"
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.14"
 dependencies = [
     "pyside6-essentials>=6.4.2,<7.0",
-    "qt-material>=2.14",
     "opencv-python-headless>=4.7,<5.0",
     "numpy>=1.23,<3.0",
     "numba>=0.56",
@@ -24,20 +23,23 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "pyinstaller>=6.0",
+]
+macos = [
+    "pyobjc-framework-Cocoa>=9.0",
 ]
 
 [project.scripts]
-chimpstackr = "src.run:main"
 chimpstackr-cli = "src.cli:main"
 
 [project.gui-scripts]
-chimpstackr-gui = "src.run:main"
+chimpstackr = "src.run:main"
 
 [tool.setuptools.packages.find]
 include = ["src*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.png", "*.svg", "*.xml"]
+"*" = ["*.png", "*.svg", "*.ico", "*.icns"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

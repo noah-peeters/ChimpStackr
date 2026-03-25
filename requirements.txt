@@ -1,14 +1,13 @@
-# Pure UI requirements
-pyside6_essentials>=6.4.2,<7.0
-qt-material>=2.14
+# GUI
+pyside6-essentials>=6.4.2,<7.0
 
-# Algorithm requirements
+# Image processing
 opencv-python-headless>=4.7,<5.0
 numpy>=1.23,<3.0
 numba>=0.56
 rawpy>=0.18
 imageio>=2.29
-pyfftw>=0.13
 
-# Used for image alignment
+# Alignment / FFT
 scipy>=1.10
+pyfftw>=0.13

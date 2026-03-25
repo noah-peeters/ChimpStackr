@@ -1,0 +1,261 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create GitHub release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  # ══════════════════════════════════════════════
+  # Run tests first on all platforms
+  # ══════════════════════════════════════════════
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.11']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Run tests
+        run: pytest tests/ -v
+
+  # ══════════════════════════════════════════════
+  # Build macOS (.app → .dmg)
+  # ══════════════════════════════════════════════
+  build-macos:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller chimpstackr.spec --noconfirm
+
+      - name: Verify build
+        run: |
+          echo "=== Build contents ==="
+          ls -la dist/chimpstackr/
+          echo "=== Testing CLI ==="
+          dist/chimpstackr/chimpstackr-cli --help || true
+          echo "=== .app bundle ==="
+          ls -la dist/ChimpStackr.app/Contents/MacOS/ || true
+
+      - name: Sign app (if certificate available)
+        if: env.CODESIGN_IDENTITY != ''
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+        run: |
+          ENTITLEMENTS="packaging/entitlements.plist"
+          APP="dist/ChimpStackr.app"
+          find "$APP" \( -name "*.dylib" -o -name "*.so" \) -exec \
+            codesign --force --options runtime --timestamp \
+            --entitlements "$ENTITLEMENTS" --sign "$CODESIGN_IDENTITY" {} \;
+          codesign --force --options runtime --timestamp \
+            --entitlements "$ENTITLEMENTS" --sign "$CODESIGN_IDENTITY" \
+            "$APP/Contents/MacOS/chimpstackr"
+          codesign --force --options runtime --timestamp \
+            --entitlements "$ENTITLEMENTS" --sign "$CODESIGN_IDENTITY" \
+            "$APP/Contents/MacOS/chimpstackr-cli"
+          codesign --force --options runtime --timestamp \
+            --entitlements "$ENTITLEMENTS" --sign "$CODESIGN_IDENTITY" "$APP"
+          codesign --verify --deep --strict "$APP"
+
+      - name: Create DMG
+        run: |
+          hdiutil create -volname "ChimpStackr" -srcfolder "dist/ChimpStackr.app" \
+            -ov -format UDZO "dist/ChimpStackr-macOS.dmg"
+
+      - name: Notarize (if credentials available)
+        if: env.APPLE_ID != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          xcrun notarytool submit "dist/ChimpStackr-macOS.dmg" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "dist/ChimpStackr-macOS.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChimpStackr-macOS
+          path: dist/ChimpStackr-macOS.dmg
+
+  # ══════════════════════════════════════════════
+  # Build Windows (.exe → installer)
+  # ══════════════════════════════════════════════
+  build-windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller chimpstackr.spec --noconfirm
+
+      - name: Verify build
+        run: |
+          echo "=== Build contents ==="
+          dir dist\chimpstackr\
+          echo "=== Testing CLI ==="
+          dist\chimpstackr\chimpstackr-cli.exe --help
+
+      - name: Create ZIP archive
+        run: |
+          Compress-Archive -Path "dist\chimpstackr\*" `
+            -DestinationPath "dist\ChimpStackr-Windows.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChimpStackr-Windows
+          path: dist/ChimpStackr-Windows.zip
+
+  # ══════════════════════════════════════════════
+  # Build Linux (AppImage)
+  # ══════════════════════════════════════════════
+  build-linux:
+    needs: test
+    runs-on: ubuntu-22.04  # Use 22.04 for broad glibc compat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libfuse2 libxcb-cursor0 libxkbcommon0 \
+            libegl1 libgl1-mesa-glx libglib2.0-0
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller chimpstackr.spec --noconfirm
+
+      - name: Verify build
+        run: |
+          echo "=== Build contents ==="
+          ls -la dist/chimpstackr/
+          echo "=== Testing CLI ==="
+          dist/chimpstackr/chimpstackr-cli --help || true
+
+      - name: Create AppImage
+        run: |
+          APPDIR="dist/ChimpStackr.AppDir"
+          mkdir -p "$APPDIR/usr/bin"
+          mkdir -p "$APPDIR/usr/share/applications"
+          mkdir -p "$APPDIR/usr/share/icons/hicolor/512x512/apps"
+
+          cp -r dist/chimpstackr/* "$APPDIR/usr/bin/"
+
+          cat > "$APPDIR/chimpstackr.desktop" << 'EOF'
+          [Desktop Entry]
+          Name=ChimpStackr
+          GenericName=Focus stacking app
+          Comment=Easily focus stack images
+          Exec=chimpstackr
+          Icon=chimpstackr
+          Terminal=false
+          Type=Application
+          Categories=Graphics;Photography;
+          StartupNotify=true
+          EOF
+          cp "$APPDIR/chimpstackr.desktop" "$APPDIR/usr/share/applications/"
+
+          cp packaging/icons/icon_512x512.png "$APPDIR/usr/share/icons/hicolor/512x512/apps/chimpstackr.png"
+          cp packaging/icons/icon_256x256.png "$APPDIR/chimpstackr.png"
+
+          cat > "$APPDIR/AppRun" << 'EOF'
+          #!/bin/bash
+          HERE="$(dirname "$(readlink -f "${0}")")"
+          export PATH="$HERE/usr/bin:$PATH"
+          export LD_LIBRARY_PATH="$HERE/usr/bin:${LD_LIBRARY_PATH:-}"
+          if [ "$1" = "--cli" ] || [ "$(basename "$0")" = "chimpstackr-cli" ]; then
+              shift 2>/dev/null || true
+              exec "$HERE/usr/bin/chimpstackr-cli" "$@"
+          else
+              exec "$HERE/usr/bin/chimpstackr" "$@"
+          fi
+          EOF
+          chmod +x "$APPDIR/AppRun"
+
+          # Download appimagetool
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" \
+            -O /tmp/appimagetool
+          chmod +x /tmp/appimagetool
+
+          ARCH=x86_64 /tmp/appimagetool "$APPDIR" "dist/ChimpStackr-Linux-x86_64.AppImage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChimpStackr-Linux
+          path: dist/ChimpStackr-Linux-x86_64.AppImage
+
+  # ══════════════════════════════════════════════
+  # Create GitHub Release (on tag push)
+  # ══════════════════════════════════════════════
+  release:
+    needs: [build-macos, build-windows, build-linux]
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: List artifacts
+        run: find artifacts/ -type f -ls
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            artifacts/ChimpStackr-macOS/ChimpStackr-macOS.dmg
+            artifacts/ChimpStackr-Windows/ChimpStackr-Windows.zip
+            artifacts/ChimpStackr-Linux/ChimpStackr-Linux-x86_64.AppImage
