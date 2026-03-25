@@ -120,6 +120,13 @@ def parse_args():
         default=False,
         help="Auto-crop black edges from alignment shifts",
     )
+    parser.add_argument(
+        "--bit-depth",
+        type=int,
+        choices=[8, 16],
+        default=8,
+        help="Output bit depth: 8 (default) or 16. 16-bit supported for PNG and TIFF.",
+    )
     return parser.parse_args()
 
 
@@ -253,10 +260,24 @@ def main():
             print(f"  Auto-cropped: {top}px top, {bottom}px bottom, {left}px left, {right}px right")
 
     # Save output
-    result = np.clip(np.around(algo.output_image), 0, 255).astype(np.uint8)
+    ext = os.path.splitext(args.output)[1].lower()
+    bit_depth = args.bit_depth
+
+    # JPG only supports 8-bit
+    if bit_depth == 16 and ext in (".jpg", ".jpeg"):
+        print("Warning: JPEG does not support 16-bit. Saving as 8-bit.", file=sys.stderr)
+        bit_depth = 8
+
+    if bit_depth == 16:
+        # Scale 0-255 float32 -> 0-65535 uint16
+        result = np.clip(algo.output_image, 0, 255) * 257.0
+        result = np.around(result).astype(np.uint16)
+        depth_str = "16-bit"
+    else:
+        result = np.clip(np.around(algo.output_image), 0, 255).astype(np.uint8)
+        depth_str = "8-bit"
 
     # Determine compression params
-    ext = os.path.splitext(args.output)[1].lower()
     params = None
     if ext in (".jpg", ".jpeg"):
         params = [cv2.IMWRITE_JPEG_QUALITY, args.quality]
@@ -269,7 +290,7 @@ def main():
         sys.exit(1)
 
     file_size = os.path.getsize(args.output)
-    print(f"  Output saved: {args.output} ({file_size / 1024:.0f} KB)")
+    print(f"  Output saved: {args.output} ({depth_str}, {file_size / 1024:.0f} KB)")
     print(f"  Total time: {total_elapsed:.2f}s")
     print(f"  Output shape: {result.shape}")
 
