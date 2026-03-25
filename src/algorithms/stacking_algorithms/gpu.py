@@ -162,7 +162,7 @@ def _cupy_focusmap(level1_gpu, level2_gpu, kernel_size):
 
 
 def _cupy_fuse(pyr1_level, pyr2_level, focusmap):
-    """Fuse two pyramid levels on GPU."""
+    """Fuse two pyramid levels on GPU (hard selection)."""
     if pyr1_level.ndim == 3:
         mask = focusmap[:, :, None].astype(bool)
     else:
@@ -170,10 +170,30 @@ def _cupy_fuse(pyr1_level, pyr2_level, focusmap):
     return cp.where(mask, pyr2_level, pyr1_level)
 
 
-def _cupy_fuse_pyramid_pair(pyr1, pyr2, kernel_size):
+def _cupy_feather_and_fuse(pyr1_level, pyr2_level, focusmap, feather_radius):
+    """Fuse with soft feathered transitions on GPU."""
+    if feather_radius <= 0:
+        return _cupy_fuse(pyr1_level, pyr2_level, focusmap)
+
+    # Gaussian blur the binary focusmap to create soft transitions
+    k = feather_radius * 2 + 1
+    soft_map = _cp_uniform_filter(focusmap.astype(cp.float32), size=k)
+    # Normalize to [0, 1]
+    max_val = soft_map.max()
+    if max_val > 0:
+        soft_map = soft_map / max_val
+
+    if pyr1_level.ndim == 3:
+        soft_map = soft_map[:, :, None]
+    return (pyr1_level * (1.0 - soft_map) + pyr2_level * soft_map).astype(cp.float32)
+
+
+def _cupy_fuse_pyramid_pair(pyr1, pyr2, kernel_size,
+                            contrast_threshold=0.0, feather_radius=0):
     """Fuse two Laplacian pyramids entirely on GPU.
 
     All computation stays on GPU — no host transfers between steps.
+    Supports contrast_threshold and feather_radius for soft blending.
     """
     threshold_index = len(pyr1) - 1
     new_pyr = []
@@ -184,17 +204,34 @@ def _cupy_fuse_pyramid_pair(pyr1, pyr2, kernel_size):
             current_focusmap = _cupy_focusmap(
                 pyr1[level], pyr2[level], kernel_size
             )
+            # Apply contrast threshold: keep pyr1 where both are below threshold
+            if contrast_threshold > 0:
+                k = kernel_size | 1
+                if pyr1[level].ndim == 3:
+                    g1 = pyr1[level][:,:,0]*0.114 + pyr1[level][:,:,1]*0.587 + pyr1[level][:,:,2]*0.299
+                    g2 = pyr2[level][:,:,0]*0.114 + pyr2[level][:,:,1]*0.587 + pyr2[level][:,:,2]*0.299
+                else:
+                    g1, g2 = pyr1[level], pyr2[level]
+                m1 = _cp_uniform_filter(g1, size=k)
+                v1 = _cp_uniform_filter(g1 * g1, size=k) - m1 * m1
+                m2 = _cp_uniform_filter(g2, size=k)
+                v2 = _cp_uniform_filter(g2 * g2, size=k) - m2 * m2
+                # Zero out focusmap where both are below threshold
+                both_low = (v1 < contrast_threshold) & (v2 < contrast_threshold)
+                current_focusmap = cp.where(both_low, cp.uint8(0), current_focusmap)
         else:
-            # Resize focusmap for largest level(s)
-            # CuPy doesn't have cv2.resize — use nearest-neighbor via repeat
             s = pyr2[level].shape[:2]
             fm_h, fm_w = current_focusmap.shape
-            # Simple nearest-neighbor resize on GPU
             y_idx = (cp.arange(s[0]) * fm_h // s[0]).astype(cp.int32)
             x_idx = (cp.arange(s[1]) * fm_w // s[1]).astype(cp.int32)
             current_focusmap = current_focusmap[cp.ix_(y_idx, x_idx)]
 
-        new_pyr.append(_cupy_fuse(pyr1[level], pyr2[level], current_focusmap))
+        if feather_radius > 0:
+            new_pyr.append(_cupy_feather_and_fuse(
+                pyr1[level], pyr2[level], current_focusmap, feather_radius
+            ))
+        else:
+            new_pyr.append(_cupy_fuse(pyr1[level], pyr2[level], current_focusmap))
 
     return new_pyr
 

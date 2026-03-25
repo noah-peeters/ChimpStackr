@@ -146,12 +146,7 @@ class LaplacianPyramid:
 
     def _can_use_cupy_path(self):
         """Check if the fully GPU-resident CuPy path can be used."""
-        return (
-            _HAS_CUPY
-            and self.config.use_gpu
-            and self.config.contrast_threshold <= 0
-            and self.config.feather_radius <= 0
-        )
+        return _HAS_CUPY and self.config.use_gpu
 
     def _align_and_stack_laplacian(self, signals=None, progress_callback=None):
         self.apply_gpu_settings()
@@ -257,7 +252,8 @@ class LaplacianPyramid:
                     new_pyr = GPU._cupy_laplacian_pyramid(img_gpu, self.pyramid_num_levels)
                     del img_gpu
                     fused_pyr = GPU._cupy_fuse_pyramid_pair(
-                        fused_pyr, new_pyr, self.fusion_kernel_size
+                        fused_pyr, new_pyr, self.fusion_kernel_size,
+                        self.config.contrast_threshold, self.config.feather_radius
                     )
                     del new_pyr
 
@@ -365,7 +361,8 @@ class LaplacianPyramid:
                     new_pyr = GPU._cupy_laplacian_pyramid(img_gpu, self.pyramid_num_levels)
                     del img_gpu
                     fused_pyr = GPU._cupy_fuse_pyramid_pair(
-                        fused_pyr, new_pyr, self.fusion_kernel_size
+                        fused_pyr, new_pyr, self.fusion_kernel_size,
+                        self.config.contrast_threshold, self.config.feather_radius
                     )
                     del new_pyr
 
