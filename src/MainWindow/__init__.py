@@ -153,24 +153,26 @@ class Window(qtw.QMainWindow):
             options=qtw.QFileDialog.DontUseNativeDialog,
         )
         if directory:
-            import numpy as np
-            image = np.clip(np.around(self.LaplacianAlgorithm.output_image), 0, 255).astype(np.uint8)
+            from src.MainWindow.ImageSavingDialog import _convert_to_uint8, _convert_to_uint16
             import cv2
+            image_8 = _convert_to_uint8(self.LaplacianAlgorithm.output_image)
+            image_16 = _convert_to_uint16(self.LaplacianAlgorithm.output_image)
             base = os.path.join(directory, "stacked_output")
             exported = []
             try:
-                cv2.imwrite(base + ".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                cv2.imwrite(base + ".jpg", image_8, [cv2.IMWRITE_JPEG_QUALITY, 95])
                 exported.append(base + ".jpg")
-                cv2.imwrite(base + ".png", image, [cv2.IMWRITE_PNG_COMPRESSION, 4])
-                exported.append(base + ".png")
-                cv2.imwrite(base + ".tif", image)
-                exported.append(base + ".tif")
+                cv2.imwrite(base + ".png", image_16, [cv2.IMWRITE_PNG_COMPRESSION, 4])
+                exported.append(base + ".png (16-bit)")
+                cv2.imwrite(base + ".tif", image_16)
+                exported.append(base + ".tif (16-bit)")
 
                 msg = qtw.QMessageBox(self)
                 msg.setStandardButtons(qtw.QMessageBox.Ok)
                 msg.setIcon(qtw.QMessageBox.Information)
                 msg.setWindowTitle("Batch export success")
                 msg.setText(f"Exported {len(exported)} files to:\n{directory}")
+                msg.setInformativeText("PNG and TIFF saved as 16-bit for maximum quality.")
                 msg.show()
             except Exception as e:
                 msg = qtw.QMessageBox(self)
