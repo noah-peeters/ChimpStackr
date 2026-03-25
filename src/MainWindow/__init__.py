@@ -101,7 +101,7 @@ class Window(qtw.QMainWindow):
                 self,
                 "Export stacked image",
                 self.current_image_directory,
-                "JPEG (*.jpg *.jpeg);; PNG (*.png);; TIFF (*.tiff *.tif)",
+                "JPEG (*.jpg *.jpeg);; PNG (*.png);; TIFF (*.tiff *.tif);; OpenEXR (*.exr)",
                 options=qtw.QFileDialog.DontUseNativeDialog,
             )
             if outputFilePath:
@@ -119,6 +119,8 @@ class Window(qtw.QMainWindow):
                     imgType = "PNG"
                 elif usedFilter == "TIFF (*.tiff *.tif)":
                     imgType = "TIFF"
+                elif usedFilter == "OpenEXR (*.exr)":
+                    imgType = "EXR"
 
                 if not os.path.splitext(outputFilePath)[1]:
                     outputFilePath = outputFilePath + "." + imgType.lower()
@@ -166,13 +168,17 @@ class Window(qtw.QMainWindow):
                 exported.append(base + ".png (16-bit)")
                 cv2.imwrite(base + ".tif", image_16)
                 exported.append(base + ".tif (16-bit)")
+                # EXR: 32-bit float (0-1 range)
+                image_exr = np.clip(self.LaplacianAlgorithm.output_image, 0, 255).astype(np.float32) / 255.0
+                cv2.imwrite(base + ".exr", image_exr)
+                exported.append(base + ".exr (32-bit float)")
 
                 msg = qtw.QMessageBox(self)
                 msg.setStandardButtons(qtw.QMessageBox.Ok)
                 msg.setIcon(qtw.QMessageBox.Information)
                 msg.setWindowTitle("Batch export success")
                 msg.setText(f"Exported {len(exported)} files to:\n{directory}")
-                msg.setInformativeText("PNG and TIFF saved as 16-bit for maximum quality.")
+                msg.setInformativeText("PNG/TIFF: 16-bit, EXR: 32-bit float.")
                 msg.show()
             except Exception as e:
                 msg = qtw.QMessageBox(self)

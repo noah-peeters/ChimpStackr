@@ -6,9 +6,11 @@
         python -m src.cli --input images/*.jpg --output result.tif
         python -m src.cli --input img1.jpg img2.jpg img3.jpg --output stacked.png --align
 """
+import os
+os.environ.setdefault('OPENCV_IO_ENABLE_OPENEXR', '1')
+
 import argparse
 import glob
-import os
 import sys
 import time
 
@@ -263,12 +265,20 @@ def main():
     ext = os.path.splitext(args.output)[1].lower()
     bit_depth = args.bit_depth
 
+    # EXR always uses 32-bit float
+    if ext == ".exr":
+        bit_depth = 32
+
     # JPG only supports 8-bit
     if bit_depth == 16 and ext in (".jpg", ".jpeg"):
         print("Warning: JPEG does not support 16-bit. Saving as 8-bit.", file=sys.stderr)
         bit_depth = 8
 
-    if bit_depth == 16:
+    if bit_depth == 32:
+        # EXR: 32-bit float in 0-1 range
+        result = np.clip(algo.output_image, 0, 255).astype(np.float32) / 255.0
+        depth_str = "32-bit float"
+    elif bit_depth == 16:
         # Scale 0-255 float32 -> 0-65535 uint16
         result = np.clip(algo.output_image, 0, 255) * 257.0
         result = np.around(result).astype(np.uint16)

@@ -15,6 +15,56 @@ from src.config import SUPPORTED_IMAGE_READ_FORMATS, SUPPORTED_RAW_FORMATS
 
 logger = logging.getLogger(__name__)
 
+# EXIF orientation tag values → rotation operations
+# See: https://sirv.com/help/articles/rotate-photos-to-be-upright/
+_EXIF_ORIENTATION_OPS = {
+    1: None,                          # Normal
+    2: (1, None),                     # Flipped horizontally
+    3: (None, cv2.ROTATE_180),        # Rotated 180
+    4: (0, None),                     # Flipped vertically
+    5: (1, cv2.ROTATE_90_CLOCKWISE),  # Transposed
+    6: (None, cv2.ROTATE_90_CLOCKWISE),       # Rotated 90 CW
+    7: (1, cv2.ROTATE_90_COUNTERCLOCKWISE),   # Transverse
+    8: (None, cv2.ROTATE_90_COUNTERCLOCKWISE), # Rotated 90 CCW
+}
+
+
+def _read_exif_orientation(path):
+    """Read EXIF orientation tag from an image file.
+
+    Uses PIL (available via Pillow/PySide6) to read just the EXIF data
+    without loading the full image. Returns orientation int (1-8) or None.
+    """
+    try:
+        from PIL import Image
+        from PIL.ExifTags import Base as ExifBase
+        with Image.open(path) as pil_img:
+            exif = pil_img.getexif()
+            if exif:
+                return exif.get(ExifBase.Orientation, None)
+    except Exception:
+        pass
+    return None
+
+
+def _apply_exif_orientation(img, orientation):
+    """Apply EXIF orientation transform to a numpy BGR image.
+
+    Handles all 8 EXIF orientation values including rotations and flips.
+    """
+    if orientation is None or orientation not in _EXIF_ORIENTATION_OPS:
+        return img
+    ops = _EXIF_ORIENTATION_OPS[orientation]
+    if ops is None:
+        return img
+
+    flip_code, rotate_code = ops
+    if flip_code is not None:
+        img = cv2.flip(img, flip_code)
+    if rotate_code is not None:
+        img = cv2.rotate(img, rotate_code)
+    return img
+
 
 class ImageLoadingHandler:
     def __init__(self, supported_formats=None, supported_raw=None):
@@ -31,6 +81,7 @@ class ImageLoadingHandler:
     def read_image_from_path(self, path):
         """
         Load src image from path to BGR 2D numpy array.
+        Applies EXIF orientation automatically.
         Returns None if loading fails.
         """
         if not os.path.isfile(path):
@@ -42,10 +93,13 @@ class ImageLoadingHandler:
 
         if extension.lower() in self.supported_formats:
             try:
+                # Read EXIF orientation before OpenCV load (cv2 ignores EXIF)
+                orientation = _read_exif_orientation(path)
                 img = cv2.imread(path, -1)
                 if img is None:
                     logger.error("cv2.imread returned None for: %s", path)
-                return img
+                    return None
+                return _apply_exif_orientation(img, orientation)
             except Exception as e:
                 logger.error("Failed to load image %s: %s", path, e)
                 return None
@@ -89,6 +143,7 @@ class ImageLoadingHandler:
     def read_image_as_float32(self, path):
         """
         Load image and convert to float32 BGR.
+        Applies EXIF orientation automatically.
         For 8-bit images: values 0-255
         For 16-bit images: values scaled to 0-255 range
         For RAW: full postprocessed output as float32
@@ -102,11 +157,14 @@ class ImageLoadingHandler:
 
         if ext_lower in self.supported_formats:
             try:
+                # Read EXIF orientation before OpenCV load
+                orientation = _read_exif_orientation(path)
                 # IMREAD_UNCHANGED preserves 16-bit depth
                 img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
                 if img is None:
                     logger.error("cv2.imread returned None for: %s", path)
                     return None
+                img = _apply_exif_orientation(img, orientation)
                 return self._to_float32_bgr(img)
             except Exception as e:
                 logger.error("Failed to load image %s: %s", path, e)

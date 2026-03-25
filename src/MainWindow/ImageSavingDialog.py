@@ -225,8 +225,15 @@ def createDialog(imageArray, imType, chosenPath):
         else:
             return
 
+    elif imType == "EXR":
+        # EXR: always 32-bit float, no dialog needed
+        bit_depth = 32
+
     # Convert to target bit depth
-    if bit_depth == 16:
+    if bit_depth == 32:
+        # EXR: keep as float32, scale to 0-1 range (EXR convention)
+        imageOut = np.clip(imageArray, 0, 255).astype(np.float32) / 255.0
+    elif bit_depth == 16:
         imageOut = _convert_to_uint16(imageArray)
     else:
         imageOut = _convert_to_uint8(imageArray)

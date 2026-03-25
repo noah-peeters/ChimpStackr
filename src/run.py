@@ -1,5 +1,8 @@
 import os, sys, tempfile, logging
 
+# Enable OpenEXR support in OpenCV (must be set before cv2 import)
+os.environ.setdefault('OPENCV_IO_ENABLE_OPENEXR', '1')
+
 # Only show warnings+ in production; set CHIMPSTACKR_DEBUG=1 for full logs
 _log_level = logging.DEBUG if os.environ.get("CHIMPSTACKR_DEBUG") else logging.WARNING
 logging.basicConfig(

@@ -81,12 +81,45 @@ class Algorithm:
         """Load image from path as float32 (preserving full bit depth)."""
         return self.ImageLoadingHandler.read_image_as_float32(path)
 
+    @staticmethod
+    def _match_dimensions(ref_im, im_to_align):
+        """Resize im_to_align to match ref_im dimensions if they differ.
+
+        Handles mixed image dimensions (#29) by center-cropping or padding
+        the image to align to match the reference dimensions. Uses
+        center-crop for larger images and zero-padding for smaller ones.
+        """
+        if ref_im.shape[:2] == im_to_align.shape[:2]:
+            return im_to_align
+
+        rh, rw = ref_im.shape[:2]
+        ah, aw = im_to_align.shape[:2]
+
+        # If dimensions are very different (>2x), resize to match
+        if ah > rh * 2 or aw > rw * 2 or ah < rh // 2 or aw < rw // 2:
+            return cv2.resize(im_to_align, (rw, rh), interpolation=cv2.INTER_AREA)
+
+        # Center-crop if larger, zero-pad if smaller
+        result = np.zeros_like(ref_im)
+        # Source region (from im_to_align)
+        sy = max(0, (ah - rh) // 2)
+        sx = max(0, (aw - rw) // 2)
+        # Destination region (in result)
+        dy = max(0, (rh - ah) // 2)
+        dx = max(0, (rw - aw) // 2)
+        # Copy region size
+        ch = min(rh - dy, ah - sy)
+        cw = min(rw - dx, aw - sx)
+        result[dy:dy+ch, dx:dx+cw] = im_to_align[sy:sy+ch, sx:sx+cw]
+        return result
+
     def align_image_pair(self, ref_im, im_to_align, scale_factor=10,
                          coarse_fine=False, use_rst=False):
         """
         Align im_to_align to ref_im.
         Returns float32 aligned image.
 
+        Handles mixed image dimensions by resizing to match reference.
         If use_rst=True, uses rotation+scale+translation alignment.
         Otherwise, translation only (DFT phase correlation).
         """
@@ -97,6 +130,10 @@ class Algorithm:
             ref_im = self.load_image(ref_im)
         if isinstance(im_to_align, str):
             im_to_align = self.load_image(im_to_align)
+
+        # Handle different image dimensions (#29)
+        if ref_im is not None and im_to_align is not None:
+            im_to_align = self._match_dimensions(ref_im, im_to_align)
 
         if use_rst:
             result = self._align_rst(ref_im, im_to_align, scale_factor)
