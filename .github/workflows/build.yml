@@ -240,6 +240,8 @@ jobs:
     needs: [build-macos, build-windows, build-linux]
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -252,9 +254,24 @@ jobs:
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          draft: true
+          draft: false
           generate_release_notes: true
+          name: "ChimpStackr ${{ github.ref_name }}"
+          body: |
+            ## Downloads
+
+            | Platform | File |
+            |---|---|
+            | Windows | `ChimpStackr-Windows.zip` — Extract and run `chimpstackr.exe` |
+            | macOS | `ChimpStackr-macOS.dmg` — Open, drag to Applications |
+            | Linux | `ChimpStackr-Linux-x86_64.AppImage` — `chmod +x` and run |
+
+            ## What's New
+
+            See [full changelog](https://github.com/noah-peeters/ChimpStackr/commits/${{ github.ref_name }}) for details.
           files: |
             artifacts/ChimpStackr-macOS/ChimpStackr-macOS.dmg
             artifacts/ChimpStackr-Windows/ChimpStackr-Windows.zip
