@@ -47,11 +47,11 @@ def get_deviation(matrix):
 
 def gaussian_pyramid(img, num_levels):
     """Calculate Gaussian pyramid."""
-    lower = img.copy()
-    gaussian_pyr = [lower.astype(np.float32)]
+    lower = img if img.dtype == np.float32 else img.astype(np.float32)
+    gaussian_pyr = [lower]
     for _ in range(num_levels):
-        lower = cv2.pyrDown(lower)
-        gaussian_pyr.append(lower.astype(np.float32))
+        lower = cv2.pyrDown(lower)  # returns float32 when input is float32
+        gaussian_pyr.append(lower)
     return gaussian_pyr
 
 
@@ -163,8 +163,8 @@ def generate_laplacian_pyramid(img, num_levels):
     for i in range(num_levels, 0, -1):
         size = (gaussian_pyr[i - 1].shape[1], gaussian_pyr[i - 1].shape[0])
         gaussian_expanded = cv2.pyrUp(gaussian_pyr[i], dstsize=size)
-        laplacian = np.subtract(gaussian_pyr[i - 1], gaussian_expanded)
-        laplacian_pyr.append(laplacian)
+        cv2.subtract(gaussian_pyr[i - 1], gaussian_expanded, dst=gaussian_expanded)
+        laplacian_pyr.append(gaussian_expanded)
     return laplacian_pyr
 
 
