@@ -11,14 +11,6 @@ import scipy.ndimage.interpolation as ndii
 pyfftw.interfaces.cache.enable()
 pyfftw.interfaces.cache.set_keepalive_time(300)  # 5 minutes
 
-# CuPy GPU acceleration (optional)
-try:
-    import cupy as cp
-    from cupyx.scipy.ndimage import map_coordinates as _cp_map_coordinates
-    HAS_CUPY = True
-except ImportError:
-    HAS_CUPY = False
-
 # -- UTILITIES --#
 # Examine the average value of the image at most radius pixels from the edge
 def get_borderval(img, radius=None):
@@ -747,86 +739,6 @@ def translation(im0, im1, filter_pcorr=0, odds=1, constraints=None):
     return ret
 
 
-# ══════════════════════════════════════════════
-# CuPy GPU-accelerated alignment
-# ══════════════════════════════════════════════
-
-def _gpu_phase_correlation(im0_small, im1_small):
-    """FFT phase correlation on GPU using CuPy.
-
-    Takes numpy arrays (small downsampled grayscale), uploads to GPU,
-    runs FFT pipeline, returns translation vector + success (on CPU).
-
-    ~0.7ms vs ~5.3ms CPU PyFFTW for 400x267 images.
-    """
-    g0 = cp.asarray(im0_small)
-    g1 = cp.asarray(im1_small)
-
-    # FFT2 both images
-    f0 = cp.fft.fft2(g0)
-    f1 = cp.fft.fft2(g1)
-
-    # Cross-power spectrum (normalized)
-    eps = cp.abs(f1).max() * 1e-15
-    cps = cp.abs(cp.fft.ifft2(
-        (f0 * f1.conjugate()) / (cp.abs(f0) * cp.abs(f1) + eps)
-    ))
-    scps = cp.fft.fftshift(cps)
-
-    # Download CPS to CPU for argmax + subpixel interpolation
-    # (these are tiny-array operations not worth keeping on GPU)
-    scps_np = cp.asnumpy(scps)
-    return scps_np, f0.shape
-
-
-def _gpu_translation(im0_small, im1_small, filter_pcorr=0, constraints=None):
-    """GPU-accelerated translation detection.
-
-    Runs FFT on GPU, argmax + subpixel refinement on CPU.
-    """
-    scps_np, fshape = _gpu_phase_correlation(im0_small, im1_small)
-
-    # Reuse existing argmax_translation for subpixel refinement
-    (t0, t1), succ = argmax_translation(scps_np, filter_pcorr, constraints)
-
-    tvec = np.array([t0, t1])
-    tvec -= np.array(fshape, int) // 2
-
-    return dict(tvec=tvec, success=succ, angle=0)
-
-
-def gpu_warp_translation(img_gpu, tx, ty):
-    """Apply sub-pixel translation to a CuPy image on GPU.
-
-    Uses bilinear interpolation via map_coordinates.
-    Returns CuPy array (stays on GPU).
-
-    ~28ms for 24MP vs ~43ms CPU warpAffine.
-    """
-    h, w = img_gpu.shape[:2]
-    # Build coordinate grids (shifted by translation)
-    yy = cp.arange(h, dtype=cp.float32)[:, None] - ty
-    xx = cp.arange(w, dtype=cp.float32)[None, :] - tx
-
-    # Broadcast to full grid
-    yy = cp.broadcast_to(yy, (h, w))
-    xx = cp.broadcast_to(xx, (h, w))
-    coords = cp.stack([yy, xx])  # (2, H, W)
-
-    if img_gpu.ndim == 3:
-        # Process each channel
-        channels = []
-        for ch in range(img_gpu.shape[2]):
-            channels.append(
-                _cp_map_coordinates(img_gpu[:, :, ch], coords,
-                                    order=1, mode='constant', cval=0.0)
-            )
-        return cp.stack(channels, axis=2)
-    else:
-        return _cp_map_coordinates(img_gpu, coords,
-                                   order=1, mode='constant', cval=0.0)
-
-
 def _get_precision(shape, scale=1):
     """
     Given the parameters of the log-polar transform, get width of the interval
@@ -1061,58 +973,6 @@ class im_reg:
         self.last_shift = (float(x_shift), float(y_shift))
 
         return result
-
-    def register_image_translation_gpu(self, im0, im1, scale_factor,
-                                       ref_gray=None, ref_gray_small=None):
-        """GPU-accelerated alignment: FFT on GPU, warp on GPU, returns CuPy array.
-
-        Saves ~130ms per image vs CPU path:
-          - GPU FFT: 0.7ms vs 5.3ms CPU (saves 4.6ms)
-          - GPU cvtColor: 4ms vs 14ms (saves 10ms)
-          - GPU warp: 28ms vs 43ms (saves 15ms)
-          - Keeps result on GPU: avoids 90ms upload in stacking loop
-
-        Args:
-            im0: Reference image (numpy float32 BGR)
-            im1: Image to align (numpy float32 BGR)
-            scale_factor: Downsample factor for FFT alignment
-            ref_gray: Pre-computed grayscale of im0 (numpy, optional)
-            ref_gray_small: Pre-computed downsampled grayscale of im0 (numpy, optional)
-
-        Returns:
-            CuPy array (float32 BGR) — stays on GPU for subsequent stacking.
-        """
-        if not HAS_CUPY:
-            # Fallback to CPU
-            return cp.asarray(
-                self.register_image_translation(im0, im1, scale_factor, ref_gray)
-            )
-
-        # Grayscale of align image (CPU — needed for resize which is faster on CPU)
-        align_gray = cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY)
-
-        # Downsample for FFT (CPU resize is faster than GPU for small targets)
-        if ref_gray_small is None:
-            if ref_gray is None:
-                ref_gray = cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY)
-            ref_small = resize_image(ref_gray, scale_factor)
-        else:
-            ref_small = ref_gray_small
-        align_small = resize_image(align_gray, scale_factor)
-
-        # GPU FFT phase correlation (~0.7ms vs 5.3ms CPU)
-        translation_result = _gpu_translation(ref_small, align_small)
-
-        y_shift, x_shift = translation_result["tvec"] * scale_factor
-        self.last_shift = (float(x_shift), float(y_shift))
-
-        # Upload image to GPU and warp there (~28ms vs 43ms CPU)
-        # The result STAYS on GPU for the stacking pipeline
-        img_gpu = cp.asarray(im1)
-        result_gpu = gpu_warp_translation(img_gpu, float(x_shift), float(y_shift))
-        del img_gpu
-
-        return result_gpu
 
     # TODO: Implement with option of selecting what method to use (not yet successfully implemented)
     # Register im1 to im0 for Rotation, Scale, Translation (RST)

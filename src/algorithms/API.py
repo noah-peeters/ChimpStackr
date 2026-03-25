@@ -11,7 +11,6 @@ import time
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-import cv2
 import numpy as np
 import src.utilities as utilities
 import src.algorithms as algorithms
@@ -224,133 +223,14 @@ class LaplacianPyramid:
         self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
 
     def _align_and_stack_laplacian_cupy(self, signals=None, progress_callback=None):
-        """Pipelined GPU align+stack: CPU loads while GPU aligns+fuses.
+        """Two-phase GPU pipeline: align ALL on CPU, then stream-fuse on GPU.
 
-        Pipeline: CPU thread loads next image from disk while GPU handles
-        the current image (align on GPU via CuPy FFT + warp, then pyramid
-        build + fuse). Aligned images stay on GPU — no CPU↔GPU round-trip.
+        Phase 1: Align all images using ALL CPU cores in parallel.
+                 Saturates CPU — all cores busy with alignment.
+        Phase 2: Stream aligned images through GPU one by one for fusion.
+                 GPU runs at ~100ms/image, continuously fed from RAM.
 
-        For non-translation alignment (RST), falls back to CPU alignment
-        with parallel workers + GPU fuse.
-        """
-        import cupy as cp
-        GPU = _GPU_module
-        from src.algorithms.dft_imreg import HAS_CUPY as _dft_has_cupy
-        import os
-
-        paths = self.image_paths
-        n = len(paths)
-        use_gpu_align = _dft_has_cupy and not self.config.align_rotation_scale
-        t_total = time.time()
-
-        GPU._cupy_warmup()
-
-        if use_gpu_align:
-            return self._align_and_stack_gpu_aligned(signals, progress_callback)
-        else:
-            # RST alignment must use CPU — fall back to two-phase pipeline
-            return self._align_and_stack_cpu_aligned_gpu_fuse(signals, progress_callback)
-
-    def _align_and_stack_gpu_aligned(self, signals=None, progress_callback=None):
-        """Fully GPU pipeline: load on CPU, align+fuse on GPU.
-
-        CPU pre-loads next image while GPU aligns + pyramids + fuses current.
-        Aligned result stays on GPU — zero round-trips between align and fuse.
-        """
-        import cupy as cp
-        GPU = _GPU_module
-        from src.algorithms import dft_imreg
-
-        paths = self.image_paths
-        n = len(paths)
-        t_total = time.time()
-        logger.info(f"[CuPy GPU] Pipelined GPU align+stack: {n} images")
-
-        # Load + setup reference
-        ref_image = self.Algorithm.load_image(paths[0])
-        ref_gray = cv2.cvtColor(ref_image, cv2.COLOR_BGR2GRAY) if ref_image.ndim == 3 else ref_image
-        ref_gray_small = dft_imreg.resize_image(ref_gray, self.config.alignment_scale_factor)
-
-        # Build initial pyramid from reference (upload once)
-        img0_gpu = cp.asarray(ref_image)
-        fused_pyr = GPU._cupy_laplacian_pyramid(img0_gpu, self.pyramid_num_levels)
-        del img0_gpu
-
-        try:
-            # Pre-load next image on CPU while GPU works
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                pending = {}
-                lookahead = 3
-                for j in range(1, min(1 + lookahead, n)):
-                    pending[j] = pool.submit(self.Algorithm.load_image, paths[j])
-
-                for i in range(1, n):
-                    self.Algorithm.wait_if_paused()
-                    if self.Algorithm.is_cancelled:
-                        for f in pending.values():
-                            f.cancel()
-                        return
-
-                    start_time = time.time()
-
-                    # Get pre-loaded image (numpy, from disk)
-                    if i in pending:
-                        im_to_align = pending.pop(i).result()
-                    else:
-                        im_to_align = self.Algorithm.load_image(paths[i])
-
-                    # Submit next load
-                    for j in range(i + 1, min(i + 1 + lookahead, n)):
-                        if j not in pending:
-                            pending[j] = pool.submit(self.Algorithm.load_image, paths[j])
-
-                    # GPU: align (FFT on GPU + warp on GPU) → returns CuPy array
-                    t_gpu = time.time()
-                    aligned_gpu = self.Algorithm.DFT_Imreg.register_image_translation_gpu(
-                        ref_image, im_to_align,
-                        scale_factor=self.config.alignment_scale_factor,
-                        ref_gray=ref_gray,
-                        ref_gray_small=ref_gray_small,
-                    )
-                    self.Algorithm.alignment_shifts.append(self.Algorithm.DFT_Imreg.last_shift)
-                    del im_to_align
-
-                    # GPU: pyramid + fuse (already on GPU, no upload needed)
-                    new_pyr = GPU._cupy_laplacian_pyramid(aligned_gpu, self.pyramid_num_levels)
-                    del aligned_gpu
-                    fused_pyr = GPU._cupy_fuse_pyramid_pair(
-                        fused_pyr, new_pyr, self.fusion_kernel_size,
-                        self.config.contrast_threshold, self.config.feather_radius
-                    )
-                    del new_pyr
-                    cp.cuda.Stream.null.synchronize()
-
-                    elapsed = time.time() - start_time
-                    gpu_elapsed = time.time() - t_gpu
-                    logger.info(f"[CuPy GPU] Image {i+1}/{n}: "
-                                f"total={elapsed:.3f}s (load={elapsed-gpu_elapsed:.3f}s, "
-                                f"gpu_align+fuse={gpu_elapsed:.3f}s)")
-                    self._emit_progress(signals, progress_callback, i + 1, n, elapsed)
-        finally:
-            del ref_image, ref_gray, ref_gray_small
-
-        if self.Algorithm.is_cancelled:
-            return
-
-        t_recon = time.time()
-        result_gpu = GPU._cupy_reconstruct(fused_pyr)
-        self.output_image = cp.asnumpy(result_gpu)
-        del result_gpu, fused_pyr
-        self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
-        logger.info(f"[CuPy GPU] Reconstruct+tonemap: {time.time()-t_recon:.3f}s")
-        logger.info(f"[CuPy GPU] Total: {time.time()-t_total:.2f}s")
-
-    def _align_and_stack_cpu_aligned_gpu_fuse(self, signals=None, progress_callback=None):
-        """Fallback: CPU alignment (RST) + GPU fuse.
-
-        Used when RST alignment is enabled (can't run on GPU).
-        Phase 1: Parallel CPU alignment with all cores.
-        Phase 2: Stream aligned images through GPU for fusion.
+        Separated phases avoid CPU↔GPU contention and maximize both.
         """
         import cupy as cp
         GPU = _GPU_module
@@ -359,10 +239,10 @@ class LaplacianPyramid:
         paths = self.image_paths
         n = len(paths)
         n_workers = min(max(4, os.cpu_count() // 2), 12)
-        logger.info(f"[CuPy GPU] CPU align ({n_workers} workers) + GPU fuse: {n} images")
+        logger.info(f"[CuPy GPU] Two-phase pipeline: {n_workers} CPU workers, then GPU stream")
         t_total = time.time()
 
-        # Phase 1: Align all on CPU
+        # ── Phase 1: Align ALL images on CPU (parallel) ──
         t_align = time.time()
         ref_image = self.Algorithm.align_image_pair(paths[0], paths[0])
         aligned_images = [ref_image]
@@ -376,6 +256,7 @@ class LaplacianPyramid:
             for i in range(1, n):
                 self.Algorithm.wait_if_paused()
                 if self.Algorithm.is_cancelled:
+                    logger.info("Stacking cancelled during alignment")
                     for f in futures.values():
                         f.cancel()
                     return
@@ -383,28 +264,35 @@ class LaplacianPyramid:
                 aligned = futures[i].result()
                 aligned_images.append(aligned)
                 t_now = time.time()
-                self._emit_progress(signals, progress_callback, i + 1, n * 2,
-                                    t_now - t_last)
+                per_image_time = t_now - t_last
                 t_last = t_now
+                logger.info(f"[CuPy GPU] Aligned {i+1}/{n} ({t_now - t_align:.1f}s elapsed)")
+                # Report progress over total pipeline (n items align + n items fuse)
+                # Pass per-image time so TimeRemainingHandler estimates correctly
+                self._emit_progress(signals, progress_callback, i + 1, n * 2, per_image_time)
 
         align_time = time.time() - t_align
-        logger.info(f"[CuPy GPU] Phase 1 (CPU align): {align_time:.2f}s")
+        logger.info(f"[CuPy GPU] Phase 1 (align): {align_time:.2f}s "
+                     f"({align_time/max(n-1,1):.3f}s/image avg)")
         del ref_image
 
         if self.Algorithm.is_cancelled:
             return
 
-        # Phase 2: GPU fuse
+        # ── Phase 2: Stream-fuse on GPU (pairwise, all data in RAM already) ──
         t_gpu = time.time()
+        GPU._cupy_warmup()
+
         img0_gpu = cp.asarray(aligned_images[0])
         fused_pyr = GPU._cupy_laplacian_pyramid(img0_gpu, self.pyramid_num_levels)
         del img0_gpu
 
+        t_last_gpu = time.time()
         for i in range(1, n):
             if self.Algorithm.is_cancelled:
                 return
             img_gpu = cp.asarray(aligned_images[i])
-            aligned_images[i] = None
+            aligned_images[i] = None  # free RAM as we go
             new_pyr = GPU._cupy_laplacian_pyramid(img_gpu, self.pyramid_num_levels)
             del img_gpu
             fused_pyr = GPU._cupy_fuse_pyramid_pair(
@@ -414,14 +302,16 @@ class LaplacianPyramid:
             del new_pyr
             t_now = time.time()
             self._emit_progress(signals, progress_callback, n + i, n * 2,
-                                t_now - t_gpu)
-            t_gpu_mark = t_now
+                                t_now - t_last_gpu)
+            t_last_gpu = t_now
 
         cp.cuda.Stream.null.synchronize()
         del aligned_images
         gpu_time = time.time() - t_gpu
-        logger.info(f"[CuPy GPU] Phase 2 (GPU fuse): {gpu_time:.2f}s")
+        logger.info(f"[CuPy GPU] Phase 2 (GPU fuse): {gpu_time:.2f}s "
+                     f"({gpu_time/max(n-1,1):.3f}s/image)")
 
+        # ── Reconstruct ──
         t_recon = time.time()
         result_gpu = GPU._cupy_reconstruct(fused_pyr)
         self.output_image = cp.asnumpy(result_gpu)
