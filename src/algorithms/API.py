@@ -165,34 +165,46 @@ class LaplacianPyramid:
             ref_image, self.pyramid_num_levels
         )
         new_pyr = None
+        paths = self.image_paths
+
+        def _align_and_pyramid(path):
+            """Load, align, and build pyramid in one worker call."""
+            aligned = self._load_and_align(ref_image, path)
+            pyr = self.Algorithm.generate_laplacian_pyramid(
+                aligned, self.pyramid_num_levels
+            )
+            del aligned
+            return pyr
 
         try:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = None
-                paths = self.image_paths
+            # Use 2 workers: pre-compute alignment + pyramid for next images
+            # while main thread fuses current pair. cv2 ops release GIL.
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                pending = {}
+                lookahead = 3
+                for j in range(1, min(1 + lookahead, len(paths))):
+                    pending[j] = pool.submit(_align_and_pyramid, paths[j])
 
                 for i in range(1, len(paths)):
                     self.Algorithm.wait_if_paused()
                     if self.Algorithm.is_cancelled:
                         logger.info("Stacking cancelled")
+                        for f in pending.values():
+                            f.cancel()
                         return
 
                     start_time = time.time()
 
-                    if future is not None:
-                        aligned = future.result()
+                    if i in pending:
+                        new_pyr = pending.pop(i).result()
                     else:
-                        aligned = self._load_and_align(ref_image, paths[i])
+                        new_pyr = _align_and_pyramid(paths[i])
 
-                    if i + 1 < len(paths):
-                        future = pool.submit(self._load_and_align, ref_image, paths[i + 1])
-                    else:
-                        future = None
+                    # Refill lookahead
+                    for j in range(i + 1, min(i + 1 + lookahead, len(paths))):
+                        if j not in pending:
+                            pending[j] = pool.submit(_align_and_pyramid, paths[j])
 
-                    new_pyr = self.Algorithm.generate_laplacian_pyramid(
-                        aligned, self.pyramid_num_levels
-                    )
-                    del aligned
                     fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
                         fused_pyr, new_pyr, self.fusion_kernel_size,
                         self.config.contrast_threshold, self.config.feather_radius,
@@ -211,15 +223,22 @@ class LaplacianPyramid:
         self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
 
     def _align_and_stack_laplacian_cupy(self, signals=None, progress_callback=None):
-        """Pipelined GPU stacking: CPU alignment overlaps with GPU fusion.
+        """Deep-pipelined GPU stacking: many CPU workers overlap with GPU.
 
-        Uses 2 worker threads so alignment of images N+1 and N+2 runs
-        while GPU fuses image N. Alignment is CPU-bound (~600ms),
-        GPU work is ~130ms, so with 2 workers the GPU never waits.
+        Alignment is CPU-bound (~500ms) while GPU fusion is ~100ms.
+        To keep the GPU fully fed, we use enough workers to always have
+        aligned images ready. Workers scale based on the ratio:
+          workers = ceil(align_time / gpu_time) = ceil(500/100) = 5
+        Capped by CPU core count to avoid thrashing.
         """
         import cupy as cp
         GPU = _GPU_module
-        logger.info("[CuPy GPU] Starting pipelined align+stack (2 workers)")
+        import os
+
+        # Scale workers: enough to keep GPU fed, capped by cores
+        # alignment ~500ms, GPU ~100ms, so need ~5 workers
+        n_workers = min(max(4, os.cpu_count() // 3), 8)
+        logger.info(f"[CuPy GPU] Starting pipelined align+stack ({n_workers} workers)")
         t_total = time.time()
         GPU._cupy_warmup()
 
@@ -231,13 +250,13 @@ class LaplacianPyramid:
 
         paths = self.image_paths
         n = len(paths)
+        lookahead = n_workers + 1  # how far ahead to pre-submit
 
         try:
-            # 2 workers: align N+1 and N+2 while GPU fuses N
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                # Pre-submit first 2 alignments immediately
+            with ThreadPoolExecutor(max_workers=n_workers) as pool:
+                # Pre-submit a full buffer of alignments
                 pending = {}
-                for j in range(1, min(3, n)):
+                for j in range(1, min(1 + lookahead, n)):
                     pending[j] = pool.submit(self._load_and_align, ref_image, paths[j])
 
                 for i in range(1, n):
@@ -250,20 +269,20 @@ class LaplacianPyramid:
 
                     start_time = time.time()
 
-                    # Get aligned image (should already be done)
+                    # Get aligned image (should already be done with enough workers)
                     if i in pending:
                         aligned = pending.pop(i).result()
                     else:
                         aligned = self._load_and_align(ref_image, paths[i])
 
-                    # Submit next alignment(s) to keep 2 ahead
-                    for j in range(i + 1, min(i + 3, n)):
+                    # Refill the lookahead buffer
+                    for j in range(i + 1, min(i + 1 + lookahead, n)):
                         if j not in pending:
                             pending[j] = pool.submit(
                                 self._load_and_align, ref_image, paths[j]
                             )
 
-                    # GPU: upload + pyramid + fuse (runs while CPU aligns next)
+                    # GPU: upload + pyramid + fuse
                     t_gpu = time.time()
                     img_gpu = cp.asarray(aligned)
                     del aligned
@@ -311,31 +330,41 @@ class LaplacianPyramid:
         fused_pyr = self.Algorithm.generate_laplacian_pyramid(im0, self.pyramid_num_levels)
         del im0
         new_pyr = None
+        paths = self.image_paths
+
+        def _load_and_pyramid(path):
+            """Load image and build pyramid in worker thread."""
+            img = self.Algorithm.load_image(path)
+            pyr = self.Algorithm.generate_laplacian_pyramid(img, self.pyramid_num_levels)
+            del img
+            return pyr
 
         try:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = None
-                paths = self.image_paths
+            # Pre-compute load+pyramid in background while main thread fuses
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                pending = {}
+                lookahead = 3
+                for j in range(1, min(1 + lookahead, len(paths))):
+                    pending[j] = pool.submit(_load_and_pyramid, paths[j])
 
                 for i in range(1, len(paths)):
                     self.Algorithm.wait_if_paused()
                     if self.Algorithm.is_cancelled:
+                        for f in pending.values():
+                            f.cancel()
                         return
 
                     start_time = time.time()
 
-                    if future is not None:
-                        im1 = future.result()
+                    if i in pending:
+                        new_pyr = pending.pop(i).result()
                     else:
-                        im1 = self.Algorithm.load_image(paths[i])
+                        new_pyr = _load_and_pyramid(paths[i])
 
-                    if i + 1 < len(paths):
-                        future = pool.submit(self.Algorithm.load_image, paths[i + 1])
-                    else:
-                        future = None
+                    for j in range(i + 1, min(i + 1 + lookahead, len(paths))):
+                        if j not in pending:
+                            pending[j] = pool.submit(_load_and_pyramid, paths[j])
 
-                    new_pyr = self.Algorithm.generate_laplacian_pyramid(im1, self.pyramid_num_levels)
-                    del im1
                     fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
                         fused_pyr, new_pyr, self.fusion_kernel_size,
                         self.config.contrast_threshold, self.config.feather_radius,
@@ -353,40 +382,46 @@ class LaplacianPyramid:
         self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
 
     def _stack_laplacian_cupy(self, signals=None, progress_callback=None):
-        """Fully GPU-resident pairwise stacking without alignment."""
+        """GPU-resident stacking with parallel image loading."""
         import cupy as cp
         GPU = _GPU_module
         logger.info("[CuPy GPU] Starting GPU-resident stacking pipeline")
         t_start = time.time()
         GPU._cupy_warmup()
-        logger.info(f"[CuPy GPU] Warmup: {time.time()-t_start:.2f}s")
 
-        im0 = self.Algorithm.load_image(self.image_paths[0])
+        paths = self.image_paths
+        n = len(paths)
+
+        im0 = self.Algorithm.load_image(paths[0])
         img0_gpu = cp.asarray(im0)
         fused_pyr = GPU._cupy_laplacian_pyramid(img0_gpu, self.pyramid_num_levels)
         del im0, img0_gpu
 
         try:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = None
-                paths = self.image_paths
+            # Pre-load images while GPU works (loading is I/O bound, ~150ms)
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                pending = {}
+                lookahead = 4
+                for j in range(1, min(1 + lookahead, n)):
+                    pending[j] = pool.submit(self.Algorithm.load_image, paths[j])
 
-                for i in range(1, len(paths)):
+                for i in range(1, n):
                     self.Algorithm.wait_if_paused()
                     if self.Algorithm.is_cancelled:
+                        for f in pending.values():
+                            f.cancel()
                         return
 
                     start_time = time.time()
 
-                    if future is not None:
-                        im1 = future.result()
+                    if i in pending:
+                        im1 = pending.pop(i).result()
                     else:
                         im1 = self.Algorithm.load_image(paths[i])
 
-                    if i + 1 < len(paths):
-                        future = pool.submit(self.Algorithm.load_image, paths[i + 1])
-                    else:
-                        future = None
+                    for j in range(i + 1, min(i + 1 + lookahead, n)):
+                        if j not in pending:
+                            pending[j] = pool.submit(self.Algorithm.load_image, paths[j])
 
                     t_gpu = time.time()
                     img_gpu = cp.asarray(im1)
@@ -402,10 +437,10 @@ class LaplacianPyramid:
 
                     elapsed = time.time() - start_time
                     gpu_elapsed = time.time() - t_gpu
-                    logger.info(f"[CuPy GPU] Image {i+1}/{len(paths)}: "
+                    logger.info(f"[CuPy GPU] Image {i+1}/{n}: "
                                 f"total={elapsed:.3f}s (load={elapsed-gpu_elapsed:.3f}s, "
                                 f"gpu={gpu_elapsed:.3f}s)")
-                    self._emit_progress(signals, progress_callback, i + 1, len(paths), elapsed)
+                    self._emit_progress(signals, progress_callback, i + 1, n, elapsed)
         finally:
             pass
 
