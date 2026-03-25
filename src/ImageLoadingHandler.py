@@ -130,8 +130,10 @@ class ImageLoadingHandler:
             # 16-bit: scale to 0-255 range as float32
             img = img.astype(np.float32) * (255.0 / 65535.0)
         elif img.dtype == np.float32 or img.dtype == np.float64:
-            # HDR/float: assume 0-1 range, scale to 0-255
-            if img.max() <= 1.0:
+            # HDR/float: check a small sample to detect 0-1 range
+            # (avoids expensive full-array img.max() scan on 24MP images)
+            sample_max = img.flat[:1000].max() if img.size > 1000 else img.max()
+            if sample_max <= 1.0:
                 img = img.astype(np.float32) * 255.0
             else:
                 img = img.astype(np.float32)

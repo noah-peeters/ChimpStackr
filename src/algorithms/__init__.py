@@ -40,6 +40,7 @@ class Algorithm:
         self._pause_event = threading.Event()
         self._pause_event.set()  # Start unpaused (set = running)
         self.alignment_shifts = []  # Track all (x, y) shifts for auto-crop
+        self._ref_gray_cache = (None, None)  # (id(ref_im), gray) cache
 
     def cancel(self):
         self._cancel_event.set()
@@ -104,8 +105,21 @@ class Algorithm:
 
         return result
 
+    def _get_ref_gray(self, ref_im):
+        """Get cached grayscale of reference image (avoids redundant cvtColor)."""
+        ref_id = id(ref_im)
+        if self._ref_gray_cache[0] != ref_id:
+            if ref_im.ndim == 3:
+                gray = cv2.cvtColor(ref_im, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = ref_im
+            self._ref_gray_cache = (ref_id, gray)
+        return self._ref_gray_cache[1]
+
     def _align_translation(self, ref_im, im_to_align, scale_factor, coarse_fine):
         """Translation-only alignment using DFT phase correlation."""
+        ref_gray = self._get_ref_gray(ref_im)
+
         if coarse_fine and min(ref_im.shape[:2]) > 1000:
             small_ref = cv2.resize(ref_im, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
             small_align = cv2.resize(im_to_align, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
@@ -115,7 +129,8 @@ class Algorithm:
             del small_ref, small_align
 
         result = self.DFT_Imreg.register_image_translation(
-            ref_im, im_to_align, scale_factor=scale_factor
+            ref_im, im_to_align, scale_factor=scale_factor,
+            ref_gray=ref_gray,
         )
         self.alignment_shifts.append(self.DFT_Imreg.last_shift)
         return result
@@ -127,15 +142,12 @@ class Algorithm:
         the right model for focus stacking — no shear, no anisotropic scale.
         Focus breathing (uniform scale) is handled by ORB feature matching fallback.
         """
-        # Convert to grayscale
-        if ref_im.ndim == 3:
-            ref_gray = cv2.cvtColor(ref_im, cv2.COLOR_BGR2GRAY)
-        else:
-            ref_gray = ref_im.copy()
+        # Convert to grayscale (reuse cached ref grayscale when available)
+        ref_gray = self._get_ref_gray(ref_im)
         if im_to_align.ndim == 3:
             align_gray = cv2.cvtColor(im_to_align, cv2.COLOR_BGR2GRAY)
         else:
-            align_gray = im_to_align.copy()
+            align_gray = im_to_align
 
         # Ensure uint8
         if ref_gray.dtype != np.uint8:
@@ -175,11 +187,11 @@ class Algorithm:
                     warp_matrix[1, 2] *= (s / prev_s)
 
                 # More iterations at coarse, fewer at fine
-                max_iter = 300 if i == 0 else 150
+                max_iter = 200 if i == 0 else 100
                 gauss = 11 if i == 0 else 5
                 criteria = (
                     cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
-                    max_iter, 1e-7,
+                    max_iter, 1e-6,
                 )
 
                 # EUCLIDEAN: translation + rotation (3 DOF) — correct for focus stacking
@@ -227,7 +239,8 @@ class Algorithm:
 
         self.alignment_shifts.append((max_dx, max_dy))
 
-        return result.astype(np.float32)
+        # warpAffine on float32 input already returns float32
+        return result
 
     def generate_laplacian_pyramid(self, im1, num_levels):
         if isinstance(im1, str):
@@ -257,13 +270,21 @@ class Algorithm:
 
         for pyramid_level in range(len(pyr1)):
             if pyramid_level < threshold_index:
-                gray1 = cv2.cvtColor(pyr1[pyramid_level], cv2.COLOR_BGR2GRAY)
-                gray2 = cv2.cvtColor(pyr2[pyramid_level], cv2.COLOR_BGR2GRAY)
                 if contrast_threshold > 0:
+                    # Thresholded focusmap needs the Numba path
+                    gray1 = cv2.cvtColor(pyr1[pyramid_level], cv2.COLOR_BGR2GRAY)
+                    gray2 = cv2.cvtColor(pyr2[pyramid_level], cv2.COLOR_BGR2GRAY)
                     current_focusmap = CPU.compute_focusmap_thresholded(
                         gray1, gray2, kernel_size, np.float32(contrast_threshold),
                     )
+                elif HAS_GPU:
+                    # Use fast vectorized focusmap (cv2.blur variance, O(1)/pixel)
+                    current_focusmap = GPU.compute_focusmap_fast(
+                        pyr1[pyramid_level], pyr2[pyramid_level], kernel_size,
+                    )
                 else:
+                    gray1 = cv2.cvtColor(pyr1[pyramid_level], cv2.COLOR_BGR2GRAY)
+                    gray2 = cv2.cvtColor(pyr2[pyramid_level], cv2.COLOR_BGR2GRAY)
                     current_focusmap = CPU.compute_focusmap(
                         gray1, gray2, kernel_size,
                     )
@@ -286,30 +307,7 @@ class Algorithm:
         return new_pyr
 
     def _fuse_gpu(self, pyr1, pyr2, kernel_size):
-        """GPU fusion — same logic as CPU but calls GPU.compute_focusmap/fuse.
-        The new GPU module handles its own host↔device transfers internally,
-        so pyramids stay as numpy arrays here."""
-        threshold_index = len(pyr1) - 1
-        new_pyr = []
-        current_focusmap = None
-
-        for pyramid_level in range(len(pyr1)):
-            if pyramid_level < threshold_index:
-                # GPU compute_focusmap expects the pyramid level arrays directly
-                # and handles BGR→gray + device transfers internally
-                current_focusmap = GPU.compute_focusmap(
-                    pyr1[pyramid_level], pyr2[pyramid_level], kernel_size,
-                )
-            else:
-                # Resize focusmap to match this pyramid level (CPU resize is fine,
-                # this is a tiny array compared to the image)
-                s = pyr2[pyramid_level].shape
-                current_focusmap = cv2.resize(
-                    current_focusmap, (s[1], s[0]), interpolation=cv2.INTER_AREA
-                )
-
-            new_pyr_level = GPU.fuse_pyramid_levels_using_focusmap(
-                pyr1[pyramid_level], pyr2[pyramid_level], current_focusmap,
-            )
-            new_pyr.append(new_pyr_level)
-        return new_pyr
+        """GPU fusion — batched pipeline that keeps data on-GPU.
+        Batch-uploads all pyramid levels, runs all kernels without
+        intermediate host↔device transfers, downloads only at the end."""
+        return GPU.fuse_pyramid_pair_gpu(pyr1, pyr2, kernel_size)
