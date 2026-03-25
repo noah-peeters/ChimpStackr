@@ -1,10 +1,11 @@
 [Desktop Entry]
 Name=ChimpStackr
-GenericName=Focus stacking app
-Comment=Easily focus stack images
+GenericName=Focus Stacking
+Comment=Open-source focus stacking application
 Exec=chimpstackr
-Icon=${SNAP}/meta/gui/icon.png
+Icon=chimpstackr
 Terminal=false
 Type=Application
-Categories=Graphics;
+Categories=Graphics;Photography;
 StartupNotify=true
+MimeType=image/jpeg;image/png;image/tiff;
