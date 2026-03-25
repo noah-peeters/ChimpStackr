@@ -223,97 +223,95 @@ class LaplacianPyramid:
         self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
 
     def _align_and_stack_laplacian_cupy(self, signals=None, progress_callback=None):
-        """Deep-pipelined GPU stacking: many CPU workers overlap with GPU.
+        """Two-phase GPU pipeline: align ALL on CPU, then stream-fuse on GPU.
 
-        Alignment is CPU-bound (~500ms) while GPU fusion is ~100ms.
-        To keep the GPU fully fed, we use enough workers to always have
-        aligned images ready. Workers scale based on the ratio:
-          workers = ceil(align_time / gpu_time) = ceil(500/100) = 5
-        Capped by CPU core count to avoid thrashing.
+        Phase 1: Align all images using ALL CPU cores in parallel.
+                 Saturates CPU — all cores busy with alignment.
+        Phase 2: Stream aligned images through GPU one by one for fusion.
+                 GPU runs at ~100ms/image, continuously fed from RAM.
+
+        Separated phases avoid CPU↔GPU contention and maximize both.
         """
         import cupy as cp
         GPU = _GPU_module
         import os
 
-        # Scale workers: enough to keep GPU fed, capped by cores
-        # alignment ~500ms, GPU ~100ms, so need ~5 workers
-        n_workers = min(max(4, os.cpu_count() // 3), 8)
-        logger.info(f"[CuPy GPU] Starting pipelined align+stack ({n_workers} workers)")
-        t_total = time.time()
-        GPU._cupy_warmup()
-
-        ref_image = self.Algorithm.align_image_pair(self.image_paths[0], self.image_paths[0])
-
-        img0_gpu = cp.asarray(ref_image)
-        fused_pyr = GPU._cupy_laplacian_pyramid(img0_gpu, self.pyramid_num_levels)
-        del img0_gpu
-
         paths = self.image_paths
         n = len(paths)
-        lookahead = n_workers + 1  # how far ahead to pre-submit
+        n_workers = min(max(4, os.cpu_count() // 2), 12)
+        logger.info(f"[CuPy GPU] Two-phase pipeline: {n_workers} CPU workers, then GPU stream")
+        t_total = time.time()
 
-        try:
-            with ThreadPoolExecutor(max_workers=n_workers) as pool:
-                # Pre-submit a full buffer of alignments
-                pending = {}
-                for j in range(1, min(1 + lookahead, n)):
-                    pending[j] = pool.submit(self._load_and_align, ref_image, paths[j])
+        # ── Phase 1: Align ALL images on CPU (parallel) ──
+        t_align = time.time()
+        ref_image = self.Algorithm.align_image_pair(paths[0], paths[0])
+        aligned_images = [ref_image]
 
-                for i in range(1, n):
-                    self.Algorithm.wait_if_paused()
-                    if self.Algorithm.is_cancelled:
-                        logger.info("Stacking cancelled")
-                        for f in pending.values():
-                            f.cancel()
-                        return
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            futures = {}
+            for j in range(1, n):
+                futures[j] = pool.submit(self._load_and_align, ref_image, paths[j])
 
-                    start_time = time.time()
+            for i in range(1, n):
+                self.Algorithm.wait_if_paused()
+                if self.Algorithm.is_cancelled:
+                    logger.info("Stacking cancelled during alignment")
+                    for f in futures.values():
+                        f.cancel()
+                    return
 
-                    # Get aligned image (should already be done with enough workers)
-                    if i in pending:
-                        aligned = pending.pop(i).result()
-                    else:
-                        aligned = self._load_and_align(ref_image, paths[i])
+                aligned = futures[i].result()
+                aligned_images.append(aligned)
+                elapsed = time.time() - t_align
+                logger.info(f"[CuPy GPU] Aligned {i+1}/{n} ({elapsed:.1f}s elapsed)")
+                self._emit_progress(signals, progress_callback, i + 1, n * 2, elapsed)
 
-                    # Refill the lookahead buffer
-                    for j in range(i + 1, min(i + 1 + lookahead, n)):
-                        if j not in pending:
-                            pending[j] = pool.submit(
-                                self._load_and_align, ref_image, paths[j]
-                            )
-
-                    # GPU: upload + pyramid + fuse
-                    t_gpu = time.time()
-                    img_gpu = cp.asarray(aligned)
-                    del aligned
-                    new_pyr = GPU._cupy_laplacian_pyramid(img_gpu, self.pyramid_num_levels)
-                    del img_gpu
-                    fused_pyr = GPU._cupy_fuse_pyramid_pair(
-                        fused_pyr, new_pyr, self.fusion_kernel_size,
-                        self.config.contrast_threshold, self.config.feather_radius
-                    )
-                    del new_pyr
-                    cp.cuda.Stream.null.synchronize()
-
-                    elapsed = time.time() - start_time
-                    gpu_elapsed = time.time() - t_gpu
-                    logger.info(f"[CuPy GPU] Image {i+1}/{n}: "
-                                f"total={elapsed:.3f}s (wait={elapsed-gpu_elapsed:.3f}s, "
-                                f"gpu={gpu_elapsed:.3f}s)")
-                    self._emit_progress(signals, progress_callback, i + 1, n, elapsed)
-        finally:
-            del ref_image
+        align_time = time.time() - t_align
+        logger.info(f"[CuPy GPU] Phase 1 (align): {align_time:.2f}s "
+                     f"({align_time/max(n-1,1):.3f}s/image avg)")
+        del ref_image
 
         if self.Algorithm.is_cancelled:
             return
 
+        # ── Phase 2: Stream-fuse on GPU (pairwise, all data in RAM already) ──
+        t_gpu = time.time()
+        GPU._cupy_warmup()
+
+        img0_gpu = cp.asarray(aligned_images[0])
+        fused_pyr = GPU._cupy_laplacian_pyramid(img0_gpu, self.pyramid_num_levels)
+        del img0_gpu
+
+        for i in range(1, n):
+            if self.Algorithm.is_cancelled:
+                return
+            img_gpu = cp.asarray(aligned_images[i])
+            aligned_images[i] = None  # free RAM as we go
+            new_pyr = GPU._cupy_laplacian_pyramid(img_gpu, self.pyramid_num_levels)
+            del img_gpu
+            fused_pyr = GPU._cupy_fuse_pyramid_pair(
+                fused_pyr, new_pyr, self.fusion_kernel_size,
+                self.config.contrast_threshold, self.config.feather_radius
+            )
+            del new_pyr
+            self._emit_progress(signals, progress_callback, n + i, n * 2,
+                                time.time() - t_gpu)
+
+        cp.cuda.Stream.null.synchronize()
+        del aligned_images
+        gpu_time = time.time() - t_gpu
+        logger.info(f"[CuPy GPU] Phase 2 (GPU fuse): {gpu_time:.2f}s "
+                     f"({gpu_time/max(n-1,1):.3f}s/image)")
+
+        # ── Reconstruct ──
         t_recon = time.time()
         result_gpu = GPU._cupy_reconstruct(fused_pyr)
         self.output_image = cp.asnumpy(result_gpu)
         del result_gpu, fused_pyr
         self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
         logger.info(f"[CuPy GPU] Reconstruct+tonemap: {time.time()-t_recon:.3f}s")
-        logger.info(f"[CuPy GPU] Total pipeline: {time.time()-t_total:.2f}s")
+        logger.info(f"[CuPy GPU] Total: {time.time()-t_total:.2f}s "
+                     f"(align={align_time:.1f}s + gpu={gpu_time:.1f}s)")
 
     def _stack_laplacian(self, signals=None, progress_callback=None):
         self.apply_gpu_settings()
@@ -385,12 +383,14 @@ class LaplacianPyramid:
         """GPU-resident stacking with parallel image loading."""
         import cupy as cp
         GPU = _GPU_module
-        logger.info("[CuPy GPU] Starting GPU-resident stacking pipeline")
-        t_start = time.time()
-        GPU._cupy_warmup()
+        import os
 
         paths = self.image_paths
         n = len(paths)
+        n_workers = min(max(3, os.cpu_count() // 3), 8)
+        logger.info(f"[CuPy GPU] Pipelined stack: {n_workers} load workers")
+        t_start = time.time()
+        GPU._cupy_warmup()
 
         im0 = self.Algorithm.load_image(paths[0])
         img0_gpu = cp.asarray(im0)
@@ -398,10 +398,9 @@ class LaplacianPyramid:
         del im0, img0_gpu
 
         try:
-            # Pre-load images while GPU works (loading is I/O bound, ~150ms)
-            with ThreadPoolExecutor(max_workers=3) as pool:
+            with ThreadPoolExecutor(max_workers=n_workers) as pool:
                 pending = {}
-                lookahead = 4
+                lookahead = n_workers + 1
                 for j in range(1, min(1 + lookahead, n)):
                     pending[j] = pool.submit(self.Algorithm.load_image, paths[j])
 
@@ -453,7 +452,7 @@ class LaplacianPyramid:
         del result_gpu, fused_pyr
         self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
         logger.info(f"[CuPy GPU] Reconstruct+tonemap: {time.time()-t_recon:.3f}s")
-        logger.info(f"[CuPy GPU] Total pipeline: {time.time()-t_start:.2f}s")
+        logger.info(f"[CuPy GPU] Total: {time.time()-t_start:.2f}s")
 
     # ─── Weighted Average Method ───
     #
