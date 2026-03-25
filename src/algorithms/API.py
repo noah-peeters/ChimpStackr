@@ -211,13 +211,17 @@ class LaplacianPyramid:
         self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
 
     def _align_and_stack_laplacian_cupy(self, signals=None, progress_callback=None):
-        """Fully GPU-resident pairwise Laplacian stacking with CuPy."""
+        """Pipelined GPU stacking: CPU alignment overlaps with GPU fusion.
+
+        Uses 2 worker threads so alignment of images N+1 and N+2 runs
+        while GPU fuses image N. Alignment is CPU-bound (~600ms),
+        GPU work is ~130ms, so with 2 workers the GPU never waits.
+        """
         import cupy as cp
         GPU = _GPU_module
-        logger.info("[CuPy GPU] Starting GPU-resident align+stack pipeline")
+        logger.info("[CuPy GPU] Starting pipelined align+stack (2 workers)")
         t_total = time.time()
         GPU._cupy_warmup()
-        logger.info(f"[CuPy GPU] Warmup: {time.time()-t_total:.2f}s")
 
         ref_image = self.Algorithm.align_image_pair(self.image_paths[0], self.image_paths[0])
 
@@ -225,29 +229,41 @@ class LaplacianPyramid:
         fused_pyr = GPU._cupy_laplacian_pyramid(img0_gpu, self.pyramid_num_levels)
         del img0_gpu
 
-        try:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = None
-                paths = self.image_paths
+        paths = self.image_paths
+        n = len(paths)
 
-                for i in range(1, len(paths)):
+        try:
+            # 2 workers: align N+1 and N+2 while GPU fuses N
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                # Pre-submit first 2 alignments immediately
+                pending = {}
+                for j in range(1, min(3, n)):
+                    pending[j] = pool.submit(self._load_and_align, ref_image, paths[j])
+
+                for i in range(1, n):
                     self.Algorithm.wait_if_paused()
                     if self.Algorithm.is_cancelled:
                         logger.info("Stacking cancelled")
+                        for f in pending.values():
+                            f.cancel()
                         return
 
                     start_time = time.time()
 
-                    if future is not None:
-                        aligned = future.result()
+                    # Get aligned image (should already be done)
+                    if i in pending:
+                        aligned = pending.pop(i).result()
                     else:
                         aligned = self._load_and_align(ref_image, paths[i])
 
-                    if i + 1 < len(paths):
-                        future = pool.submit(self._load_and_align, ref_image, paths[i + 1])
-                    else:
-                        future = None
+                    # Submit next alignment(s) to keep 2 ahead
+                    for j in range(i + 1, min(i + 3, n)):
+                        if j not in pending:
+                            pending[j] = pool.submit(
+                                self._load_and_align, ref_image, paths[j]
+                            )
 
+                    # GPU: upload + pyramid + fuse (runs while CPU aligns next)
                     t_gpu = time.time()
                     img_gpu = cp.asarray(aligned)
                     del aligned
@@ -262,10 +278,10 @@ class LaplacianPyramid:
 
                     elapsed = time.time() - start_time
                     gpu_elapsed = time.time() - t_gpu
-                    logger.info(f"[CuPy GPU] Image {i+1}/{len(paths)}: "
-                                f"total={elapsed:.3f}s (align={elapsed-gpu_elapsed:.3f}s, "
+                    logger.info(f"[CuPy GPU] Image {i+1}/{n}: "
+                                f"total={elapsed:.3f}s (wait={elapsed-gpu_elapsed:.3f}s, "
                                 f"gpu={gpu_elapsed:.3f}s)")
-                    self._emit_progress(signals, progress_callback, i + 1, len(paths), elapsed)
+                    self._emit_progress(signals, progress_callback, i + 1, n, elapsed)
         finally:
             del ref_image
 
