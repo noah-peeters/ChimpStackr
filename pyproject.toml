@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "chimpstackr"
-version = "0.0.25"
+dynamic = ["version"]
 description = "Open-source focus stacking application"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -34,6 +34,9 @@ chimpstackr-cli = "src.cli:main"
 
 [project.gui-scripts]
 chimpstackr = "src.run:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "src._version.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["src*"]

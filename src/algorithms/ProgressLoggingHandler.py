@@ -13,13 +13,11 @@ class Logger:
         signals.progress_update.connect(self.progress_update)
         # signals.status_update.connect(self.status_update)
 
-    # Handle final data
     def finished(self):
-        print()
+        pass
 
-    # Handle previous process data
     def progress_update(self, current_progress_percentage):
-        print(current_progress_percentage)
+        pass
 
     # def status_update(self, status_text):
     #     print()

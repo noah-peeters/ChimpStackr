@@ -57,6 +57,32 @@ class ImageViewer(qtw.QGraphicsView):
         empty_layout.addWidget(subtitle)
         self.empty_state.setVisible(True)
 
+        # Accept drops on the viewer area too (larger target)
+        self.setAcceptDrops(True)
+
+    # --- Forward drag-drop to the loaded images handler ---
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            # Delegate to the LoadedImagesWidget's drop handler
+            loaded_widget = settings.globalVars.get("LoadedImagesWidget")
+            if loaded_widget:
+                loaded_widget.dropEvent(event)
+        else:
+            super().dropEvent(event)
+
     def set_image(self, image):
         self.viewerScene.set_image(image)
         self.empty_state.setVisible(image is None)

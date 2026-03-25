@@ -1,255 +1,224 @@
 """
-Focus stacking algorithms on GPU accelerated with Numba's cuda.
-~2x speedup when using (6000x4000) images on my hardware (intel i5-11400H, nvidia rtx 3060),
-when CPU runtime is compared to GPU runtime.
+GPU-accelerated focus stacking algorithms.
+
+Strategy: Use OpenCV's CUDA module (cv2.cuda) when available for pyrDown/pyrUp
+and image operations. These keep data on the GPU without host↔device transfers.
+Falls back to Numba CUDA kernels for the focus map computation (the main
+bottleneck) which needs custom logic.
+
+If cv2.cuda is not available, falls back to CPU OpenCV for pyramid ops
+with only the focusmap/fuse kernels running on GPU via Numba.
 """
 import math
 import numpy as np
-import numba.cuda as cuda
+import cv2
+
+try:
+    import numba.cuda as cuda
+    HAS_NUMBA_CUDA = cuda.is_available()
+except ImportError:
+    HAS_NUMBA_CUDA = False
+
+# Check for OpenCV CUDA support (opencv-contrib with CUDA build)
+HAS_CV_CUDA = hasattr(cv2, 'cuda') and cv2.cuda.getCudaEnabledDeviceCount() > 0 if hasattr(cv2, 'cuda') else False
 
 
-### Internal functions ###
-@cuda.jit(device=True, fastmath=True)
-def get_deviation(matrix, kernel_size):
-    """
-    Get deviation of a matrix using kernel_size for 'padding' zeros.
-    This is a device function that is called from within a CUDA kernel.
-    We are not able to pad an array on the gpu (np.zeros) like we do on the cpu,
-    so we calculate how many zero values would be added to pad the array instead.
-    """
-    # compute zeros to add
-    y_shape = matrix.shape[0]
-    x_shape = matrix.shape[1]
-    num_elements = y_shape * matrix.shape[1]
+# ──────────────────────────────────────────────
+# Numba CUDA kernels (focusmap + fuse)
+# ──────────────────────────────────────────────
 
-    y_pad = kernel_size - y_shape
-    x_pad = kernel_size - x_shape
-    zeros_to_add = y_pad * y_shape + x_pad * x_shape
-    # Total elements in padded matrix
-    total_elements = num_elements + zeros_to_add
+if HAS_NUMBA_CUDA:
+    @cuda.jit(device=True, fastmath=True)
+    def _variance_patch(matrix, kernel_size):
+        """Compute variance of a patch, accounting for virtual zero-padding."""
+        y_shape = matrix.shape[0]
+        x_shape = matrix.shape[1]
+        num_elements = y_shape * x_shape
 
-    # Get average value of matrix
-    average_value = 0
-    for y in range(y_shape):
-        for x in range(x_shape):
-            average_value += matrix[y, x]
-    average_value = average_value / total_elements
+        y_pad = max(0, kernel_size - y_shape)
+        x_pad = max(0, kernel_size - x_shape)
+        total_elements = num_elements + y_pad * x_shape + x_pad * y_shape
 
-    summed_deviation = float(0)
-    for y in range(y_shape):
-        for x in range(x_shape):
-            summed_deviation += (matrix[y, x] - average_value) ** 2 / total_elements
-    return summed_deviation
+        if total_elements == 0:
+            return 0.0
 
+        # Mean
+        avg = 0.0
+        for y in range(y_shape):
+            for x in range(x_shape):
+                avg += matrix[y, x]
+        avg /= total_elements
 
-@cuda.jit(fastmath=True)
-def compute_focusmap_gpu(array1, array2, kernel_size, focusmap):
-    """
-    Computes which pixel is more in focus between 'array1' and 'array2'.
-    Uses a (standard) deviation of the surrounding area according to the 'kernel_size'.
-    Saves the result in a 2D focusmap array where a '0' means the first image's pixel is more in focus.
-    A '1' means the second image's pixel is more in focus.
+        # Variance
+        var = 0.0
+        for y in range(y_shape):
+            for x in range(x_shape):
+                diff = matrix[y, x] - avg
+                var += diff * diff
+        # Zero-padded elements contribute avg² each
+        var += (num_elements + y_pad * x_shape + x_pad * y_shape - num_elements) * avg * avg
+        return var / total_elements
 
-    CUDA will execute this function in parallel, so it should be faster than the serial CPU calculation.
-    """
-    x, y = cuda.grid(2)
-    # If grid index is larger than image shape, do nothing
-    if x < array1.shape[0] and y < array1.shape[1]:
-        value_to_insert = 0
+    @cuda.jit(fastmath=True)
+    def _focusmap_kernel(gray1, gray2, kernel_size, focusmap):
+        """Per-pixel focus comparison between two grayscale images."""
+        y, x = cuda.grid(2)
+        if y < gray1.shape[0] and x < gray1.shape[1]:
+            k = kernel_size // 2
+            # Clamp patch bounds
+            y0 = max(0, y - k)
+            y1 = min(gray1.shape[0], y + k)
+            x0 = max(0, x - k)
+            x1 = min(gray1.shape[1], x + k)
 
-        k = int(kernel_size / 2)
-        patch1 = array1[x - k : x + k, y - k : y + k]
-        patch2 = array2[x - k : x + k, y - k : y + k]
+            patch1 = gray1[y0:y1, x0:x1]
+            patch2 = gray2[y0:y1, x0:x1]
 
-        # Compare 2 (standard) deviations
-        if get_deviation(patch2, kernel_size) > get_deviation(patch1, kernel_size):
-            value_to_insert = 1
+            v1 = _variance_patch(patch1, kernel_size)
+            v2 = _variance_patch(patch2, kernel_size)
 
-        # Write most in-focus pixel to output
-        focusmap[x, y] = value_to_insert
+            focusmap[y, x] = 1 if v2 > v1 else 0
 
+    @cuda.jit(fastmath=True)
+    def _fuse_kernel(pyr1, pyr2, focusmap):
+        """Fuse two pyramid levels: copy pyr2 pixels where focusmap == 1."""
+        y, x = cuda.grid(2)
+        if y < pyr1.shape[0] and x < pyr1.shape[1]:
+            if focusmap[y, x] != 0:
+                for c in range(pyr1.shape[2]):
+                    pyr1[y, x, c] = pyr2[y, x, c]
 
-@cuda.jit(fastmath=True)
-def fuse_pyramid_levels_using_focusmap_gpu(pyr_level1, pyr_level2, focusmap):
-    """
-    Choose which pixel to use between 'pyr_level1' and 'pyr_level2',
-    based on the corresponding value in the focusmap.
-    Values are saved in 'pyr_level1'.
-    This is safe, because each kernel only works on a single pixel.
-    """
-    x, y = cuda.grid(2)
-    # If grid index is larger than image shape, do nothing
-    if x < pyr_level1.shape[0] and y < pyr_level1.shape[1]:
-        if focusmap[x, y] != 0:
-            # Copy 3 color channels
-            for i in range(3):
-                pyr_level1[x, y, i] = pyr_level2[x, y, i]
-
-
-@cuda.jit(fastmath=True)
-def BGR2GRAY(array_in, array_out):
-    """
-    Convert a 3D BGR image array to a 2D grayscale image.
-    According to this formula: 'Y = 0.299 R + 0.587 G + 0.114 B'.
-    Has the same effect as cv2.cvtColor(array, cv2.COLOR_BGR2GRAY), but it's all on the GPU.
-    """
-    x, y = cuda.grid(2)
-    # If grid index is larger than image shape, do nothing
-    if x < array_in.shape[0] and y < array_in.shape[1]:
-        array_out[x, y] = (
-            0.299 * array_in[x, y, 2]  # Red
-            + 0.587 * array_in[x, y, 1]  # Green
-            + 0.114 * array_in[x, y, 0]  # Blue
-        )
+    @cuda.jit(fastmath=True)
+    def _bgr2gray_kernel(bgr_in, gray_out):
+        """BGR to grayscale on GPU."""
+        y, x = cuda.grid(2)
+        if y < bgr_in.shape[0] and x < bgr_in.shape[1]:
+            gray_out[y, x] = (
+                0.114 * bgr_in[y, x, 0]
+                + 0.587 * bgr_in[y, x, 1]
+                + 0.299 * bgr_in[y, x, 2]
+            )
 
 
-# TODO: Accelerate using gpu
-# Plan of action: use gpu for blurring images
+def _cuda_grid(shape_2d, block=(16, 16)):
+    """Compute CUDA grid dimensions for a 2D array."""
+    return (
+        math.ceil(shape_2d[0] / block[0]),
+        math.ceil(shape_2d[1] / block[1]),
+    )
+
+
+# ──────────────────────────────────────────────
+# Pyramid operations (GPU-accelerated where possible)
+# ──────────────────────────────────────────────
+
 def gaussian_pyramid(img, num_levels):
-    """Calculate Gaussian pyramid."""
-    import cv2
-
-    lower = img.copy()
-    gaussian_pyr = []
-    gaussian_pyr.append(lower.astype(np.float32))  # Use same dtype
-    # Compute all required pyramid levels
+    """Calculate Gaussian pyramid, using cv2.cuda if available."""
+    if HAS_CV_CUDA:
+        return _gaussian_pyramid_cuda(img, num_levels)
+    # Fallback: CPU OpenCV (still fast, uses SSE/AVX)
+    lower = img.astype(np.float32)
+    pyr = [lower]
     for _ in range(num_levels):
         lower = cv2.pyrDown(lower)
-        gaussian_pyr.append(lower.astype(np.float32))  # convert_to_memmap
-    return gaussian_pyr
+        pyr.append(lower.astype(np.float32))
+    return pyr
 
 
-### Exposed functions ###
-# TODO: Don't recalculate cuda args? And call most functions directly from parent script?
+def _gaussian_pyramid_cuda(img, num_levels):
+    """Gaussian pyramid using OpenCV CUDA — zero host↔device copies between levels."""
+    gpu_mat = cv2.cuda_GpuMat()
+    gpu_mat.upload(img.astype(np.float32))
+
+    pyr = [img.astype(np.float32)]
+    for _ in range(num_levels):
+        gpu_mat = cv2.cuda.pyrDown(gpu_mat)
+        pyr.append(gpu_mat.download().astype(np.float32))
+    return pyr
 
 
-def compute_focusmap(array1, array2, kernel_size):
-    """
-    Move arrays to device and call actual function next.
-    Will not wait for result to be ready. (which is what we want)
-    """
-    threadsperblock = (16, 16)  # Should be a multiple of 32 (max 1024)
-    blockspergrid_x = math.ceil(array1.shape[0] / threadsperblock[0])
-    blockspergrid_y = math.ceil(array1.shape[1] / threadsperblock[1])
-    blockspergrid = (blockspergrid_x, blockspergrid_y)
-
-    # Convert BGR to grayscale
-    array1_gray = cuda.device_array(
-        shape=(array1.shape[0], array1.shape[1]), dtype=np.float32
-    )
-    array2_gray = cuda.device_array_like(array1_gray)
-
-    BGR2GRAY[blockspergrid, threadsperblock](array1, array1_gray)
-    BGR2GRAY[blockspergrid, threadsperblock](array2, array2_gray)
-
-    # Result will be stored here
-    focusmap = cuda.device_array(shape=array1_gray.shape, dtype=np.uint8)
-
-    # Start calculation
-    compute_focusmap_gpu[blockspergrid, threadsperblock](
-        array1_gray, array2_gray, kernel_size, focusmap
-    )
-    # Don't wait for completion
-    # TODO: Check if that actually is the case
-    return focusmap
-
-
-def fuse_pyramid_levels_using_focusmap(pyr_level1, pyr_level2, focusmap):
-    # Calculate cuda args
-    threadsperblock = (16, 16)  # Should be a multiple of 32 (max 1024)
-    blockspergrid_x = math.ceil(pyr_level1.shape[0] / threadsperblock[0])
-    blockspergrid_y = math.ceil(pyr_level1.shape[1] / threadsperblock[1])
-    blockspergrid = (blockspergrid_x, blockspergrid_y)
-
-    # Start calculation
-    fuse_pyramid_levels_using_focusmap_gpu[blockspergrid, threadsperblock](
-        pyr_level1, pyr_level2, focusmap
-    )
-    return pyr_level1
-
-
-@cuda.jit(fastmath=True)
-def resize_image(array_in, array_out, width_out, height_out):
-    """
-    Algorithm src:
-    https://eng.aurelienpierre.com/2020/03/bilinear-interpolation-on-images-stored-as-python-numpy-ndarray/
-    A valid replacement for 'cv2.resize()',
-    the only (visual) difference is that the cv2 result seems a little more blocky.
-    """
-    i, j = cuda.grid(2)
-    height_in = array_in.shape[0]
-    width_in = array_in.shape[1]
-    if i < width_out and j < height_out:
-        # Relative coordinates of the pixel in output space
-        x_out = j / width_out
-        y_out = i / height_out
-
-        # Corresponding absolute coordinates of the pixel in input space
-        x_in = x_out * width_in
-        y_in = y_out * height_in
-
-        # Nearest neighbours coordinates in input space
-        x_prev = int(math.floor(x_in))
-        x_next = x_prev + 1
-        y_prev = int(math.floor(y_in))
-        y_next = y_prev + 1
-
-        # Sanitize bounds - no need to check for < 0
-        x_prev = min(x_prev, width_in - 1)
-        x_next = min(x_next, width_in - 1)
-        y_prev = min(y_prev, height_in - 1)
-        y_next = min(y_next, height_in - 1)
-
-        # Distances between neighbour nodes in input space
-        Dy_next = y_next - y_in
-        Dy_prev = 1.0 - Dy_next
-        # because next - prev = 1
-        Dx_next = x_next - x_in
-        Dx_prev = 1.0 - Dx_next
-        # because next - prev = 1
-
-        array_out[i][j] = Dy_prev * (
-            array_in[y_next][x_prev] * Dx_next + array_in[y_next][x_next] * Dx_prev
-        ) + Dy_next * (
-            array_in[y_prev][x_prev] * Dx_next + array_in[y_prev][x_next] * Dx_prev
-        )
-
-
-# TODO: Accelerate using gpu
 def generate_laplacian_pyramid(img, num_levels):
-    """Generate Laplacian pyramid (from Gaussian pyramid)"""
-    import cv2
+    """Generate Laplacian pyramid."""
+    gauss = gaussian_pyramid(img, num_levels)
 
-    # Create gaussian pyramid
-    gaussian_pyr = gaussian_pyramid(img, num_levels)
-
-    laplacian_top = gaussian_pyr[-1]
-
-    laplacian_pyr = []
-    # Insert smallest pyramid level (with color)
-    laplacian_pyr.append(laplacian_top)
-    # Loop through pyramid levels from smallest to largest shape
+    lap_pyr = [gauss[-1]]  # Smallest level (lowpass residual)
     for i in range(num_levels, 0, -1):
-        size = (gaussian_pyr[i - 1].shape[1], gaussian_pyr[i - 1].shape[0])
-        gaussian_expanded = cv2.pyrUp(gaussian_pyr[i], dstsize=size)
+        size = (gauss[i - 1].shape[1], gauss[i - 1].shape[0])
+        expanded = cv2.pyrUp(gauss[i], dstsize=size)
+        lap = np.subtract(gauss[i - 1], expanded)
+        lap_pyr.append(lap)
+    return lap_pyr
 
-        laplacian = np.subtract(gaussian_pyr[i - 1], gaussian_expanded)
-        laplacian_pyr.append(laplacian)
-    return laplacian_pyr
 
-
-# TODO: Accelerate using gpu?
 def reconstruct_pyramid(laplacian_pyr):
-    """Reconstruct original image (highest resolution) from Laplacian pyramid."""
-    import cv2
-
-    laplacian_top = laplacian_pyr[0]
-    laplacian_lst = [laplacian_top]
+    """Reconstruct image from Laplacian pyramid."""
+    top = laplacian_pyr[0]
     num_levels = len(laplacian_pyr) - 1
     for i in range(num_levels):
         size = (laplacian_pyr[i + 1].shape[1], laplacian_pyr[i + 1].shape[0])
-        laplacian_expanded = cv2.pyrUp(laplacian_top, dstsize=size)
-        laplacian_top = cv2.add(laplacian_pyr[i + 1], laplacian_expanded)
+        expanded = cv2.pyrUp(top, dstsize=size)
+        top = cv2.add(laplacian_pyr[i + 1], expanded)
+    return top
 
-        laplacian_lst.append(laplacian_top)
-    return laplacian_lst[num_levels]
+
+# ──────────────────────────────────────────────
+# Exposed functions (match CPU API)
+# ──────────────────────────────────────────────
+
+def compute_focusmap(array1, array2, kernel_size):
+    """
+    Compute focus map comparing two grayscale pyramid levels.
+    Keeps data on GPU — returns a Numba device array if possible,
+    otherwise returns a numpy array.
+    """
+    if not HAS_NUMBA_CUDA:
+        # Fallback to CPU
+        from src.algorithms.stacking_algorithms import cpu as CPU
+        return CPU.compute_focusmap(array1, array2, kernel_size)
+
+    block = (16, 16)
+    grid = _cuda_grid(array1.shape[:2], block)
+
+    # Transfer to GPU
+    d_arr1 = cuda.to_device(np.ascontiguousarray(array1))
+    d_arr2 = cuda.to_device(np.ascontiguousarray(array2))
+
+    # BGR to grayscale on GPU (skip if already 2D)
+    if array1.ndim == 3:
+        d_gray1 = cuda.device_array(array1.shape[:2], dtype=np.float32)
+        d_gray2 = cuda.device_array(array1.shape[:2], dtype=np.float32)
+        _bgr2gray_kernel[grid, block](d_arr1, d_gray1)
+        _bgr2gray_kernel[grid, block](d_arr2, d_gray2)
+    else:
+        d_gray1 = d_arr1
+        d_gray2 = d_arr2
+
+    d_focusmap = cuda.device_array(array1.shape[:2], dtype=np.uint8)
+    _focusmap_kernel[grid, block](d_gray1, d_gray2, kernel_size, d_focusmap)
+
+    # Synchronize and return to host
+    cuda.synchronize()
+    return d_focusmap.copy_to_host()
+
+
+def fuse_pyramid_levels_using_focusmap(pyr_level1, pyr_level2, focusmap):
+    """Fuse two pyramid levels using focusmap. Returns modified pyr_level1."""
+    if not HAS_NUMBA_CUDA:
+        from src.algorithms.stacking_algorithms import cpu as CPU
+        return CPU.fuse_pyramid_levels_using_focusmap(pyr_level1, pyr_level2, focusmap)
+
+    block = (16, 16)
+    grid = _cuda_grid(pyr_level1.shape[:2], block)
+
+    d_pyr1 = cuda.to_device(np.ascontiguousarray(pyr_level1))
+    d_pyr2 = cuda.to_device(np.ascontiguousarray(pyr_level2))
+
+    # Focusmap may be a numpy array or already on device
+    if isinstance(focusmap, np.ndarray):
+        d_fm = cuda.to_device(np.ascontiguousarray(focusmap))
+    else:
+        d_fm = focusmap
+
+    _fuse_kernel[grid, block](d_pyr1, d_pyr2, d_fm)
+    cuda.synchronize()
+    return d_pyr1.copy_to_host()

@@ -565,7 +565,6 @@ def transform_img(
     if img.ndim == 3:
         # A bloody painful special case of RGB images
         ret = np.empty_like(img)
-        print(img.shape[2])
         for idx in range(img.shape[2]):
             sli = (slice(None), slice(None), idx)
             ret[sli] = transform_img(img[sli], scale, angle, tvec, mode, bgval, order)
@@ -982,7 +981,6 @@ class im_reg:
             filter_pcorr,
             exponent,
         )
-        print(res)
 
         scale = res["scale"]
         rot = res["angle"] * np.pi / 180  # Convert from degrees to radians

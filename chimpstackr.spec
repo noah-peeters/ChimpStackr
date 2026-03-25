@@ -12,9 +12,23 @@ Output goes to dist/chimpstackr/
 """
 import sys
 import os
+import subprocess
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
+
+# ── Bake version from git tag at build time ──
+try:
+    _ver = subprocess.check_output(
+        ["git", "describe", "--tags", "--always"],
+        text=True, timeout=5,
+    ).strip()
+except Exception:
+    _ver = "dev"
+
+# Write static version file so runtime doesn't need git
+with open(os.path.join("src", "_version_static.py"), "w") as f:
+    f.write(f'__version__ = "{_ver}"\n')
 
 # ── Collect problematic dependencies ──
 # Numba/llvmlite need special handling — their native libs are often missed
@@ -176,8 +190,8 @@ if sys.platform == 'darwin':
         info_plist={
             'CFBundleName': 'ChimpStackr',
             'CFBundleDisplayName': 'ChimpStackr',
-            'CFBundleShortVersionString': '0.0.25',
-            'CFBundleVersion': '0.0.25',
+            'CFBundleShortVersionString': _ver.lstrip('v'),
+            'CFBundleVersion': _ver.lstrip('v'),
             'NSHighResolutionCapable': True,
             'NSRequiresAquaSystemAppearance': False,  # Support dark mode
             'LSMinimumSystemVersion': '11.0',
