@@ -3,7 +3,7 @@
 ![GitHub all releases](https://img.shields.io/github/downloads/noah-peeters/ChimpStackr/total) ![GitHub release (latest by date)](https://img.shields.io/github/downloads/noah-peeters/ChimpStackr/latest/total) ![GitHub](https://img.shields.io/github/license/noah-peeters/ChimpStackr) ![GitHub commits since latest release (by date)](https://img.shields.io/github/commits-since/noah-peeters/ChimpStackr/latest)
 
 <p align="center">
-  <img src="https://user-images.githubusercontent.com/17707805/196983883-84ec7174-74d3-4833-b9f6-16b84e19280d.png" width="300"/>
+  <img src="packaging/icons/chimpstackr_icon.png" width="200"/>
 </p>
 
 Open-source focus stacking application for Windows, macOS, and Linux.
