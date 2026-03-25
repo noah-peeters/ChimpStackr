@@ -199,6 +199,177 @@ def _cupy_fuse_pyramid_pair(pyr1, pyr2, kernel_size):
     return new_pyr
 
 
+# ──────────────────────────────────────────────
+# N-way batch fusion (process many images at once)
+# ──────────────────────────────────────────────
+
+def _cupy_variance_gpu(level_gpu, kernel_size):
+    """Compute local variance of a single pyramid level on GPU."""
+    k = kernel_size | 1
+    if level_gpu.ndim == 3:
+        gray = level_gpu[:, :, 0] * 0.114 + level_gpu[:, :, 1] * 0.587 + level_gpu[:, :, 2] * 0.299
+    else:
+        gray = level_gpu
+    mean = _cp_uniform_filter(gray, size=k)
+    return _cp_uniform_filter(gray * gray, size=k) - mean * mean
+
+
+def _estimate_gpu_memory_per_image(shape, num_levels):
+    """Estimate GPU memory needed per image for N-way fusion (bytes)."""
+    h, w = shape[:2]
+    channels = shape[2] if len(shape) > 2 else 1
+    bytes_per_pixel = 4  # float32
+
+    # Laplacian pyramid: sum of all levels (geometric series ≈ 4/3 of full res)
+    pyr_bytes = int(h * w * channels * bytes_per_pixel * 1.34)
+    # Variance map (grayscale, one per level)
+    var_bytes = int(h * w * bytes_per_pixel * 1.34)
+    # Working memory overhead
+    overhead = int(h * w * channels * bytes_per_pixel * 0.5)
+
+    return pyr_bytes + var_bytes + overhead
+
+
+def get_max_batch_size(image_shape, num_levels):
+    """Calculate how many images can fit in GPU memory for N-way fusion."""
+    if not HAS_CUPY:
+        return 2  # CPU path: pairwise only
+
+    free_mem, total_mem = cp.cuda.Device(0).mem_info
+    # Reserve 500MB for CuPy overhead, kernel code, etc.
+    usable = free_mem - 500 * 1024**2
+    per_image = _estimate_gpu_memory_per_image(image_shape, num_levels)
+    # Need at least 2 images for fusion
+    return max(2, int(usable / per_image))
+
+
+def cupy_fuse_n_way(images_np, num_levels, kernel_size, progress_callback=None):
+    """N-way Laplacian pyramid fusion: process all images in one pass on GPU.
+
+    Instead of N-1 sequential pairwise fusions, computes variance for ALL
+    images at each pyramid level and selects pixels from the sharpest source.
+    This is both faster (one pass) and more accurate (compares clean originals
+    instead of fused intermediates).
+
+    If images don't fit in GPU memory, processes in batches and merges.
+
+    Args:
+        images_np: list of numpy float32 images (all same shape)
+        num_levels: number of pyramid levels
+        kernel_size: focus comparison kernel size
+        progress_callback: optional fn(current, total) for progress updates
+
+    Returns:
+        list of numpy arrays (fused Laplacian pyramid)
+    """
+    _cupy_warmup()
+    N = len(images_np)
+    if N == 0:
+        return None
+    if N == 1:
+        img_gpu = cp.asarray(images_np[0])
+        pyr = _cupy_laplacian_pyramid(img_gpu, num_levels)
+        return [cp.asnumpy(l) for l in pyr]
+
+    # Check batch size
+    max_batch = get_max_batch_size(images_np[0].shape, num_levels)
+
+    if N <= max_batch:
+        # All fit in GPU — single pass
+        return _cupy_fuse_n_way_batch(images_np, num_levels, kernel_size, progress_callback)
+    else:
+        # Process in batches, then merge batch results
+        results = []
+        for batch_start in range(0, N, max_batch):
+            batch = images_np[batch_start:batch_start + max_batch]
+            batch_pyr = _cupy_fuse_n_way_batch(batch, num_levels, kernel_size)
+            results.append(batch_pyr)
+            if progress_callback:
+                progress_callback(min(batch_start + max_batch, N), N)
+
+        # Merge batch results pairwise on GPU
+        while len(results) > 1:
+            merged = []
+            for i in range(0, len(results), 2):
+                if i + 1 < len(results):
+                    # Upload both pyramids, fuse on GPU
+                    g1 = [cp.asarray(l) for l in results[i]]
+                    g2 = [cp.asarray(l) for l in results[i + 1]]
+                    fused = _cupy_fuse_pyramid_pair(g1, g2, kernel_size)
+                    cp.cuda.Stream.null.synchronize()
+                    merged.append([cp.asnumpy(l) for l in fused])
+                else:
+                    merged.append(results[i])
+            results = merged
+
+        return results[0]
+
+
+def _cupy_fuse_n_way_batch(images_np, num_levels, kernel_size, progress_callback=None):
+    """Fuse N images in one pass on GPU using argmax over variances.
+
+    All images must fit in GPU memory simultaneously.
+    """
+    N = len(images_np)
+    k = kernel_size | 1
+
+    # Upload all images and build pyramids on GPU
+    pyramids = []
+    for idx, img in enumerate(images_np):
+        img_gpu = cp.asarray(img if img.dtype == np.float32 else img.astype(np.float32))
+        pyr = _cupy_laplacian_pyramid(img_gpu, num_levels)
+        pyramids.append(pyr)
+        del img_gpu  # free the raw image (pyramid holds the data now)
+        if progress_callback:
+            progress_callback(idx + 1, N * 2)  # first half = building pyramids
+
+    num_total_levels = len(pyramids[0])
+    threshold_index = num_total_levels - 1
+    fused_pyr = []
+    best_idx = None
+
+    for level in range(num_total_levels):
+        if level < threshold_index:
+            # Compute variance for ALL images at this level
+            variances = []
+            for p in range(N):
+                variances.append(_cupy_variance_gpu(pyramids[p][level], kernel_size))
+
+            # Stack and argmax: which image is sharpest at each pixel
+            var_stack = cp.stack(variances, axis=0)  # (N, H, W)
+            best_idx = cp.argmax(var_stack, axis=0)  # (H, W) values in [0, N-1]
+            del var_stack, variances
+        else:
+            # Resize best_idx for largest level(s) (nearest-neighbor on GPU)
+            s = pyramids[0][level].shape[:2]
+            fm_h, fm_w = best_idx.shape
+            y_idx = (cp.arange(s[0]) * fm_h // s[0]).astype(cp.int32)
+            x_idx = (cp.arange(s[1]) * fm_w // s[1]).astype(cp.int32)
+            best_idx = best_idx[cp.ix_(y_idx, x_idx)]
+
+        # Select pixels from the winning image at this level
+        # Stack all images' level: (N, H, W, C) or (N, H, W)
+        level_stack = cp.stack([pyramids[p][level] for p in range(N)], axis=0)
+
+        h, w = best_idx.shape
+        rows = cp.arange(h)[:, None]
+        cols = cp.arange(w)[None, :]
+        if level_stack.ndim == 4:  # (N, H, W, C)
+            fused_level = level_stack[best_idx, rows, cols, :]
+        else:  # (N, H, W)
+            fused_level = level_stack[best_idx, rows, cols]
+
+        fused_pyr.append(fused_level)
+        del level_stack
+
+    # Free pyramid memory
+    del pyramids
+    cp.cuda.Stream.null.synchronize()
+
+    # Download result
+    return [cp.asnumpy(l) for l in fused_pyr]
+
+
 # ══════════════════════════════════════════════
 # Tier 3: CPU vectorized (fallback)
 # ══════════════════════════════════════════════
