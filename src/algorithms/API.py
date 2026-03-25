@@ -155,7 +155,10 @@ class LaplacianPyramid:
 
         # Use fully GPU-resident path when CuPy is available
         if self._can_use_cupy_path():
+            logger.info("Using CuPy GPU-resident pipeline (use_gpu=True, CuPy available)")
             return self._align_and_stack_laplacian_cupy(signals, progress_callback)
+        else:
+            logger.info(f"Using CPU pipeline (use_gpu={self.config.use_gpu}, CuPy={_HAS_CUPY})")
 
         ref_image = self.Algorithm.align_image_pair(self.image_paths[0], self.image_paths[0])
         fused_pyr = self.Algorithm.generate_laplacian_pyramid(
@@ -283,7 +286,10 @@ class LaplacianPyramid:
 
         # Use fully GPU-resident path when CuPy is available
         if self._can_use_cupy_path():
+            logger.info("Using CuPy GPU-resident pipeline (stack-only)")
             return self._stack_laplacian_cupy(signals, progress_callback)
+        else:
+            logger.info(f"Using CPU pipeline (use_gpu={self.config.use_gpu}, CuPy={_HAS_CUPY})")
 
         im0 = self.Algorithm.load_image(self.image_paths[0])
         fused_pyr = self.Algorithm.generate_laplacian_pyramid(im0, self.pyramid_num_levels)
