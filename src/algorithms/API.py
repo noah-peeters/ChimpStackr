@@ -9,6 +9,7 @@
 """
 import time
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import src.utilities as utilities
@@ -149,45 +150,50 @@ class LaplacianPyramid:
         new_pyr = None
 
         try:
-            for i, path in enumerate(self.image_paths):
-                if i == 0:
-                    continue
-                self.Algorithm.wait_if_paused()
-                if self.Algorithm.is_cancelled:
-                    logger.info("Stacking cancelled")
-                    return
+            # Pre-fetch: load+align next image in background while GPU fuses current.
+            # cv2 and Numba CUDA both release the GIL, so this overlaps I/O with compute.
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = None
+                paths = self.image_paths
 
-                start_time = time.time()
-                aligned = self._load_and_align(ref_image, path)
-                new_pyr = self.Algorithm.generate_laplacian_pyramid(
-                    aligned, self.pyramid_num_levels
-                )
-                del aligned
-                fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
-                    fused_pyr, new_pyr, self.fusion_kernel_size,
-                    self.config.contrast_threshold, self.config.feather_radius,
-                )
-                del new_pyr
-                new_pyr = None
-                elapsed = time.time() - start_time
-                self._emit_progress(signals, progress_callback, i + 1, len(self.image_paths), elapsed)
+                for i in range(1, len(paths)):
+                    self.Algorithm.wait_if_paused()
+                    if self.Algorithm.is_cancelled:
+                        logger.info("Stacking cancelled")
+                        return
+
+                    start_time = time.time()
+
+                    # Get aligned image (from pre-fetch or synchronous)
+                    if future is not None:
+                        aligned = future.result()
+                    else:
+                        aligned = self._load_and_align(ref_image, paths[i])
+
+                    # Submit pre-fetch for next image (overlaps with pyramid+fuse below)
+                    if i + 1 < len(paths):
+                        future = pool.submit(self._load_and_align, ref_image, paths[i + 1])
+                    else:
+                        future = None
+
+                    new_pyr = self.Algorithm.generate_laplacian_pyramid(
+                        aligned, self.pyramid_num_levels
+                    )
+                    del aligned
+                    fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
+                        fused_pyr, new_pyr, self.fusion_kernel_size,
+                        self.config.contrast_threshold, self.config.feather_radius,
+                    )
+                    del new_pyr
+                    new_pyr = None
+                    elapsed = time.time() - start_time
+                    self._emit_progress(signals, progress_callback, i + 1, len(paths), elapsed)
         finally:
             # Ensure intermediate arrays are freed even on cancel/error
             del new_pyr, ref_image
 
         if self.Algorithm.is_cancelled:
             return
-
-        # GPU module now returns numpy arrays (transfers happen internally),
-        # so no copy_to_host() needed. Handle legacy device arrays gracefully.
-        try:
-            import numba.cuda as cuda
-            fused_pyr = [
-                level.copy_to_host() if cuda.is_cuda_array(level) else level
-                for level in fused_pyr
-            ]
-        except (ImportError, AttributeError):
-            pass
 
         self.output_image = self.Algorithm.reconstruct_pyramid(fused_pyr)
         # Local tone-mapping to compensate for PMax contrast boost
@@ -203,24 +209,39 @@ class LaplacianPyramid:
         new_pyr = None
 
         try:
-            for i, path in enumerate(self.image_paths):
-                if i == 0:
-                    continue
-                self.Algorithm.wait_if_paused()
-                if self.Algorithm.is_cancelled:
-                    return
-                start_time = time.time()
-                im1 = self.Algorithm.load_image(path)
-                new_pyr = self.Algorithm.generate_laplacian_pyramid(im1, self.pyramid_num_levels)
-                del im1
-                fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
-                    fused_pyr, new_pyr, self.fusion_kernel_size,
-                    self.config.contrast_threshold, self.config.feather_radius,
-                )
-                del new_pyr
-                new_pyr = None
-                elapsed = time.time() - start_time
-                self._emit_progress(signals, progress_callback, i + 1, len(self.image_paths), elapsed)
+            # Pre-fetch: load next image in background while GPU fuses current
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = None
+                paths = self.image_paths
+
+                for i in range(1, len(paths)):
+                    self.Algorithm.wait_if_paused()
+                    if self.Algorithm.is_cancelled:
+                        return
+
+                    start_time = time.time()
+
+                    if future is not None:
+                        im1 = future.result()
+                    else:
+                        im1 = self.Algorithm.load_image(paths[i])
+
+                    # Submit pre-fetch for next image
+                    if i + 1 < len(paths):
+                        future = pool.submit(self.Algorithm.load_image, paths[i + 1])
+                    else:
+                        future = None
+
+                    new_pyr = self.Algorithm.generate_laplacian_pyramid(im1, self.pyramid_num_levels)
+                    del im1
+                    fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
+                        fused_pyr, new_pyr, self.fusion_kernel_size,
+                        self.config.contrast_threshold, self.config.feather_radius,
+                    )
+                    del new_pyr
+                    new_pyr = None
+                    elapsed = time.time() - start_time
+                    self._emit_progress(signals, progress_callback, i + 1, len(paths), elapsed)
         finally:
             del new_pyr
 

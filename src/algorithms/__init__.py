@@ -286,30 +286,7 @@ class Algorithm:
         return new_pyr
 
     def _fuse_gpu(self, pyr1, pyr2, kernel_size):
-        """GPU fusion — same logic as CPU but calls GPU.compute_focusmap/fuse.
-        The new GPU module handles its own host↔device transfers internally,
-        so pyramids stay as numpy arrays here."""
-        threshold_index = len(pyr1) - 1
-        new_pyr = []
-        current_focusmap = None
-
-        for pyramid_level in range(len(pyr1)):
-            if pyramid_level < threshold_index:
-                # GPU compute_focusmap expects the pyramid level arrays directly
-                # and handles BGR→gray + device transfers internally
-                current_focusmap = GPU.compute_focusmap(
-                    pyr1[pyramid_level], pyr2[pyramid_level], kernel_size,
-                )
-            else:
-                # Resize focusmap to match this pyramid level (CPU resize is fine,
-                # this is a tiny array compared to the image)
-                s = pyr2[pyramid_level].shape
-                current_focusmap = cv2.resize(
-                    current_focusmap, (s[1], s[0]), interpolation=cv2.INTER_AREA
-                )
-
-            new_pyr_level = GPU.fuse_pyramid_levels_using_focusmap(
-                pyr1[pyramid_level], pyr2[pyramid_level], current_focusmap,
-            )
-            new_pyr.append(new_pyr_level)
-        return new_pyr
+        """GPU fusion — batched pipeline that keeps data on-GPU.
+        Batch-uploads all pyramid levels, runs all kernels without
+        intermediate host↔device transfers, downloads only at the end."""
+        return GPU.fuse_pyramid_pair_gpu(pyr1, pyr2, kernel_size)
