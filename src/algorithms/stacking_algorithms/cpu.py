@@ -170,15 +170,13 @@ def generate_laplacian_pyramid(img, num_levels):
 
 def reconstruct_pyramid(laplacian_pyr):
     """Reconstruct original image from Laplacian pyramid."""
-    laplacian_top = laplacian_pyr[0]
-    laplacian_lst = [laplacian_top]
+    top = laplacian_pyr[0]
     num_levels = len(laplacian_pyr) - 1
     for i in range(num_levels):
         size = (laplacian_pyr[i + 1].shape[1], laplacian_pyr[i + 1].shape[0])
-        laplacian_expanded = cv2.pyrUp(laplacian_top, dstsize=size)
-        laplacian_top = cv2.add(laplacian_pyr[i + 1], laplacian_expanded)
-        laplacian_lst.append(laplacian_top)
-    return laplacian_lst[num_levels]
+        expanded = cv2.pyrUp(top, dstsize=size)
+        top = cv2.add(laplacian_pyr[i + 1], expanded)
+    return top
 
 
 def local_tone_map(image, strength=0.5):

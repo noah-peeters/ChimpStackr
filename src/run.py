@@ -1,4 +1,11 @@
-import os, sys, tempfile
+import os, sys, tempfile, logging
+
+# Enable logging so GPU timing info is visible
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 import PySide6.QtGui as qtg

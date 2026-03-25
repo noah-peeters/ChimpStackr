@@ -1,9 +1,15 @@
 import math
 import cv2
 import numpy as np
+import pyfftw
 import pyfftw.interfaces.numpy_fft as fft
 import scipy.ndimage as ndi
 import scipy.ndimage.interpolation as ndii
+
+# Enable PyFFTW plan caching — reuses FFT plans for repeated array sizes
+# (saves ~50ms per plan creation, significant for repeated alignment calls)
+pyfftw.interfaces.cache.enable()
+pyfftw.interfaces.cache.set_keepalive_time(300)  # 5 minutes
 
 # -- UTILITIES --#
 # Examine the average value of the image at most radius pixels from the edge
@@ -714,21 +720,20 @@ def translation(im0, im1, filter_pcorr=0, odds=1, constraints=None):
     tvec, succ = _phase_correlation(
         im0, im1, argmax_translation, filter_pcorr, constraints
     )
-    # ... and for the 180-degrees rotated image (the rotation estimation
-    # doesn't distinguish rotation of x vs x + 180deg).
-    ret = np.rot90(im1, 2)  # Rotate the input array over 180°
-    tvec2, succ2 = _phase_correlation(
-        im0, ret, argmax_translation, filter_pcorr, constraints
-    )
+    # Skip 180° check if we already have high confidence — focus stacking
+    # images are never rotated 180° relative to each other, and this
+    # saves a full phase correlation computation (~50% of alignment cost).
+    if succ < 0.6 or odds == -1:
+        # Low confidence or forced — check 180° rotation
+        ret = np.rot90(im1, 2)
+        tvec2, succ2 = _phase_correlation(
+            im0, ret, argmax_translation, filter_pcorr, constraints
+        )
 
-    pick_rotated = False
-    if succ2 * odds > succ or odds == -1:
-        pick_rotated = True
-
-    if pick_rotated:
-        tvec = tvec2
-        succ = succ2
-        angle += 180
+        if succ2 * odds > succ or odds == -1:
+            tvec = tvec2
+            succ = succ2
+            angle += 180
 
     ret = dict(tvec=tvec, success=succ, angle=angle)
     return ret
@@ -936,14 +941,24 @@ def resize_image(im, division_factor):
 
 class im_reg:
     # Register im1 to im0 for Translation only
-    def register_image_translation(self, im0, im1, scale_factor):
+    def register_image_translation(self, im0, im1, scale_factor,
+                                   ref_gray=None):
+        """Align im1 to im0 using DFT phase correlation.
+
+        Args:
+            ref_gray: Pre-computed grayscale of im0 (avoids redundant cvtColor
+                      when aligning multiple images to the same reference).
+        """
+        if ref_gray is None:
+            ref_gray = cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY)
+        align_gray = cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY)
+
         translation_result = translation(
-            resize_image(cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY), scale_factor),
-            resize_image(cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY), scale_factor),
+            resize_image(ref_gray, scale_factor),
+            resize_image(align_gray, scale_factor),
         )
 
         height, width = im1.shape[:2]
-        # Upscale offset, as it was calculated on a smaller image
         y_shift, x_shift = translation_result["tvec"] * scale_factor
 
         translation_matrix = np.float64(
@@ -952,12 +967,12 @@ class im_reg:
                 [0, 1, y_shift],
             ]
         )
+        # warpAffine on float32 input returns float32 — no astype needed
         result = cv2.warpAffine(im1, translation_matrix, (width, height))
 
-        # Store last computed shift for external access
         self.last_shift = (float(x_shift), float(y_shift))
 
-        return result.astype(np.float32)
+        return result
 
     # TODO: Implement with option of selecting what method to use (not yet successfully implemented)
     # Register im1 to im0 for Rotation, Scale, Translation (RST)

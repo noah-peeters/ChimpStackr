@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/Users/noahe/Documents/ChimpStackr/src/algorithms -name \"*.py\" -exec wc -l {} +)",
+      "Bash(wc -l /c/Users/noahe/Documents/ChimpStackr/src/algorithms/stacking_algorithms/*.py)",
+      "Bash(find /c/Users/noahe/Documents/ChimpStackr/src -name \"*.py\" -exec wc -l {} +)",
+      "Bash(grep -r \"TODO\\\\|FIXME\\\\|XXX\\\\|HACK\" /c/Users/noahe/Documents/ChimpStackr/src --include=*.py)",
+      "Bash(python -m pytest tests/ -v)"
+    ]
+  }
+}

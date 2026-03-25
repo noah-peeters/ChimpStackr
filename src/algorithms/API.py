@@ -208,15 +208,13 @@ class LaplacianPyramid:
         self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
 
     def _align_and_stack_laplacian_cupy(self, signals=None, progress_callback=None):
-        """Fully GPU-resident pairwise Laplacian stacking with CuPy.
-
-        Upload each aligned image, build pyramid + fuse on GPU.
-        Only 2 pyramids in VRAM at a time — scales to any stack size.
-        ~11x faster than CPU for 50x 24MP images.
-        """
+        """Fully GPU-resident pairwise Laplacian stacking with CuPy."""
         import cupy as cp
         GPU = _GPU_module
+        logger.info("[CuPy GPU] Starting GPU-resident align+stack pipeline")
+        t_total = time.time()
         GPU._cupy_warmup()
+        logger.info(f"[CuPy GPU] Warmup: {time.time()-t_total:.2f}s")
 
         ref_image = self.Algorithm.align_image_pair(self.image_paths[0], self.image_paths[0])
 
@@ -247,6 +245,7 @@ class LaplacianPyramid:
                     else:
                         future = None
 
+                    t_gpu = time.time()
                     img_gpu = cp.asarray(aligned)
                     del aligned
                     new_pyr = GPU._cupy_laplacian_pyramid(img_gpu, self.pyramid_num_levels)
@@ -256,8 +255,13 @@ class LaplacianPyramid:
                         self.config.contrast_threshold, self.config.feather_radius
                     )
                     del new_pyr
+                    cp.cuda.Stream.null.synchronize()
 
                     elapsed = time.time() - start_time
+                    gpu_elapsed = time.time() - t_gpu
+                    logger.info(f"[CuPy GPU] Image {i+1}/{len(paths)}: "
+                                f"total={elapsed:.3f}s (align={elapsed-gpu_elapsed:.3f}s, "
+                                f"gpu={gpu_elapsed:.3f}s)")
                     self._emit_progress(signals, progress_callback, i + 1, len(paths), elapsed)
         finally:
             del ref_image
@@ -265,10 +269,13 @@ class LaplacianPyramid:
         if self.Algorithm.is_cancelled:
             return
 
+        t_recon = time.time()
         result_gpu = GPU._cupy_reconstruct(fused_pyr)
         self.output_image = cp.asnumpy(result_gpu)
         del result_gpu, fused_pyr
         self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
+        logger.info(f"[CuPy GPU] Reconstruct+tonemap: {time.time()-t_recon:.3f}s")
+        logger.info(f"[CuPy GPU] Total pipeline: {time.time()-t_total:.2f}s")
 
     def _stack_laplacian(self, signals=None, progress_callback=None):
         self.apply_gpu_settings()
@@ -327,7 +334,10 @@ class LaplacianPyramid:
         """Fully GPU-resident pairwise stacking without alignment."""
         import cupy as cp
         GPU = _GPU_module
+        logger.info("[CuPy GPU] Starting GPU-resident stacking pipeline")
+        t_start = time.time()
         GPU._cupy_warmup()
+        logger.info(f"[CuPy GPU] Warmup: {time.time()-t_start:.2f}s")
 
         im0 = self.Algorithm.load_image(self.image_paths[0])
         img0_gpu = cp.asarray(im0)
@@ -356,6 +366,7 @@ class LaplacianPyramid:
                     else:
                         future = None
 
+                    t_gpu = time.time()
                     img_gpu = cp.asarray(im1)
                     del im1
                     new_pyr = GPU._cupy_laplacian_pyramid(img_gpu, self.pyramid_num_levels)
@@ -365,8 +376,13 @@ class LaplacianPyramid:
                         self.config.contrast_threshold, self.config.feather_radius
                     )
                     del new_pyr
+                    cp.cuda.Stream.null.synchronize()
 
                     elapsed = time.time() - start_time
+                    gpu_elapsed = time.time() - t_gpu
+                    logger.info(f"[CuPy GPU] Image {i+1}/{len(paths)}: "
+                                f"total={elapsed:.3f}s (load={elapsed-gpu_elapsed:.3f}s, "
+                                f"gpu={gpu_elapsed:.3f}s)")
                     self._emit_progress(signals, progress_callback, i + 1, len(paths), elapsed)
         finally:
             pass
@@ -374,10 +390,13 @@ class LaplacianPyramid:
         if self.Algorithm.is_cancelled:
             return
 
+        t_recon = time.time()
         result_gpu = GPU._cupy_reconstruct(fused_pyr)
         self.output_image = cp.asnumpy(result_gpu)
         del result_gpu, fused_pyr
         self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
+        logger.info(f"[CuPy GPU] Reconstruct+tonemap: {time.time()-t_recon:.3f}s")
+        logger.info(f"[CuPy GPU] Total pipeline: {time.time()-t_start:.2f}s")
 
     # ─── Weighted Average Method ───
     #
