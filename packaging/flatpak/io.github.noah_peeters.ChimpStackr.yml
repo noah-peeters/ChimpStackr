@@ -1,6 +1,6 @@
 app-id: io.github.noah_peeters.ChimpStackr
 runtime: org.kde.Platform
-runtime-version: '6.7'
+runtime-version: '6.8'
 sdk: org.kde.Sdk
 command: chimpstackr
 
@@ -59,7 +59,7 @@ modules:
     sources:
       - type: archive
         url: https://www.libraw.org/data/LibRaw-0.21.2.tar.gz
-        sha256: fe7288013206854baf6e4417d0fb63ba4571571571b111b4e3ff76c78f2785caf
+        sha256: fe7288013206854baf6e4417d0fb63ba4ed7227bf36fff021992671c2dd34b03
     cleanup:
       - /bin
       - /share/doc
@@ -68,15 +68,11 @@ modules:
   - name: chimpstackr
     buildsystem: simple
     build-options:
-      env:
-        # Ensure pip installs into the Flatpak prefix
-        PIP_PREFIX: /app
-        PYTHONPATH: /app/lib/python3.11/site-packages
       build-args:
         - --share=network
     build-commands:
       # Install Python dependencies
-      - pip3 install --no-cache-dir --prefix=/app
+      - pip3 install --no-cache-dir --prefix=/app --no-build-isolation
           pyside6-essentials
           opencv-python-headless
           numpy
