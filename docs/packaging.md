@@ -111,7 +111,7 @@ The build script wraps the PyInstaller output in an AppImage:
 
 ### Linux Flatpak
 
-Flatpak packaging files are in `packaging/flatpak/`. The Flatpak build uses the KDE 6.8 runtime (provides Qt 6 and Python) and installs all Python dependencies via pip at build time.
+Flatpak packaging files are in `packaging/flatpak/`. The Flatpak build uses the KDE 6.7 runtime (provides Qt 6 and Python) and installs all Python dependencies via pip at build time.
 
 **App ID:** `io.github.noah_peeters.ChimpStackr`
 
@@ -128,7 +128,7 @@ Flatpak packaging files are in `packaging/flatpak/`. The Flatpak build uses the 
 ```bash
 # Install prerequisites
 sudo apt install flatpak flatpak-builder
-flatpak install flathub org.kde.Platform//6.8 org.kde.Sdk//6.8
+flatpak install flathub org.kde.Platform//6.7 org.kde.Sdk//6.7
 
 # Build and install locally
 ./scripts/build_flatpak.sh
@@ -200,7 +200,7 @@ The ~450MB uncompressed size is normal for NumPy + SciPy + Numba + PySide6. The 
 Install the KDE 6.7 runtime from Flathub:
 ```bash
 flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install flathub org.kde.Platform//6.8 org.kde.Sdk//6.8
+flatpak install flathub org.kde.Platform//6.7 org.kde.Sdk//6.7
 ```
 
 ### Flatpak can't access files

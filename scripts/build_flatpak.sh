@@ -8,10 +8,10 @@
 # Prerequisites:
 #   flatpak
 #   flatpak-builder
-#   org.kde.Platform//6.8 and org.kde.Sdk//6.8 runtimes
+#   org.kde.Platform//6.7 and org.kde.Sdk//6.7 runtimes
 #
 # Install runtimes:
-#   flatpak install flathub org.kde.Platform//6.8 org.kde.Sdk//6.8
+#   flatpak install flathub org.kde.Platform//6.7 org.kde.Sdk//6.7
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -33,9 +33,9 @@ if ! command -v flatpak-builder &>/dev/null; then
 fi
 
 # ── Install runtimes if missing ──
-if ! flatpak info org.kde.Sdk//6.8 &>/dev/null 2>&1; then
+if ! flatpak info org.kde.Sdk//6.7 &>/dev/null 2>&1; then
     echo "Installing KDE SDK runtime..."
-    flatpak install -y flathub org.kde.Platform//6.8 org.kde.Sdk//6.8
+    flatpak install -y flathub org.kde.Platform//6.7 org.kde.Sdk//6.7
 fi
 
 # ── Clean previous build ──
