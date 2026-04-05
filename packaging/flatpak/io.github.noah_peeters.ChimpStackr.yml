@@ -53,9 +53,10 @@ modules:
 
   # ── LibRaw (required by rawpy) ──
   - name: libraw
-    buildsystem: cmake-ninja
+    buildsystem: autotools
     config-opts:
-      - -DCMAKE_BUILD_TYPE=Release
+      - --disable-static
+      - --enable-shared
     sources:
       - type: archive
         url: https://www.libraw.org/data/LibRaw-0.21.2.tar.gz
