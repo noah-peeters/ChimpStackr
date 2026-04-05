@@ -84,8 +84,8 @@ modules:
           pyfftw
 
       # Install ChimpStackr itself (upgrade setuptools first for _legacy backend)
-      - pip3 install --no-cache-dir --prefix=/app "setuptools>=74"
-      - pip3 install --no-cache-dir --prefix=/app --no-deps .
+      - pip3 install --no-cache-dir --prefix=/app --ignore-installed "setuptools>=74"
+      - PYTHONPATH=/app/lib/python3.11/site-packages pip3 install --no-cache-dir --prefix=/app --no-deps .
 
       # Install desktop file
       - install -Dm644 packaging/flatpak/io.github.noah_peeters.ChimpStackr.desktop
