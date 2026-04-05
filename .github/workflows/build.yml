@@ -251,6 +251,20 @@ jobs:
           bundle: ChimpStackr-Linux.flatpak
           cache-key: flatpak-builder-${{ github.sha }}
 
+      - name: Smoke-test Flatpak build
+        run: |
+          echo "=== Checking installed files ==="
+          ls -la flatpak_app/files/bin/
+          ls flatpak_app/files/lib/python3.11/site-packages/src/ | head -20
+
+          echo "=== Testing Python imports inside sandbox ==="
+          flatpak-builder --run flatpak_app packaging/flatpak/io.github.noah_peeters.ChimpStackr.yml \
+            python3 -c "import sys; sys.path.insert(0,'/app/lib/python3.11/site-packages'); from src.cli import main; print('CLI import OK'); from src.run import main; print('GUI import OK'); from src.config import AlgorithmConfig; print('Config import OK'); import numpy,cv2,scipy,pyfftw; print('numpy=%s cv2=%s scipy=%s' % (numpy.__version__,cv2.__version__,scipy.__version__)); print('All imports OK')"
+
+          echo "=== Testing CLI entry point ==="
+          flatpak-builder --run flatpak_app packaging/flatpak/io.github.noah_peeters.ChimpStackr.yml \
+            chimpstackr-cli --help
+
       - uses: actions/upload-artifact@v4
         with:
           name: ChimpStackr-Flatpak
