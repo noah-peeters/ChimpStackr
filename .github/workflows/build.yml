@@ -234,10 +234,33 @@ jobs:
           path: dist/ChimpStackr-Linux-x86_64.AppImage
 
   # ══════════════════════════════════════════════
+  # Build Linux (Flatpak)
+  # ══════════════════════════════════════════════
+  build-flatpak:
+    needs: test
+    runs-on: ubuntu-latest
+    container:
+      image: bilelmoussaoui/flatpak-github-actions:kde-6.7
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: packaging/flatpak/io.github.noah_peeters.ChimpStackr.yml
+          bundle: ChimpStackr-Linux.flatpak
+          cache-key: flatpak-builder-${{ github.sha }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChimpStackr-Flatpak
+          path: ChimpStackr-Linux.flatpak
+
+  # ══════════════════════════════════════════════
   # Create GitHub Release (on tag push)
   # ══════════════════════════════════════════════
   release:
-    needs: [build-macos, build-windows, build-linux]
+    needs: [build-macos, build-windows, build-linux, build-flatpak]
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
     runs-on: ubuntu-latest
     permissions:
@@ -268,6 +291,7 @@ jobs:
             | Windows | `ChimpStackr-Windows.zip` — Extract and run `chimpstackr.exe` |
             | macOS | `ChimpStackr-macOS.dmg` — Open, drag to Applications |
             | Linux | `ChimpStackr-Linux-x86_64.AppImage` — `chmod +x` and run |
+            | Linux (Flatpak) | `ChimpStackr-Linux.flatpak` — `flatpak install ChimpStackr-Linux.flatpak` |
 
             ## What's New
 
@@ -276,3 +300,4 @@ jobs:
             artifacts/ChimpStackr-macOS/ChimpStackr-macOS.dmg
             artifacts/ChimpStackr-Windows/ChimpStackr-Windows.zip
             artifacts/ChimpStackr-Linux/ChimpStackr-Linux-x86_64.AppImage
+            artifacts/ChimpStackr-Flatpak/ChimpStackr-Linux.flatpak

@@ -16,6 +16,11 @@ appimage-build/
 *.AppImage.zsync
 *.squashfs
 
+# Flatpak build files
+.flatpak-build/
+.flatpak-repo/
+*.flatpak
+
 
 # Distribution / packaging
 .Python

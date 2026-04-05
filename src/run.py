@@ -1,7 +1,7 @@
 import os, sys, tempfile, logging
 
 # Enable OpenEXR support in OpenCV (must be set before cv2 import)
-os.environ.setdefault('OPENCV_IO_ENABLE_OPENEXR', '1')
+os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")
 
 # Only show warnings+ in production; set CHIMPSTACKR_DEBUG=1 for full logs
 _log_level = logging.DEBUG if os.environ.get("CHIMPSTACKR_DEBUG") else logging.WARNING
@@ -28,6 +28,12 @@ settings.init()
 settings.globalVars["RootTempDir"] = ROOT_TEMP_DIRECTORY
 
 APP_ID = "noah.peeters.chimpstackr"
+FLATPAK_ID = "io.github.noah_peeters.ChimpStackr"
+
+
+def _is_flatpak():
+    """Detect if running inside a Flatpak sandbox."""
+    return os.path.isfile("/.flatpak-info")
 
 
 def _setup_platform_icon():
@@ -36,6 +42,7 @@ def _setup_platform_icon():
         # Windows: set AppUserModelID so taskbar groups under our icon, not Python's
         try:
             import ctypes
+
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
         except Exception:
             pass
@@ -69,7 +76,12 @@ def _find_icon_path():
             return ico
 
     # All platforms: prefer largest PNG for best quality
-    for name in ["chimpstackr_icon.png", "icon_512x512.png", "icon_256x256.png", "icon_128x128.png"]:
+    for name in [
+        "chimpstackr_icon.png",
+        "icon_512x512.png",
+        "icon_256x256.png",
+        "icon_128x128.png",
+    ]:
         p = os.path.join(icons_dir, name)
         if os.path.isfile(p):
             return p
@@ -97,7 +109,12 @@ def _apply_app_icon(qApp, icon_path):
         if os.path.isfile(ico):
             icon.addFile(ico)
 
-    for name in ["icon_128x128.png", "icon_256x256.png", "icon_512x512.png", "chimpstackr_icon.png"]:
+    for name in [
+        "icon_128x128.png",
+        "icon_256x256.png",
+        "icon_512x512.png",
+        "chimpstackr_icon.png",
+    ]:
         p = os.path.join(icons_dir, name)
         if os.path.isfile(p):
             icon.addFile(p)
@@ -110,6 +127,7 @@ def _apply_app_icon(qApp, icon_path):
     if sys.platform == "darwin":
         try:
             from AppKit import NSImage, NSApplication
+
             ns_image = NSImage.alloc().initWithContentsOfFile_(icon_path)
             if ns_image:
                 NSApplication.sharedApplication().setApplicationIconImage_(ns_image)
@@ -118,7 +136,8 @@ def _apply_app_icon(qApp, icon_path):
 
     # Linux/Wayland: set desktopFileName so compositors match the .desktop entry
     if sys.platform == "linux":
-        qApp.setDesktopFileName(APP_ID)
+        desktop_id = FLATPAK_ID if _is_flatpak() else APP_ID
+        qApp.setDesktopFileName(desktop_id)
 
 
 def main():
@@ -135,6 +154,7 @@ def main():
     window = MainWindow.Window()
 
     from src.MainWindow.style import get_stylesheet
+
     qApp.setStyleSheet(get_stylesheet())
 
     _apply_app_icon(qApp, icon_path)
@@ -149,15 +169,19 @@ def main():
         try:
             import numpy as np
             from src.algorithms.stacking_algorithms import cpu as CPU
+
             dummy = np.zeros((8, 8, 3), dtype=np.float32)
             pyr = CPU.generate_laplacian_pyramid(dummy, 2)
             gray = np.zeros((4, 4), dtype=np.float32)
             CPU.compute_focusmap(gray, gray, 2)
-            CPU.fuse_pyramid_levels_using_focusmap(pyr[0], pyr[0].copy(), np.zeros((2, 3), dtype=np.uint8))
+            CPU.fuse_pyramid_levels_using_focusmap(
+                pyr[0], pyr[0].copy(), np.zeros((2, 3), dtype=np.uint8)
+            )
         except Exception:
             pass
 
     import threading
+
     threading.Thread(target=_warmup_jit, daemon=True).start()
 
     qApp.exec()

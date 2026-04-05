@@ -9,6 +9,7 @@ ChimpStackr uses PyInstaller to create native packages for all platforms. Builds
 | macOS | `./scripts/build_macos.sh` | `dist/ChimpStackr-macOS.dmg` |
 | Windows | `.\scripts\build_windows.ps1` | `dist/ChimpStackr-Windows.zip` |
 | Linux | `./scripts/build_linux.sh` | `dist/ChimpStackr-Linux-x86_64.AppImage` |
+| Linux (Flatpak) | `./scripts/build_flatpak.sh` | Flatpak install (local) |
 
 ## Prerequisites
 
@@ -19,6 +20,7 @@ ChimpStackr uses PyInstaller to create native packages for all platforms. Builds
   - **macOS**: Xcode command line tools (`xcode-select --install`)
   - **Windows**: [Inno Setup 6](https://jrsoftware.org/isdownload.php) (optional, for installer)
   - **Linux**: FUSE (`sudo apt install libfuse2`)
+  - **Linux (Flatpak)**: `flatpak-builder`, KDE 6.7 runtime (see [Flatpak section](#linux-flatpak))
 
 ## Local Build
 
@@ -66,7 +68,8 @@ This runs:
 2. **Build macOS** -- PyInstaller, optional code signing, DMG creation
 3. **Build Windows** -- PyInstaller, ZIP archive
 4. **Build Linux** -- PyInstaller, AppImage creation
-5. **Release** -- draft GitHub Release with all 3 artifacts
+5. **Build Flatpak** -- flatpak-builder, `.flatpak` bundle
+6. **Release** -- GitHub Release with all artifacts
 
 ### GitHub Secrets (optional)
 
@@ -105,6 +108,43 @@ The build script wraps the PyInstaller output in an AppImage:
 - `AppRun` script detects `--cli` flag or binary name to dispatch to GUI or CLI
 - Desktop entry and icons included for desktop integration
 - Works on most distros with glibc 2.31+
+
+### Linux Flatpak
+
+Flatpak packaging files are in `packaging/flatpak/`. The Flatpak build uses the KDE 6.7 runtime (provides Qt 6 and Python) and installs all Python dependencies via pip at build time.
+
+**App ID:** `io.github.noah_peeters.ChimpStackr`
+
+**Files:**
+
+| File | Purpose |
+|---|---|
+| `packaging/flatpak/io.github.noah_peeters.ChimpStackr.yml` | Flatpak manifest |
+| `packaging/flatpak/io.github.noah_peeters.ChimpStackr.desktop` | Desktop entry (Flatpak-specific, uses Flatpak app ID for icon) |
+| `packaging/flatpak/io.github.noah_peeters.ChimpStackr.metainfo.xml` | AppStream metadata for software centers |
+
+**Local build:**
+
+```bash
+# Install prerequisites
+sudo apt install flatpak flatpak-builder
+flatpak install flathub org.kde.Platform//6.7 org.kde.Sdk//6.7
+
+# Build and install locally
+./scripts/build_flatpak.sh
+
+# Run
+flatpak run io.github.noah_peeters.ChimpStackr
+
+# Create a redistributable .flatpak bundle
+./scripts/build_flatpak.sh --bundle
+```
+
+**Native dependencies** (built from source in the manifest):
+- FFTW3 (float + double precision) -- required by pyFFTW
+- LibRaw -- required by rawpy
+
+The CI workflow uses `flatpak/flatpak-github-actions` to build and produce a `.flatpak` bundle file attached to each release.
 
 ### Heavy dependencies
 
@@ -154,3 +194,19 @@ This is common with PyInstaller. Options:
 The ~450MB uncompressed size is normal for NumPy + SciPy + Numba + PySide6. The DMG compresses to ~200MB. To reduce:
 - Use `--exclude-module` for unused scipy submodules
 - Consider Nuitka for 20-30% smaller binaries (future optimization)
+
+### Flatpak build fails with missing runtime
+
+Install the KDE 6.7 runtime from Flathub:
+```bash
+flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+flatpak install flathub org.kde.Platform//6.7 org.kde.Sdk//6.7
+```
+
+### Flatpak can't access files
+
+The Flatpak is configured with `--filesystem=home` access. If you need access to files outside your home directory, run with:
+```bash
+flatpak run --filesystem=/path/to/files io.github.noah_peeters.ChimpStackr
+```
+Or use the Flatseal app to manage permissions.

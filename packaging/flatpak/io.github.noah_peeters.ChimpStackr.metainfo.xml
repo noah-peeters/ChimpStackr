@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.noah_peeters.ChimpStackr</id>
+
+  <name>ChimpStackr</name>
+  <summary>Open-source focus stacking application</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <developer id="io.github.noah_peeters">
+    <name>Noah Peeters</name>
+  </developer>
+
+  <description>
+    <p>
+      ChimpStackr is a free, multi-platform focus stacking application. It combines
+      multiple photos taken at different focus distances into a single image where
+      everything is in sharp focus.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Multiple stacking algorithms: Laplacian pyramid, weighted average, depth map, and exposure fusion (Mertens)</li>
+      <li>Automatic image alignment using ECC and DFT-based registration</li>
+      <li>RAW image support (CR2, NEF, ARW, DNG, and many more)</li>
+      <li>16-bit and 32-bit (HDR) output</li>
+      <li>Side-by-side before/after comparison viewer</li>
+      <li>Retouching tools for manual corrections</li>
+      <li>Optional GPU acceleration via CUDA</li>
+      <li>Command-line interface for batch processing</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.noah_peeters.ChimpStackr.desktop</launchable>
+
+  <url type="homepage">https://github.com/noah-peeters/ChimpStackr</url>
+  <url type="bugtracker">https://github.com/noah-peeters/ChimpStackr/issues</url>
+  <url type="vcs-browser">https://github.com/noah-peeters/ChimpStackr</url>
+
+  <provides>
+    <binary>chimpstackr</binary>
+    <binary>chimpstackr-cli</binary>
+  </provides>
+
+  <content_rating type="oars-1.1" />
+
+  <branding>
+    <color type="primary" scheme_preference="light">#8bc34a</color>
+    <color type="primary" scheme_preference="dark">#33691e</color>
+  </branding>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Main stacking interface</caption>
+      <image>https://raw.githubusercontent.com/noah-peeters/ChimpStackr/main/docs/screenshot.png</image>
+    </screenshot>
+  </screenshots>
+
+  <releases>
+    <release version="0.0.25" date="2024-01-01">
+      <description>
+        <p>Latest development release.</p>
+      </description>
+    </release>
+  </releases>
+
+  <keywords>
+    <keyword>focus stacking</keyword>
+    <keyword>photography</keyword>
+    <keyword>macro</keyword>
+    <keyword>image processing</keyword>
+    <keyword>focus</keyword>
+    <keyword>stacking</keyword>
+  </keywords>
+
+  <categories>
+    <category>Graphics</category>
+    <category>Photography</category>
+  </categories>
+</component>

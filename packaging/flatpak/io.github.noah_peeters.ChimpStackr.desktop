@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=ChimpStackr
+GenericName=Focus Stacking
+Comment=Open-source focus stacking application
+Exec=chimpstackr
+Icon=io.github.noah_peeters.ChimpStackr
+Terminal=false
+Type=Application
+Categories=Graphics;Photography;
+StartupNotify=true
+MimeType=image/jpeg;image/png;image/tiff;

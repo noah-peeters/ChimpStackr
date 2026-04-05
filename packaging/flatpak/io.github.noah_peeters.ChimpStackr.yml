@@ -1,0 +1,110 @@
+app-id: io.github.noah_peeters.ChimpStackr
+runtime: org.kde.Platform
+runtime-version: '6.7'
+sdk: org.kde.Sdk
+command: chimpstackr
+
+finish-args:
+  # Display
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+
+  # File access for loading/saving images
+  - --filesystem=home
+
+  # For GPU acceleration (CUDA, optional)
+  - --device=all
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /lib/cmake
+  - /share/man
+  - '*.a'
+  - '*.la'
+
+modules:
+  # ── FFTW3 (required by pyFFTW) ──
+  - name: fftw3
+    buildsystem: autotools
+    config-opts:
+      - --enable-shared
+      - --disable-static
+      - --enable-threads
+      - --enable-float
+    sources:
+      - type: archive
+        url: https://www.fftw.org/fftw-3.3.10.tar.gz
+        sha256: 56c932549852cddcfafdab3820b0200c7742675be92179e59e6215b340e26467
+
+  # FFTW3 double-precision (pyFFTW needs both float and double)
+  - name: fftw3-double
+    buildsystem: autotools
+    config-opts:
+      - --enable-shared
+      - --disable-static
+      - --enable-threads
+    sources:
+      - type: archive
+        url: https://www.fftw.org/fftw-3.3.10.tar.gz
+        sha256: 56c932549852cddcfafdab3820b0200c7742675be92179e59e6215b340e26467
+
+  # ── LibRaw (required by rawpy) ──
+  - name: libraw
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    sources:
+      - type: archive
+        url: https://www.libraw.org/data/LibRaw-0.21.2.tar.gz
+        sha256: fe7288013206854baf6e4417d0fb63ba4571571571b111b4e3ff76c78f2785caf
+    cleanup:
+      - /bin
+      - /share/doc
+
+  # ── Python dependencies + ChimpStackr ──
+  - name: chimpstackr
+    buildsystem: simple
+    build-options:
+      env:
+        # Ensure pip installs into the Flatpak prefix
+        PIP_PREFIX: /app
+        PYTHONPATH: /app/lib/python3.11/site-packages
+      build-args:
+        - --share=network
+    build-commands:
+      # Install Python dependencies
+      - pip3 install --no-cache-dir --prefix=/app
+          pyside6-essentials
+          opencv-python-headless
+          numpy
+          numba
+          rawpy
+          imageio
+          scipy
+          pyfftw
+
+      # Install ChimpStackr itself
+      - pip3 install --no-cache-dir --prefix=/app --no-deps .
+
+      # Install desktop file
+      - install -Dm644 packaging/flatpak/io.github.noah_peeters.ChimpStackr.desktop
+          /app/share/applications/io.github.noah_peeters.ChimpStackr.desktop
+
+      # Install AppStream metainfo
+      - install -Dm644 packaging/flatpak/io.github.noah_peeters.ChimpStackr.metainfo.xml
+          /app/share/metainfo/io.github.noah_peeters.ChimpStackr.metainfo.xml
+
+      # Install icons
+      - install -Dm644 packaging/icons/icon_128x128.png
+          /app/share/icons/hicolor/128x128/apps/io.github.noah_peeters.ChimpStackr.png
+      - install -Dm644 packaging/icons/icon_256x256.png
+          /app/share/icons/hicolor/256x256/apps/io.github.noah_peeters.ChimpStackr.png
+      - install -Dm644 packaging/icons/icon_512x512.png
+          /app/share/icons/hicolor/512x512/apps/io.github.noah_peeters.ChimpStackr.png
+
+    sources:
+      - type: dir
+        path: ../../
