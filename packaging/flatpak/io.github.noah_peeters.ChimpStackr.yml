@@ -83,7 +83,8 @@ modules:
           scipy
           pyfftw
 
-      # Install ChimpStackr itself
+      # Install ChimpStackr itself (upgrade setuptools first for _legacy backend)
+      - pip3 install --no-cache-dir --prefix=/app "setuptools>=74"
       - pip3 install --no-cache-dir --prefix=/app --no-deps .
 
       # Install desktop file
