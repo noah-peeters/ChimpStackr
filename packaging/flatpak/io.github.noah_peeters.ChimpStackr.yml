@@ -83,9 +83,17 @@ modules:
           scipy
           pyfftw
 
-      # Install ChimpStackr itself (upgrade setuptools first for _legacy backend)
-      - pip3 install --no-cache-dir --prefix=/app --ignore-installed "setuptools>=74"
-      - PYTHONPATH=/app/lib/python3.11/site-packages pip3 install --no-cache-dir --prefix=/app --no-deps .
+      # Install ChimpStackr source directly (avoids setuptools build backend issues)
+      - mkdir -p /app/lib/python3.11/site-packages/src
+      - cp -r src/* /app/lib/python3.11/site-packages/src/
+      - cp -r packaging /app/lib/python3.11/site-packages/
+
+      # Create entry-point wrapper scripts
+      - mkdir -p /app/bin
+      - printf '#!/usr/bin/env python3\nimport sys, os\nsys.path.insert(0, "/app/lib/python3.11/site-packages")\nfrom src.run import main\nmain()\n' > /app/bin/chimpstackr
+      - chmod +x /app/bin/chimpstackr
+      - printf '#!/usr/bin/env python3\nimport sys, os\nsys.path.insert(0, "/app/lib/python3.11/site-packages")\nfrom src.cli import main\nmain()\n' > /app/bin/chimpstackr-cli
+      - chmod +x /app/bin/chimpstackr-cli
 
       # Install desktop file
       - install -Dm644 packaging/flatpak/io.github.noah_peeters.ChimpStackr.desktop
