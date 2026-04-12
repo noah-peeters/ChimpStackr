@@ -108,12 +108,22 @@ class LaplacianPyramid:
             return len(self.image_paths) // 2
         return 0
 
+    def _resolve_alignment_mode(self):
+        """Resolve alignment mode from config, handling backward compat."""
+        mode = self.config.alignment_mode
+        if mode != "auto":
+            return mode
+        # Legacy: align_rotation_scale boolean → similarity (upgraded from old euclidean)
+        if self.config.align_rotation_scale:
+            return "similarity"
+        return "translation"
+
     def _load_and_align(self, ref_image, path):
         """Load an image and align it to the reference. Returns float32."""
         return self.Algorithm.align_image_pair(
             ref_image, path,
             scale_factor=self.config.alignment_scale_factor,
-            use_rst=self.config.align_rotation_scale,
+            alignment_mode=self._resolve_alignment_mode(),
         )
 
     # ─── Align + Stack (dispatches to chosen method) ───

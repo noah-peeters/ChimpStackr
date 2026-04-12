@@ -114,14 +114,13 @@ class Algorithm:
         return result
 
     def align_image_pair(self, ref_im, im_to_align, scale_factor=10,
-                         coarse_fine=False, use_rst=False):
+                         coarse_fine=False, use_rst=False, alignment_mode="translation"):
         """
         Align im_to_align to ref_im.
         Returns float32 aligned image.
 
-        Handles mixed image dimensions by resizing to match reference.
-        If use_rst=True, uses rotation+scale+translation alignment.
-        Otherwise, translation only (DFT phase correlation).
+        alignment_mode: "translation", "euclidean", "similarity", "affine"
+        use_rst: legacy flag — if True and alignment_mode not explicitly set, uses euclidean
         """
         # Handle path loading
         if isinstance(ref_im, str) and isinstance(im_to_align, str) and ref_im == im_to_align:
@@ -135,7 +134,15 @@ class Algorithm:
         if ref_im is not None and im_to_align is not None:
             im_to_align = self._match_dimensions(ref_im, im_to_align)
 
-        if use_rst:
+        # Legacy compat: use_rst maps to euclidean if no explicit mode
+        if use_rst and alignment_mode == "translation":
+            alignment_mode = "euclidean"
+
+        if alignment_mode == "similarity":
+            result = self._align_similarity(ref_im, im_to_align, scale_factor)
+        elif alignment_mode == "affine":
+            result = self._align_affine(ref_im, im_to_align, scale_factor)
+        elif alignment_mode == "euclidean":
             result = self._align_rst(ref_im, im_to_align, scale_factor)
         else:
             result = self._align_translation(ref_im, im_to_align, scale_factor, coarse_fine)
@@ -255,28 +262,196 @@ class Algorithm:
             borderMode=cv2.BORDER_CONSTANT, borderValue=0
         )
 
-        # Track shifts for auto-crop.
-        # For RST we compute the max displacement at any corner of the image,
-        # since rotation/scale moves corners more than the center.
-        h, w = im_to_align.shape[:2]
-        corners = np.array([[0, 0, 1], [w, 0, 1], [0, h, 1], [w, h, 1]], dtype=np.float32)
-        # warp_matrix maps ref→src (WARP_INVERSE_MAP), so the inverse maps src→ref.
-        # Displacement = transformed_corner - original_corner
-        M = warp_matrix  # 2x3
-        max_dx = 0.0
-        max_dy = 0.0
-        for cx, cy, _ in corners:
-            # Since we used WARP_INVERSE_MAP, the actual forward transform is the inverse
-            # The border black region is determined by which src pixels map outside the image
-            # Approximate: just use the translation + scale/rotation effect at corners
+        self._track_warp_shifts(warp_matrix, im_to_align.shape)
+        return result
+
+    def _track_warp_shifts(self, warp_matrix, shape):
+        """Track max corner displacement for auto-crop (shared by RST/similarity/affine)."""
+        h, w = shape[:2]
+        M = warp_matrix
+        max_dx = max_dy = 0.0
+        for cx, cy in [(0, 0), (w, 0), (0, h), (w, h)]:
             tx = M[0, 0] * cx + M[0, 1] * cy + M[0, 2] - cx
             ty = M[1, 0] * cx + M[1, 1] * cy + M[1, 2] - cy
             max_dx = max(max_dx, abs(tx))
             max_dy = max(max_dy, abs(ty))
-
         self.alignment_shifts.append((max_dx, max_dy))
 
-        # warpAffine on float32 input already returns float32
+    def _to_gray_u8(self, im):
+        """Convert image to grayscale uint8 for feature matching / ECC."""
+        if im.ndim == 3:
+            gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = im
+        if gray.dtype != np.uint8:
+            gray = np.clip(gray, 0, 255).astype(np.uint8)
+        return gray
+
+    def _feature_match(self, ref_u8, align_u8, mode="similarity"):
+        """
+        ORB feature matching → estimateAffinePartial2D (4 DOF) or estimateAffine2D (6 DOF).
+        Returns 2x3 warp matrix or None if insufficient matches.
+        """
+        orb = cv2.ORB_create(nfeatures=2000)
+        kp1, des1 = orb.detectAndCompute(ref_u8, None)
+        kp2, des2 = orb.detectAndCompute(align_u8, None)
+
+        if des1 is None or des2 is None or len(des1) < 10 or len(des2) < 10:
+            return None
+
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+        matches = bf.knnMatch(des1, des2, k=2)
+
+        # Lowe's ratio test
+        good = [m for m, n in matches if m.distance < 0.75 * n.distance]
+        min_matches = 6 if mode == "similarity" else 10
+        if len(good) < min_matches:
+            return None
+
+        pts_ref = np.float32([kp1[m.queryIdx].pt for m in good])
+        pts_align = np.float32([kp2[m.trainIdx].pt for m in good])
+
+        # estimateAffine*2D(src, dst) computes transform FROM src TO dst.
+        # warpAffine with WARP_INVERSE_MAP expects the map FROM dst TO src.
+        # We want to warp align→ref space, so the inverse map is ref→align.
+        # Therefore: estimate(ref→align) = estimate(pts_ref, pts_align)
+        if mode == "affine":
+            M, inliers = cv2.estimateAffine2D(
+                pts_ref, pts_align,
+                method=cv2.RANSAC, ransacReprojThreshold=3.0,
+                maxIters=2000, confidence=0.99,
+            )
+        else:
+            M, inliers = cv2.estimateAffinePartial2D(
+                pts_ref, pts_align,
+                method=cv2.RANSAC, ransacReprojThreshold=3.0,
+                maxIters=2000, confidence=0.99,
+            )
+
+        if M is None or (inliers is not None and inliers.sum() < min_matches):
+            return None
+        return M.astype(np.float32)
+
+    def _ecc_refine(self, ref_u8, prealigned_u8, motion_type=cv2.MOTION_EUCLIDEAN):
+        """
+        Multi-scale ECC refinement on a pre-aligned image.
+        Returns residual 2x3 warp matrix (identity if ECC fails).
+        """
+        h_full, w_full = ref_u8.shape[:2]
+        scales = []
+        for max_dim in [512, 1024, min(2048, max(h_full, w_full))]:
+            s = min(max_dim / max(h_full, w_full), 1.0)
+            if not scales or s > scales[-1]:
+                scales.append(s)
+
+        warp = np.eye(2, 3, dtype=np.float32)
+
+        try:
+            for i, s in enumerate(scales):
+                if s < 1.0:
+                    ref_s = cv2.resize(ref_u8, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+                    align_s = cv2.resize(prealigned_u8, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+                else:
+                    ref_s = ref_u8
+                    align_s = prealigned_u8
+
+                if i > 0:
+                    prev_s = scales[i - 1]
+                    warp[0, 2] *= (s / prev_s)
+                    warp[1, 2] *= (s / prev_s)
+
+                max_iter = 200 if i == 0 else 100
+                gauss = 11 if i == 0 else 5
+                criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, max_iter, 1e-6)
+
+                _, warp = cv2.findTransformECC(
+                    ref_s, align_s, warp, motion_type, criteria,
+                    inputMask=None, gaussFiltSize=gauss,
+                )
+
+            final_s = scales[-1]
+            if final_s < 1.0:
+                warp[0, 2] /= final_s
+                warp[1, 2] /= final_s
+
+        except cv2.error:
+            pass  # Return identity (no refinement)
+
+        return warp
+
+    def _align_similarity(self, ref_im, im_to_align, scale_factor):
+        """
+        4 DOF similarity alignment: tx, ty, rotation, uniform scale.
+        Hybrid: ORB features for coarse alignment, ECC for sub-pixel refinement.
+        """
+        ref_u8 = self._to_gray_u8(self._get_ref_gray(ref_im))
+        align_u8 = self._to_gray_u8(im_to_align)
+
+        # Stage 1: Feature-based coarse alignment
+        coarse_warp = self._feature_match(ref_u8, align_u8, mode="similarity")
+        if coarse_warp is None:
+            # Fallback to euclidean ECC
+            return self._align_rst(ref_im, im_to_align, scale_factor)
+
+        # Stage 2: Pre-warp and refine with ECC
+        h, w = align_u8.shape[:2]
+        prealigned = cv2.warpAffine(
+            align_u8, coarse_warp, (w, h),
+            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+        residual = self._ecc_refine(ref_u8, prealigned, cv2.MOTION_EUCLIDEAN)
+
+        # Stage 3: Compose coarse + residual
+        C = np.vstack([coarse_warp, [0, 0, 1]])
+        R = np.vstack([residual, [0, 0, 1]])
+        combined = (R @ C)[:2, :].astype(np.float32)
+
+        # Apply to full-res color image
+        h, w = im_to_align.shape[:2]
+        result = cv2.warpAffine(
+            im_to_align, combined, (w, h),
+            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
+            borderMode=cv2.BORDER_CONSTANT, borderValue=0,
+        )
+        self._track_warp_shifts(combined, im_to_align.shape)
+        return result
+
+    def _align_affine(self, ref_im, im_to_align, scale_factor):
+        """
+        6 DOF affine alignment: tx, ty, rotation, scale_x, scale_y, shear.
+        Hybrid: ORB features for coarse alignment, ECC MOTION_AFFINE for refinement.
+        """
+        ref_u8 = self._to_gray_u8(self._get_ref_gray(ref_im))
+        align_u8 = self._to_gray_u8(im_to_align)
+
+        # Stage 1: Feature-based coarse alignment (full 6 DOF)
+        coarse_warp = self._feature_match(ref_u8, align_u8, mode="affine")
+        if coarse_warp is None:
+            # Fallback to similarity
+            return self._align_similarity(ref_im, im_to_align, scale_factor)
+
+        # Stage 2: Pre-warp and refine with MOTION_AFFINE ECC
+        h, w = align_u8.shape[:2]
+        prealigned = cv2.warpAffine(
+            align_u8, coarse_warp, (w, h),
+            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+        residual = self._ecc_refine(ref_u8, prealigned, cv2.MOTION_AFFINE)
+
+        # Stage 3: Compose
+        C = np.vstack([coarse_warp, [0, 0, 1]])
+        R = np.vstack([residual, [0, 0, 1]])
+        combined = (R @ C)[:2, :].astype(np.float32)
+
+        h, w = im_to_align.shape[:2]
+        result = cv2.warpAffine(
+            im_to_align, combined, (w, h),
+            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
+            borderMode=cv2.BORDER_CONSTANT, borderValue=0,
+        )
+        self._track_warp_shifts(combined, im_to_align.shape)
         return result
 
     def generate_laplacian_pyramid(self, im1, num_levels):

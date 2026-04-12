@@ -81,10 +81,18 @@ def parse_args():
         help="Stacking method (default: laplacian)",
     )
     parser.add_argument(
+        "--alignment-mode",
+        choices=["translation", "euclidean", "similarity", "affine"],
+        default=None,
+        help="Alignment mode: translation (shift only), euclidean (shift+rotation), "
+             "similarity (shift+rotation+scale, default with --align), "
+             "affine (full 6 DOF for extreme cases)",
+    )
+    parser.add_argument(
         "--rotation-scale",
         action="store_true",
         default=False,
-        help="Enable rotation + scale alignment (focus breathing correction)",
+        help="Legacy: equivalent to --alignment-mode similarity",
     )
     parser.add_argument(
         "--gpu",
@@ -208,10 +216,13 @@ def main():
 
     print(f"  Method: {args.method}")
     print(f"  Kernel size: {kernel_size}, Pyramid levels: {pyramid_levels}")
+    # Resolve alignment mode
+    alignment_mode = args.alignment_mode or ("similarity" if args.rotation_scale else "similarity")
+    if not args.align:
+        alignment_mode = "translation"
+
     if args.align:
-        print(f"  Alignment: ref={args.alignment_ref}, scale={scale_factor}")
-        if args.rotation_scale:
-            print(f"  Rotation + Scale correction: enabled")
+        print(f"  Alignment: ref={args.alignment_ref}, scale={scale_factor}, mode={alignment_mode}")
 
     # Configure algorithm
     config = AlgorithmConfig(
@@ -222,7 +233,8 @@ def main():
         use_gpu=args.gpu,
         selected_gpu_id=args.gpu_id,
         alignment_reference=args.alignment_ref,
-        align_rotation_scale=args.rotation_scale,
+        align_rotation_scale=alignment_mode in ("euclidean", "similarity", "affine"),
+        alignment_mode=alignment_mode,
     )
 
     algo = LaplacianPyramid(config=config)

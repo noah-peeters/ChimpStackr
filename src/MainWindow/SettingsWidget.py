@@ -305,6 +305,17 @@ class SettingsPanel(qtw.QWidget):
             "first: align all to first image\n"
             "middle: align all to middle image")
 
+        self.alignment_mode_combo = qtw.QComboBox()
+        self.alignment_mode_combo.addItems(["Similarity (recommended)", "Euclidean", "Full Affine"])
+        mode_map = {"similarity": 0, "euclidean": 1, "affine": 2}
+        saved_mode = settings.globalVars["QSettings"].value("algorithm/alignment_mode") or "similarity"
+        self.alignment_mode_combo.setCurrentIndex(mode_map.get(saved_mode, 0))
+        self.alignment_mode_combo.currentIndexChanged.connect(self._on_alignment_mode_changed)
+        align_adv_section.add_row("Alignment mode", self.alignment_mode_combo,
+            "Similarity (4 DOF): shift, rotation, uniform scale — best for most stacks\n"
+            "Euclidean (3 DOF): shift, rotation only — no scale correction\n"
+            "Full Affine (6 DOF): shift, rotation, scale, shear — for extreme cases")
+
         self.autocrop_checkbox = qtw.QCheckBox()
         self.autocrop_checkbox.setChecked(
             bool(int(settings.globalVars["QSettings"].value("algorithm/auto_crop") or 1))
@@ -380,6 +391,12 @@ class SettingsPanel(qtw.QWidget):
 
         outer.addLayout(wrapper)
 
+    def _on_alignment_mode_changed(self, index):
+        """Handle alignment mode dropdown change."""
+        mode_keys = ["similarity", "euclidean", "affine"]
+        if 0 <= index < len(mode_keys):
+            self.change_setting("algorithm/alignment_mode", mode_keys[index])
+
     def _select_method(self, method_key):
         """Handle segmented control method selection."""
         for key, btn in self._method_buttons.items():
@@ -421,6 +438,7 @@ class SettingsPanel(qtw.QWidget):
             selected_gpu_id=int(qs.value("computing/selected_gpu_id") or 0),
             alignment_reference=str(qs.value("algorithm/alignment_ref") or "first"),
             align_rotation_scale=bool(int(qs.value("algorithm/align_rst") or 0)),
+            alignment_mode=str(qs.value("algorithm/alignment_mode") or "auto"),
             contrast_threshold=float(qs.value("algorithm/contrast_threshold") or 0.0),
             feather_radius=int(qs.value("algorithm/feather_radius") or 2),
             depthmap_smoothing=int(qs.value("algorithm/depthmap_smoothing") or 5),

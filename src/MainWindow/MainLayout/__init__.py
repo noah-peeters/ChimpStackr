@@ -186,10 +186,26 @@ class CenterWidget(qtw.QWidget):
                 cfg = mainWin.LaplacianAlgorithm.config
                 method = cfg.stacking_method
                 aligned = bool(mainWin.LaplacianAlgorithm.Algorithm.alignment_shifts)
-            method_short = {"laplacian": "Lap", "weighted_average": "WAvg", "depth_map": "DMap", "exposure_fusion": "HDR"}.get(method, method)
-            align_tag = "+Aligned" if aligned else ""
-            rst_tag = "+RST" if (mainWin and mainWin.LaplacianAlgorithm.config.align_rotation_scale and aligned) else ""
-            item.setText(f"{datetime.today().strftime('%Y%m%d')}_{method_short}{align_tag}{rst_tag}")
+            method_names = {
+                "laplacian": "Laplacian",
+                "weighted_average": "WeightedAvg",
+                "depth_map": "DepthMap",
+                "exposure_fusion": "Mertens",
+            }
+            method_short = method_names.get(method, method)
+            if aligned and mainWin:
+                mode = mainWin.LaplacianAlgorithm._resolve_alignment_mode()
+                mode_names = {
+                    "translation": "Trans",
+                    "euclidean": "Euclid",
+                    "similarity": "Simil",
+                    "affine": "Affine",
+                }
+                align_tag = f"_{mode_names.get(mode, mode)}"
+            else:
+                align_tag = ""
+            num_images = len(settings.globalVars.get("LoadedImagePaths", []))
+            item.setText(f"{method_short}{align_tag}_{num_images}img")
             item.setData(qtc.Qt.UserRole, tmp_file)
 
             if not cv2.imwrite(tmp_file, new_image_array):

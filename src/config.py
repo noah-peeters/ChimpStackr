@@ -87,7 +87,8 @@ class AlgorithmConfig:
     use_gpu: bool = False
     selected_gpu_id: int = 0
     alignment_reference: str = "first"  # "first", "middle", "previous"
-    align_rotation_scale: bool = False  # Enable rotation + scale alignment
+    align_rotation_scale: bool = False  # Enable rotation + scale alignment (legacy, use alignment_mode)
+    alignment_mode: str = "auto"  # "auto", "translation", "euclidean", "similarity", "affine"
     contrast_threshold: float = 0.0  # Laplacian: min contrast to switch (0 = off)
     feather_radius: int = 2  # Laplacian: blur radius for soft focusmap edges (0 = hard)
     depthmap_smoothing: int = 5  # Depth map: smoothing radius for focus map (higher = smoother)

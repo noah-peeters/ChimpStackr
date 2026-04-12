@@ -460,6 +460,101 @@ class TestRSTAlignment:
         assert lp.output_image is not None
 
 
+# -- Similarity & Affine Alignment Tests --
+
+class TestSimilarityAlignment:
+    def test_similarity_same_image(self):
+        """Similarity-aligning an image to itself should produce similar output."""
+        algo = Algorithm()
+        img = algo.load_image("tests/low_res_images/DSC_0356.jpg")
+        result = algo.align_image_pair(img, img.copy(), alignment_mode="similarity")
+        assert result is not None
+        assert result.shape == img.shape
+        assert result.dtype == np.float32
+
+    def test_similarity_detects_scale(self):
+        """Similarity alignment should correct a known scale change."""
+        algo = Algorithm()
+        img = algo.load_image("tests/low_res_images/DSC_0356.jpg")
+        h, w = img.shape[:2]
+        # Simulate 5% focus breathing (scale down)
+        scaled = cv2.resize(img, None, fx=0.95, fy=0.95, interpolation=cv2.INTER_LINEAR)
+        padded = np.zeros_like(img)
+        sh, sw = scaled.shape[:2]
+        dy, dx = (h - sh) // 2, (w - sw) // 2
+        padded[dy:dy+sh, dx:dx+sw] = scaled
+
+        result = algo.align_image_pair(img, padded, alignment_mode="similarity")
+        assert result is not None
+        # Aligned result should be closer to original than the padded input
+        diff_before = np.abs(img.astype(float) - padded.astype(float)).mean()
+        diff_after = np.abs(img.astype(float) - result.astype(float)).mean()
+        assert diff_after < diff_before, "Similarity alignment should reduce difference"
+
+    def test_similarity_config_flag(self, test_image_paths):
+        """alignment_mode='similarity' via config works end-to-end."""
+        config = AlgorithmConfig(
+            fusion_kernel_size=6, pyramid_num_levels=4,
+            alignment_mode="similarity"
+        )
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:2])
+        lp.align_and_stack_images()
+        assert lp.output_image is not None
+
+    def test_backward_compat_rst_flag(self, test_image_paths):
+        """Old align_rotation_scale=True + alignment_mode='auto' → similarity."""
+        config = AlgorithmConfig(
+            fusion_kernel_size=6, pyramid_num_levels=4,
+            align_rotation_scale=True, alignment_mode="auto"
+        )
+        lp = LaplacianPyramid(config=config)
+        assert lp._resolve_alignment_mode() == "similarity"
+
+    def test_feature_match_fallback(self):
+        """When feature matching fails (uniform image), should fall back gracefully."""
+        algo = Algorithm()
+        # Mostly uniform images — ORB will find few features
+        img1 = np.full((200, 200, 3), 128.0, dtype=np.float32)
+        img1[90:110, 90:110] = 200.0
+        img2 = np.roll(img1, 3, axis=1).copy()
+        result = algo.align_image_pair(img1, img2, alignment_mode="similarity")
+        assert result is not None
+        assert result.shape == img1.shape
+
+
+class TestAffineAlignment:
+    def test_affine_same_image(self):
+        """Affine-aligning an image to itself should produce similar output."""
+        algo = Algorithm()
+        img = algo.load_image("tests/low_res_images/DSC_0356.jpg")
+        result = algo.align_image_pair(img, img.copy(), alignment_mode="affine")
+        assert result is not None
+        assert result.shape == img.shape
+        assert result.dtype == np.float32
+
+    def test_affine_config_flag(self, test_image_paths):
+        """alignment_mode='affine' via config works end-to-end."""
+        config = AlgorithmConfig(
+            fusion_kernel_size=6, pyramid_num_levels=4,
+            alignment_mode="affine"
+        )
+        lp = LaplacianPyramid(config=config)
+        lp.update_image_paths(test_image_paths[:2])
+        lp.align_and_stack_images()
+        assert lp.output_image is not None
+
+    def test_all_modes_produce_output(self):
+        """All 4 alignment modes should produce non-None output."""
+        algo = Algorithm()
+        img = algo.load_image("tests/low_res_images/DSC_0356.jpg")
+        for mode in ["translation", "euclidean", "similarity", "affine"]:
+            algo.alignment_shifts = []
+            result = algo.align_image_pair(img, img.copy(), alignment_mode=mode)
+            assert result is not None, f"Mode '{mode}' returned None"
+            assert result.shape == img.shape, f"Mode '{mode}' changed shape"
+
+
 # -- Laplacian Enhancement Tests --
 
 class TestLaplacianEnhancements:
