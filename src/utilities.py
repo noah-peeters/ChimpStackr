@@ -17,7 +17,7 @@ def int_string_sorting(text):
 
 
 def merge_image_paths(existing, new):
-    """Combine two path lists, drop duplicates (keep first), numeric-aware sort.
+    """Combine two path lists, drop duplicates, then numeric-aware sort.
 
     Used to append camera-captured frames to the already-loaded image list.
     """

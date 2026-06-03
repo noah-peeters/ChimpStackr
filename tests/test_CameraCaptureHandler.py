@@ -4,6 +4,7 @@ currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
 sys.path.insert(0, parentdir)
 
+import cv2
 import numpy as np
 import pytest
 
@@ -146,8 +147,6 @@ def test_get_resolution_reflects_current():
     assert handler.get_resolution() == (640, 480)
 
 
-import cv2 as _cv2  # local alias for the roundtrip test
-
 def test_save_still_lossless_roundtrip(tmp_path):
     frame = _synthetic_frame(64, 48)
     out_path = str(tmp_path / "cap_0001.png")
@@ -156,7 +155,7 @@ def test_save_still_lossless_roundtrip(tmp_path):
     assert saved is True
     assert os.path.isfile(out_path)
 
-    reloaded = _cv2.imread(out_path, _cv2.IMREAD_UNCHANGED)
+    reloaded = cv2.imread(out_path, cv2.IMREAD_UNCHANGED)
     assert reloaded is not None
     # PNG is lossless: pixels must be byte-identical
     assert np.array_equal(reloaded, frame)
@@ -166,3 +165,18 @@ def test_save_still_lossless_none_frame(tmp_path):
     out_path = str(tmp_path / "none.png")
     assert CameraCaptureHandler.save_still_lossless(None, out_path) is False
     assert not os.path.exists(out_path)
+
+
+def test_read_frame_propagates_stream_failure():
+    """If the device returns ok=False mid-stream, read_frame reports failure."""
+    class FailingReadCapture(FakeCapture):
+        def read(self):
+            return False, None
+
+    handler = CameraCaptureHandler(capture_factory=lambda i: FailingReadCapture(i))
+    handler.open(0)
+    ok, frame = handler.read_frame()
+    assert ok is False
+    assert frame is None
+    # capture_still relies on read_frame's result, so it must return None too
+    assert handler.capture_still(warmup_frames=0) is None

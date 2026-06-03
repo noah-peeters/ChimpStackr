@@ -12,9 +12,12 @@ import cv2
 
 logger = logging.getLogger(__name__)
 
-# OpenCV CAP_PROP ids (avoid importing constants for clarity)
+# Cache cv2 CAP_PROP constants at module level
 _CAP_PROP_FRAME_WIDTH = cv2.CAP_PROP_FRAME_WIDTH
 _CAP_PROP_FRAME_HEIGHT = cv2.CAP_PROP_FRAME_HEIGHT
+
+# Oversized sentinel: drivers clamp a too-large request to their real maximum
+_OVERSIZED_RESOLUTION = 100000
 
 
 class CameraCaptureHandler:
@@ -33,6 +36,8 @@ class CameraCaptureHandler:
             try:
                 if cap.isOpened():
                     found.append({"index": index, "name": f"Camera {index}"})
+            except Exception:
+                logger.debug("Error probing camera index %s", index, exc_info=True)
             finally:
                 cap.release()
         return found
@@ -77,7 +82,7 @@ class CameraCaptureHandler:
             try:
                 self._cap.release()
             except Exception:
-                pass
+                logger.warning("Error releasing camera device", exc_info=True)
         self._cap = None
         self._index = None
 
@@ -91,7 +96,7 @@ class CameraCaptureHandler:
 
     def request_max_resolution(self):
         """Request an oversized resolution so the driver clamps to its real max."""
-        return self.set_resolution(100000, 100000)
+        return self.set_resolution(_OVERSIZED_RESOLUTION, _OVERSIZED_RESOLUTION)
 
     def get_resolution(self):
         """Return the current (width, height) as ints."""
@@ -103,12 +108,15 @@ class CameraCaptureHandler:
 
     @staticmethod
     def save_still_lossless(frame, path):
-        """Write a BGR frame to `path` losslessly (PNG). Returns True on success."""
+        """Write a BGR frame to `path` losslessly (PNG). Returns True on success.
+
+        `path` may be a str or os.PathLike; it is coerced to str for cv2.
+        """
         if frame is None:
             return False
         try:
             # PNG compression level 1 = fast, still lossless
-            return bool(cv2.imwrite(path, frame, [cv2.IMWRITE_PNG_COMPRESSION, 1]))
+            return bool(cv2.imwrite(str(path), frame, [cv2.IMWRITE_PNG_COMPRESSION, 1]))
         except Exception as e:
             logger.error("Failed to save still %s: %s", path, e)
             return False

@@ -23,3 +23,7 @@ def test_merge_dedupes():
 
 def test_merge_into_empty():
     assert merge_image_paths([], ["/a/img1.png"]) == ["/a/img1.png"]
+
+
+def test_merge_both_empty():
+    assert merge_image_paths([], []) == []
