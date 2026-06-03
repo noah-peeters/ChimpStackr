@@ -1,6 +1,12 @@
 """
 Live camera-capture tab: device/resolution selection, preview, single capture,
 and timed focus-bracketing. Drives the Qt-free CameraCaptureHandler backend.
+
+Note: frame capture (capture_still + lossless save) runs synchronously on the UI
+thread. A single capture is a one-shot ~100 ms stall on an explicit click, and in
+bracketing it is dwarfed by the user-set inter-frame delay, so this is acceptable
+for v1. If capture is ever moved to a worker thread, CameraCaptureHandler must
+gain a lock guarding _cap access (the preview timer reads the same device).
 """
 import os
 import tempfile
@@ -20,6 +26,9 @@ def bgr_to_qimage(frame):
     Copies so the QImage owns its buffer (the numpy frame may be reused).
     """
     if frame is None:
+        return qtg.QImage()
+    if frame.dtype != np.uint8 or frame.ndim != 3 or frame.shape[2] != 3:
+        # Format_BGR888 assumes a 3-channel uint8 buffer with stride w*3.
         return qtg.QImage()
     h, w = frame.shape[:2]
     contiguous = np.ascontiguousarray(frame)
@@ -43,7 +52,7 @@ class CameraCaptureWidget(qtw.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.handler = CameraCaptureHandler()
-        self._capture_counter = 0
+        self._enumerated_once = False
 
         # --- Controls ---
         self.device_combo = qtw.QComboBox()
@@ -92,7 +101,6 @@ class CameraCaptureWidget(qtw.QWidget):
         layout = qtw.QVBoxLayout(self)
         layout.addLayout(controls)
         layout.addWidget(self.preview_label, 1)
-        self.setLayout(layout)
 
         # --- Timer ---
         self._timer = qtc.QTimer(self)
@@ -111,17 +119,34 @@ class CameraCaptureWidget(qtw.QWidget):
         self.start_btn.toggled.connect(self._on_toggle_preview)
         self.capture_btn.clicked.connect(self._on_capture_clicked)
         self.resolution_combo.currentIndexChanged.connect(self._on_resolution_changed)
+        self.device_combo.currentIndexChanged.connect(self._on_device_changed)
         self.bracket_btn.clicked.connect(self._start_bracketing)
 
-        self.refresh_devices()
+        # Enumeration is deferred to first show (probing camera indices can block
+        # for seconds, so we must not do it during app startup).
+        self.device_combo.addItem("Click ⟳ to detect cameras", -1)
+
+    def showEvent(self, event):
+        if not self._enumerated_once:
+            self._enumerated_once = True
+            self.refresh_devices()
+        super().showEvent(event)
 
     # ---- device / resolution ----
     def refresh_devices(self):
+        # Stop any running preview before re-enumerating (frees the open device).
+        if self.handler.is_opened:
+            self.start_btn.setChecked(False)
         self.device_combo.clear()
         for dev in self.handler.enumerate_devices(max_probe=5):
             self.device_combo.addItem(dev["name"], dev["index"])
         if self.device_combo.count() == 0:
             self.device_combo.addItem("No cameras found", -1)
+
+    def _on_device_changed(self, _index):
+        # Switching device while previewing: stop so the user restarts cleanly.
+        if self.handler.is_opened:
+            self.start_btn.setChecked(False)
 
     def _populate_resolutions(self):
         """Probe candidate resolutions on the open device; keep accepted ones."""
@@ -135,9 +160,12 @@ class CameraCaptureWidget(qtw.QWidget):
         for (w, h) in accepted:
             self.resolution_combo.addItem(f"{w} × {h}", (w, h))
         self.resolution_combo.blockSignals(False)
-        # Default to the highest accepted resolution
+        # Default to the highest accepted resolution; if probing yielded nothing
+        # usable, fall back to the device's native maximum.
         if accepted:
             self.handler.set_resolution(*accepted[0])
+        else:
+            self.handler.request_max_resolution()
 
     def _on_resolution_changed(self, _index):
         data = self.resolution_combo.currentData()
@@ -183,11 +211,16 @@ class CameraCaptureWidget(qtw.QWidget):
         return root.name if root is not None else tempfile.gettempdir()
 
     def _save_frame(self, frame):
-        self._capture_counter += 1
-        name = f"capture_{self._capture_counter:04d}.png"
-        path = os.path.join(self._temp_dir(), name)
+        # Unique temp file per capture (mirrors add_processed_image); avoids
+        # stale-counter collisions when the temp root is recreated.
+        file_handle, path = tempfile.mkstemp(suffix=".png", dir=self._temp_dir())
+        os.close(file_handle)
         if CameraCaptureHandler.save_still_lossless(frame, path):
             return path
+        try:
+            os.remove(path)  # clean up the empty placeholder on failure
+        except OSError:
+            pass
         return None
 
     def _on_capture_clicked(self):
@@ -215,9 +248,9 @@ class CameraCaptureWidget(qtw.QWidget):
         self._bracket_remaining -= 1
 
         if self._bracket_remaining > 0:
-            captured = len(self._bracket_paths)
             total = self.bracket_count.value()
-            self.bracket_btn.setText(f"Capturing {captured}/{total}…")
+            done = total - self._bracket_remaining  # frames attempted so far
+            self.bracket_btn.setText(f"Capturing {done}/{total}…")
             self._bracket_timer.start(int(self.bracket_delay.value() * 1000))
         else:
             self._finish_bracketing()

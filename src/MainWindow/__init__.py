@@ -244,6 +244,8 @@ class Window(qtw.QMainWindow):
 
         existing = settings.globalVars.get("LoadedImagePaths", [])
         merged = merge_image_paths(existing, new_paths)
+        if not merged:
+            return
 
         self.current_image_directory = os.path.dirname(merged[0])
         self._main_content.set_loaded_images(merged)
