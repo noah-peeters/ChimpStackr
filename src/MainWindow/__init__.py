@@ -19,6 +19,7 @@ import src.MainWindow.SettingsWidget as SettingsWidget
 
 import src.algorithms.API as algorithm_API
 from src.config import AlgorithmConfig
+from src.utilities import merge_image_paths
 
 if os.name == "nt":
     current_image_directory = os.path.expanduser("~")
@@ -230,6 +231,30 @@ class Window(qtw.QMainWindow):
                     new_paths.append(old_path)
 
             self.set_new_loaded_image_files(new_paths)
+
+    # Add camera-captured frames to the loaded list WITHOUT clearing/prompting.
+    def add_captured_image_files(self, new_paths):
+        if self.is_stacking:
+            self.statusBar().showMessage(
+                "Cannot add images while stacking", self.statusbar_msg_display_time
+            )
+            return
+        if not new_paths:
+            return
+
+        existing = settings.globalVars.get("LoadedImagePaths", [])
+        merged = merge_image_paths(existing, new_paths)
+
+        self.current_image_directory = os.path.dirname(merged[0])
+        self._main_content.set_loaded_images(merged)
+        self.LaplacianAlgorithm.update_image_paths(merged)
+        settings.globalVars["LoadedImagePaths"] = merged
+        self._output_exported = False
+        self.SettingsWidget._auto_detect_params()
+        self.statusBar().showMessage(
+            f"Added {len(new_paths)} captured image{'s' if len(new_paths) > 1 else ''}",
+            self.statusbar_msg_display_time,
+        )
 
     # Update loaded image files
     def set_new_loaded_image_files(self, new_loaded_images):

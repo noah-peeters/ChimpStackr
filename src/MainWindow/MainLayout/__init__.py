@@ -14,6 +14,7 @@ import src.ImageLoadingHandler as ImageLoadingHandler
 import src.MainWindow.MainLayout.ImageWidgets as ImageWidgets
 import src.MainWindow.MainLayout.ImageViewers as ImageViewers
 from src.MainWindow.MainLayout.ImageViewers.ComparisonViewer import ComparisonWidget
+from src.MainWindow.MainLayout.CameraCaptureWidget import CameraCaptureWidget
 from src.utilities import int_string_sorting
 import src.settings as settings
 
@@ -44,6 +45,7 @@ class CenterWidget(qtw.QWidget):
         self.ImageViewer = ImageViewers.ImageViewer()
         self.RetouchingViewer = ImageViewers.ImageRetouchingWidget()
         self.ComparisonViewer = ComparisonWidget()
+        self.CameraCaptureViewer = CameraCaptureWidget()
         self.ImageLoading = ImageLoadingHandler.ImageLoadingHandler()
         self._recent_dirs = []
         self._preview_pool = qtc.QThreadPool()
@@ -62,6 +64,8 @@ class CenterWidget(qtw.QWidget):
         self.tabWidget = qtw.QTabWidget()
         self.tabWidget.addTab(self.ImageViewer, "View")
         self.tabWidget.addTab(self.ComparisonViewer, "Compare")
+        self.tabWidget.addTab(self.CameraCaptureViewer, "Capture")
+        self.CameraCaptureViewer.framesCaptured.connect(self._on_frames_captured)
 
         # Splitter: sidebar | content
         v_splitter = qtw.QSplitter()
@@ -166,6 +170,12 @@ class CenterWidget(qtw.QWidget):
         # Auto-select first image for preview
         if loaded_widget.list.count() > 0:
             loaded_widget.list.setCurrentRow(0)
+
+    def _on_frames_captured(self, paths):
+        """Route camera-captured frame paths into the main loaded-image list."""
+        main_window = settings.globalVars.get("MainWindow")
+        if main_window is not None and paths:
+            main_window.add_captured_image_files(paths)
 
     def add_processed_image(self, new_image_array):
         if new_image_array is None:
