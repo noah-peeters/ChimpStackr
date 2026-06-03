@@ -11,6 +11,7 @@ finish-args:
   - --socket=fallback-x11
   - --socket=wayland
   - --device=dri
+  - --device=all
   - --filesystem=home
 
 cleanup-commands:

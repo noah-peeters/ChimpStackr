@@ -11,5 +11,8 @@
     <!-- Required for loading bundled .dylib files -->
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
+    <!-- Required for USB camera / microscope capture -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
 </dict>
 </plist>

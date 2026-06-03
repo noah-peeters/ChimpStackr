@@ -195,6 +195,8 @@ if sys.platform == 'darwin':
             'NSHighResolutionCapable': True,
             'NSRequiresAquaSystemAppearance': False,  # Support dark mode
             'LSMinimumSystemVersion': '11.0',
+            'NSCameraUsageDescription':
+                'ChimpStackr uses your camera to capture images for focus stacking.',
             'CFBundleDocumentTypes': [
                 {
                     'CFBundleTypeName': 'Image Files',
