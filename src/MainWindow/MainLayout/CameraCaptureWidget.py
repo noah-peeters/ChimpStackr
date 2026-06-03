@@ -186,11 +186,19 @@ class CameraCaptureWidget(qtw.QWidget):
             self.bracket_btn.setEnabled(True)
             self._timer.start()
         else:
+            # Abort any in-flight bracketing sequence when preview stops.
+            self._bracket_timer.stop()
+            self._bracket_remaining = 0
+            self._bracket_paths = []
             self._timer.stop()
             self.handler.release()
             self.start_btn.setText("Start preview")
             self.capture_btn.setEnabled(False)
+            # Reset bracket controls (may have been disabled mid-sequence).
+            self.bracket_btn.setText("Capture N frames")
             self.bracket_btn.setEnabled(False)
+            self.bracket_count.setEnabled(True)
+            self.bracket_delay.setEnabled(True)
             self.preview_label.setText("No preview")
 
     def _update_preview(self):
