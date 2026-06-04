@@ -1,4 +1,11 @@
+---
+title: Stacking Algorithms
+description: How each of ChimpStackr's four fusion methods works
+---
+
 # Stacking Algorithms
+
+[&larr; Back to home](index.html)
 
 ChimpStackr implements four image fusion methods. This document explains how each works and when to use it.
 

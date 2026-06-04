@@ -1,4 +1,11 @@
+---
+title: Packaging & Distribution
+description: Building native ChimpStackr packages for each platform
+---
+
 # Packaging & Distribution
+
+[&larr; Back to home](index.html)
 
 ChimpStackr uses PyInstaller to create native packages for all platforms. Builds are automated via GitHub Actions but can also be done locally.
 
