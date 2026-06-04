@@ -1,4 +1,5 @@
 ---
+layout: default
 title: Packaging & Distribution
 description: Building native ChimpStackr packages for each platform
 ---

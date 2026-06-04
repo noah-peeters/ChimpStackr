@@ -1,4 +1,5 @@
 ---
+layout: default
 title: ChimpStackr
 description: Open-source focus stacking for Windows, macOS, and Linux
 ---

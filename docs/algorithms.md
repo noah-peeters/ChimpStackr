@@ -1,4 +1,5 @@
 ---
+layout: default
 title: Stacking Algorithms
 description: How each of ChimpStackr's four fusion methods works
 ---
