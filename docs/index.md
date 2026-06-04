@@ -6,8 +6,6 @@ description: Open-source focus stacking for Windows, macOS, and Linux
 
 **ChimpStackr** is a free, open-source focus stacking application for Windows, macOS, and Linux. It merges a series of differently-focused photos into a single, fully-sharp image — with a full GUI and a headless CLI.
 
-[Download](https://github.com/noah-peeters/ChimpStackr/releases){: .btn } [View on GitHub](https://github.com/noah-peeters/ChimpStackr){: .btn }
-
 ![ChimpStackr main window](screenshots/main.png)
 
 ## Features
@@ -48,6 +46,14 @@ chimpstackr-cli -i images/*.jpg -o result.tif --align --auto --auto-crop
 ```
 
 Available methods: `laplacian` (default), `weighted_average`, `depth_map`.
+
+## Gallery
+
+Stacks shot at ~4× magnification (~150 frames each), stacked with ChimpStackr and post-processed in [darktable](https://www.darktable.org/).
+
+![Stacked macro example 1](https://user-images.githubusercontent.com/17707805/196990942-413ea35c-2abb-4bce-9807-3f3d6b3de3c5.jpg)
+![Stacked macro example 2](https://user-images.githubusercontent.com/17707805/196991117-dc4f1c76-cc87-4ef1-92ee-9a7484c7ff07.jpg)
+![Stacked macro example 3](https://user-images.githubusercontent.com/17707805/196996295-9fb6c365-ef10-4ef5-b451-1a7269156e53.jpg)
 
 ## Documentation
 
