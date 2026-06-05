@@ -1,3 +1,35 @@
+
+<div align="right">
+  <details>
+    <summary >🌐 Language</summary>
+    <div>
+      <div align="center">
+        <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=en">English</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=zh-CN">简体中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=zh-TW">繁體中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=ja">日本語</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=ko">한국어</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=hi">हिन्दी</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=th">ไทย</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=fr">Français</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=de">Deutsch</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=es">Español</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=it">Italiano</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=ru">Русский</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=pt">Português</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=nl">Nederlands</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=pl">Polski</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=ar">العربية</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=fa">فارسی</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=tr">Türkçe</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=vi">Tiếng Việt</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=id">Bahasa Indonesia</a>
+        | <a href="https://openaitx.github.io/view.html?user=noah-peeters&project=ChimpStackr&lang=as">অসমীয়া</
+      </div>
+    </div>
+  </details>
+</div>
+
 # ChimpStackr
 
 ![GitHub all releases](https://img.shields.io/github/downloads/noah-peeters/ChimpStackr/total) ![GitHub release (latest by date)](https://img.shields.io/github/downloads/noah-peeters/ChimpStackr/latest/total) ![GitHub](https://img.shields.io/github/license/noah-peeters/ChimpStackr) ![GitHub commits since latest release (by date)](https://img.shields.io/github/commits-since/noah-peeters/ChimpStackr/latest)
