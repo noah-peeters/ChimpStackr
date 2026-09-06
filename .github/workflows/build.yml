@@ -279,7 +279,7 @@ jobs:
   # Create GitHub Release (on tag push)
   # ══════════════════════════════════════════════
   release:
-    needs: [build-macos, build-windows, build-linux, build-flatpak]
+    needs: [build-macos, build-windows, build-linux]
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
     runs-on: ubuntu-latest
     permissions:
