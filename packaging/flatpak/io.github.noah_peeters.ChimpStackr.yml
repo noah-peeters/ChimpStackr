@@ -1,9 +1,9 @@
 app-id: io.github.noah_peeters.ChimpStackr
 runtime: org.kde.Platform
-runtime-version: '6.9'
+runtime-version: '6.10'
 sdk: org.kde.Sdk
 base: io.qt.PySide.BaseApp
-base-version: '6.9'
+base-version: '6.10'
 command: chimpstackr
 
 finish-args:
@@ -71,10 +71,14 @@ modules:
       build-args:
         - --share=network
     build-commands:
-      # Install Python dependencies (PySide6 comes from BaseApp, skip it)
+      # Install Python dependencies from requirements.txt so the Flatpak honours
+      # the same version constraints as every other build. PySide6 is provided
+      # by the BaseApp, so drop that line.
       - >-
-        pip3 install --no-cache-dir --prefix=/app --no-build-isolation
-        opencv-python-headless numpy numba rawpy imageio scipy pyfftw
+        grep -viE '^\s*(#|$)|pyside' requirements.txt > /tmp/requirements-flatpak.txt
+        && cat /tmp/requirements-flatpak.txt
+        && pip3 install --no-cache-dir --prefix=/app --no-build-isolation
+        -r /tmp/requirements-flatpak.txt
 
       # Install ChimpStackr source with auto-detected Python version
       - |
