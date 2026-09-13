@@ -153,4 +153,10 @@ dmypy.json
 .pytype/
 
 # Cython debug symbols
-cython_debug/src/_version_static.py
+cython_debug/
+
+# Generated at build time by scripts/build_*.sh
+src/_version_static.py
+
+# Claude Code per-machine settings
+.claude/settings.local.json

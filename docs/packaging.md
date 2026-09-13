@@ -118,7 +118,7 @@ The build script wraps the PyInstaller output in an AppImage:
 
 ### Linux Flatpak
 
-Flatpak packaging files are in `packaging/flatpak/`. The Flatpak build uses the KDE 6.9 runtime with the PySide BaseApp (provides PySide6 bindings linked against the runtime's Qt6).
+Flatpak packaging files are in `packaging/flatpak/`. The Flatpak build uses the KDE 6.10 runtime with the PySide BaseApp (provides PySide6 bindings linked against the runtime's Qt6).
 
 **App ID:** `io.github.noah_peeters.ChimpStackr`
 
@@ -135,7 +135,7 @@ Flatpak packaging files are in `packaging/flatpak/`. The Flatpak build uses the 
 ```bash
 # Install prerequisites
 sudo apt install flatpak flatpak-builder
-flatpak install flathub org.kde.Platform//6.9 org.kde.Sdk//6.9 io.qt.PySide.BaseApp//6.9
+flatpak install flathub org.kde.Platform//6.10 org.kde.Sdk//6.10 io.qt.PySide.BaseApp//6.10
 
 # Build and install locally
 ./scripts/build_flatpak.sh
@@ -151,7 +151,7 @@ flatpak run io.github.noah_peeters.ChimpStackr
 - FFTW3 (float + double precision) -- required by pyFFTW
 - LibRaw -- required by rawpy
 
-The CI workflow uses `flatpak/flatpak-github-actions` with the `ghcr.io/flathub-infra/flatpak-github-actions:kde-6.9` container image to build and produce a `.flatpak` bundle attached to each release.
+The CI workflow uses `flatpak/flatpak-github-actions` with the `ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10` container image to build and produce a `.flatpak` bundle attached to each release.
 
 ### Heavy dependencies
 
