@@ -240,7 +240,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.9
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
       options: --privileged
     steps:
       - uses: actions/checkout@v6
@@ -279,8 +279,17 @@ jobs:
   # Create GitHub Release (on tag push)
   # ══════════════════════════════════════════════
   release:
+    # Wait for every build, but only *require* the native ones. A failed Flatpak
+    # build (e.g. EOL runtime) must not block cutting a release; the .flatpak
+    # asset is simply omitted (fail_on_unmatched_files defaults to false).
     needs: [build-macos, build-windows, build-linux, build-flatpak]
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release)
+    if: >-
+      ${{ !cancelled()
+          && needs.build-macos.result == 'success'
+          && needs.build-windows.result == 'success'
+          && needs.build-linux.result == 'success'
+          && (startsWith(github.ref, 'refs/tags/v')
+              || (github.event_name == 'workflow_dispatch' && inputs.create_release)) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
