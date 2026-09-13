@@ -4,7 +4,7 @@ import numpy as np
 import pyfftw
 import pyfftw.interfaces.numpy_fft as fft
 import scipy.ndimage as ndi
-import scipy.ndimage.interpolation as ndii
+import scipy.ndimage as ndii  # scipy.ndimage.interpolation namespace is deprecated
 
 # Enable PyFFTW plan caching — reuses FFT plans for repeated array sizes
 # (saves ~50ms per plan creation, significant for repeated alignment calls)
@@ -18,7 +18,7 @@ def get_borderval(img, radius=None):
         mindim = min(img.shape)
         radius = max(1, mindim // 20)
 
-    mask = np.zeros_like(img, dtype=np.bool)
+    mask = np.zeros_like(img, dtype=np.bool_)
     mask[:, :radius] = True
     mask[:, -radius:] = True
     mask[:radius, :] = True

@@ -152,7 +152,7 @@ jobs:
   # ══════════════════════════════════════════════
   build-linux:
     needs: test
-    runs-on: ubuntu-22.04  # Use 22.04 for broad glibc compat
+    runs-on: ubuntu-24.04  # 22.04 runners deprecated by GitHub from 2026-09-17
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -163,7 +163,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libfuse2 libxcb-cursor0 libxkbcommon0 \
-            libegl1 libgl1-mesa-glx libglib2.0-0
+            libegl1 libgl1 libglib2.0-0
 
       - name: Install Python dependencies
         run: |
