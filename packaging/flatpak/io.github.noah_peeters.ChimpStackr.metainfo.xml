@@ -60,7 +60,27 @@
   </screenshots>
 
   <releases>
-    <release version="0.2.1" date="2026-04-05">
+    <release version="0.3.4" date="2026-04-12">
+      <description>
+        <p>Four alignment modes: translation, euclidean, similarity and affine.</p>
+      </description>
+    </release>
+    <release version="0.3.3" date="2026-04-05">
+      <description>
+        <p>Flatpak packaging fixes and metainfo screenshots.</p>
+      </description>
+    </release>
+    <release version="0.3.2" date="2026-04-05">
+      <description>
+        <p>Flatpak packaging, EXIF auto-rotation, support for mixed image dimensions, 16-bit TIFF/PNG and EXR output.</p>
+      </description>
+    </release>
+    <release version="0.3.0" date="2026-03-25">
+      <description>
+        <p>GPU-accelerated stacking pipeline with CuPy, large CPU pipeline optimisations, Windows fixes.</p>
+      </description>
+    </release>
+    <release version="0.2.1" date="2026-03-25">
       <description>
         <p>Major update with multiple stacking algorithms, CLI support, modern UI, and cross-platform packaging.</p>
       </description>

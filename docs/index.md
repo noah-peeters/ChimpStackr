@@ -11,7 +11,7 @@ description: Open-source focus stacking for Windows, macOS, and Linux
 ## Features
 
 - **4 stacking algorithms** — Laplacian Pyramid, Weighted Average, Depth Map, Exposure Fusion (HDR)
-- **Automatic alignment** — translation-only or rotation + scale correction (focus breathing)
+- **Automatic alignment** — translation, euclidean (rotation), similarity (rotation + scale, for focus breathing), or affine correction
 - **16-bit pipeline** — full bit-depth preservation from RAW to output
 - **Auto-crop** — removes black edges from alignment shifts
 - **Auto-tuning** — parameters auto-detected from image resolution
@@ -31,7 +31,8 @@ Pre-built packages are on the [Releases](https://github.com/noah-peeters/ChimpSt
 |---|---|---|
 | **Windows** | `ChimpStackr-Windows.zip` | Extract and run `chimpstackr.exe` |
 | **macOS** | `ChimpStackr-macOS.dmg` | Open DMG, drag to Applications |
-| **Linux** | `ChimpStackr-Linux-x86_64.AppImage` | `chmod +x` and run |
+| **Linux (AppImage)** | `ChimpStackr-Linux-x86_64.AppImage` | `chmod +x` and run |
+| **Linux (Flatpak)** | `ChimpStackr-Linux.flatpak` | `flatpak install ChimpStackr-Linux.flatpak` |
 
 ## CLI quickstart
 
