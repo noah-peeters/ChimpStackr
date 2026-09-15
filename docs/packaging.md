@@ -17,7 +17,6 @@ ChimpStackr uses PyInstaller to create native packages for all platforms. Builds
 | macOS | `./scripts/build_macos.sh` | `dist/ChimpStackr-macOS.dmg` |
 | Windows | `.\scripts\build_windows.ps1` | `dist/ChimpStackr-Windows.zip` |
 | Linux (AppImage) | `./scripts/build_linux.sh` | `dist/ChimpStackr-Linux-x86_64.AppImage` |
-| Linux (Flatpak) | `./scripts/build_flatpak.sh` | Flatpak install (local) |
 
 ## Prerequisites
 
@@ -75,8 +74,7 @@ This runs:
 2. **Build macOS** -- PyInstaller, optional code signing, DMG creation
 3. **Build Windows** -- PyInstaller, ZIP archive
 4. **Build Linux (AppImage)** -- PyInstaller, AppImage creation
-5. **Build Linux (Flatpak)** -- flatpak-builder, `.flatpak` bundle
-6. **Release** -- GitHub Release with all artifacts
+5. **Release** -- GitHub Release with all artifacts
 
 ### GitHub Secrets (optional)
 
@@ -115,43 +113,6 @@ The build script wraps the PyInstaller output in an AppImage:
 - `AppRun` script detects `--cli` flag or binary name to dispatch to GUI or CLI
 - Desktop entry and icons included for desktop integration
 - Works on most distros with glibc 2.31+
-
-### Linux Flatpak
-
-Flatpak packaging files are in `packaging/flatpak/`. The Flatpak build uses the KDE 6.10 runtime with the PySide BaseApp (provides PySide6 bindings linked against the runtime's Qt6).
-
-**App ID:** `io.github.noah_peeters.ChimpStackr`
-
-**Files:**
-
-| File | Purpose |
-|---|---|
-| `packaging/flatpak/io.github.noah_peeters.ChimpStackr.yml` | Flatpak manifest |
-| `packaging/flatpak/io.github.noah_peeters.ChimpStackr.desktop` | Desktop entry |
-| `packaging/flatpak/io.github.noah_peeters.ChimpStackr.metainfo.xml` | AppStream metadata for software centers |
-
-**Local build:**
-
-```bash
-# Install prerequisites
-sudo apt install flatpak flatpak-builder
-flatpak install flathub org.kde.Platform//6.10 org.kde.Sdk//6.10 io.qt.PySide.BaseApp//6.10
-
-# Build and install locally
-./scripts/build_flatpak.sh
-
-# Run
-flatpak run io.github.noah_peeters.ChimpStackr
-
-# Create a redistributable .flatpak bundle
-./scripts/build_flatpak.sh --bundle
-```
-
-**Native dependencies** (built from source in the manifest):
-- FFTW3 (float + double precision) -- required by pyFFTW
-- LibRaw -- required by rawpy
-
-The CI workflow uses `flatpak/flatpak-github-actions` with the `ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10` container image to build and produce a `.flatpak` bundle attached to each release.
 
 ### Heavy dependencies
 

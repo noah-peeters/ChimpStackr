@@ -28,12 +28,8 @@ settings.init()
 settings.globalVars["RootTempDir"] = ROOT_TEMP_DIRECTORY
 
 APP_ID = "noah.peeters.chimpstackr"
-FLATPAK_ID = "io.github.noah_peeters.ChimpStackr"
-
-
-def _is_flatpak():
-    """Detect if running inside a Flatpak sandbox."""
-    return os.path.isfile("/.flatpak-info")
+# Basename of the .desktop entry shipped in the AppImage (chimpstackr.desktop)
+DESKTOP_FILE_NAME = "chimpstackr"
 
 
 def _setup_platform_icon():
@@ -124,8 +120,7 @@ def _apply_app_icon(qApp, icon_path):
 
     # Linux/Wayland: set desktopFileName so compositors match the .desktop entry
     if sys.platform == "linux":
-        desktop_id = FLATPAK_ID if _is_flatpak() else APP_ID
-        qApp.setDesktopFileName(desktop_id)
+        qApp.setDesktopFileName(DESKTOP_FILE_NAME)
 
 
 def main():
