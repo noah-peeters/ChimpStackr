@@ -32,7 +32,6 @@ Pre-built packages are on the [Releases](https://github.com/noah-peeters/ChimpSt
 | **Windows** | `ChimpStackr-Windows.zip` | Extract and run `chimpstackr.exe` |
 | **macOS** | `ChimpStackr-macOS.dmg` | Open DMG, drag to Applications |
 | **Linux (AppImage)** | `ChimpStackr-Linux-x86_64.AppImage` | `chmod +x` and run |
-| **Linux (Flatpak)** | `ChimpStackr-Linux.flatpak` | `flatpak install ChimpStackr-Linux.flatpak` |
 
 ## CLI quickstart
 
