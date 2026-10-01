@@ -11,7 +11,7 @@ license = "GPL-3.0-or-later"
 requires-python = ">=3.9,<3.14"
 dependencies = [
     "pyside6-essentials>=6.4.2,<7.0",
-    "opencv-python-headless>=4.7,<5.0",
+    "opencv-python-headless>=4.7,<6.0",
     "numpy>=1.23,<3.0",
     "numba>=0.56",
     "rawpy>=0.18",
