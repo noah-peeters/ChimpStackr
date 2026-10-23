@@ -113,6 +113,41 @@ a_cli = Analysis(
     noarchive=False,
 )
 
+# ── Linux: use the user's desktop stack, don't bundle the build host's ──
+# PyInstaller picks these up from the build machine (ubuntu-24.04). At runtime the
+# user's own GIO/GVfs modules, GTK input methods, pixbuf loaders and Mesa drivers
+# get loaded into the app and need the user's matching versions of these libs.
+# Bundling older copies shadows them and crashes newer distros (issue #179:
+# Ubuntu 26.04 GVfs needs g_variant_builder_init_static from GLib 2.84+).
+# Wheel-vendored libs have hashed names (e.g. libxcb-ad31f5a3.so) and are kept.
+if sys.platform.startswith('linux'):
+    import re
+    _system_libs = re.compile(r'^lib(' + '|'.join([
+        # GLib / GTK3 stack (loaded by Qt's gtk3 platform theme)
+        'glib-2.0', 'gio-2.0', 'gobject-2.0', 'gmodule-2.0', 'gthread-2.0',
+        'gtk-3', 'gdk-3', 'gdk_pixbuf-2.0', 'atk-1.0', 'atk-bridge-2.0', 'atspi',
+        'pango-1.0', 'pangocairo-1.0', 'pangoft2-1.0', 'cairo', 'cairo-gobject',
+        'harfbuzz', 'fribidi', 'thai', 'datrie', 'graphite2', 'pixman-1', 'epoxy',
+        'fontconfig', 'freetype', 'png16', 'brotlicommon', 'brotlidec', 'expat',
+        'ffi', 'pcre2-8', 'mount', 'blkid', 'selinux', 'z', 'bz2', 'zstd',
+        # X11 / xcb (shared with the system's Mesa libGL)
+        'X11', 'X11-xcb', 'Xau', 'Xdmcp', 'Xext', 'Xfixes', 'Xi', 'Xinerama',
+        'Xrandr', 'Xrender', 'Xcursor', 'Xcomposite', 'Xdamage', 'xkbcommon',
+        'xcb-glx', 'xcb-randr', 'xcb-render', 'xcb-shm', 'xcb-sync', 'xcb-xfixes',
+        # D-Bus, systemd, crypto and Kerberos (deps of the system's GVfs modules)
+        'dbus-1', 'systemd', 'gcrypt', 'gpg-error', 'bsd', 'md', 'ssl', 'crypto',
+        'gssapi_krb5', 'krb5', 'krb5support', 'k5crypto', 'com_err', 'keyutils',
+        'cap', 'lz4', 'lzma', 'uuid',
+        # Toolchain runtime (Mesa's LLVM needs the system's newer libstdc++)
+        'stdc\\+\\+', 'gcc_s',
+    ]) + r')\.so(\.|$)')
+
+    def _drop_system_libs(toc):
+        return [e for e in toc if not _system_libs.match(os.path.basename(e[0]))]
+
+    a.binaries = _drop_system_libs(a.binaries)
+    a_cli.binaries = _drop_system_libs(a_cli.binaries)
+
 # Merge analyses so shared libs are only collected once
 MERGE(
     (a, 'chimpstackr', 'chimpstackr'),
