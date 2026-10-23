@@ -180,6 +180,11 @@ jobs:
           ls -la dist/chimpstackr/
           echo "=== Testing CLI ==="
           dist/chimpstackr/chimpstackr-cli --help || true
+          # Host GLib/GTK/libstdc++ must come from the user's system (issue #179)
+          if ls dist/chimpstackr/_internal | grep -E '^lib(glib-2\.0|gio-2\.0|gtk-3|stdc\+\+)\.so'; then
+            echo "::error::Build host system libs were bundled, see chimpstackr.spec"
+            exit 1
+          fi
 
       - name: Create AppImage
         run: |

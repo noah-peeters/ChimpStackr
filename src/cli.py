@@ -7,6 +7,13 @@
         python -m src.cli --input img1.jpg img2.jpg img3.jpg --output stacked.png --align
 """
 import os
+import multiprocessing
+
+# Frozen builds: let multiprocessing helpers that re-run this executable exit
+# instead of running the CLI (see src/run.py)
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+
 os.environ.setdefault('OPENCV_IO_ENABLE_OPENEXR', '1')
 
 import argparse
