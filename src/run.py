@@ -1,4 +1,10 @@
-import os, sys, tempfile, logging
+import os, sys, tempfile, logging, multiprocessing
+
+# Frozen builds: multiprocessing helpers (e.g. the resource tracker Python 3.14
+# starts for numba's parallel lock) re-run this executable. Let them do their
+# job and exit instead of opening another copy of the app (issue #179).
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
 
 # Enable OpenEXR support in OpenCV (must be set before cv2 import)
 os.environ.setdefault('OPENCV_IO_ENABLE_OPENEXR', '1')
