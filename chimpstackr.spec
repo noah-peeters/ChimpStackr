@@ -123,8 +123,9 @@ a_cli = Analysis(
 if sys.platform.startswith('linux'):
     import re
     _system_libs = re.compile(r'^lib(' + '|'.join([
-        # GLib / GTK3 stack (loaded by Qt's gtk3 platform theme)
-        'glib-2.0', 'gio-2.0', 'gobject-2.0', 'gmodule-2.0', 'gthread-2.0',
+        # GLib / GTK3 stack (loaded by Qt's gtk3 platform theme). libgthread
+        # stays bundled: Qt needs it, it's an empty stub, and openSUSE omits it.
+        'glib-2.0', 'gio-2.0', 'gobject-2.0', 'gmodule-2.0',
         'gtk-3', 'gdk-3', 'gdk_pixbuf-2.0', 'atk-1.0', 'atk-bridge-2.0', 'atspi',
         'pango-1.0', 'pangocairo-1.0', 'pangoft2-1.0', 'cairo', 'cairo-gobject',
         'harfbuzz', 'fribidi', 'thai', 'datrie', 'graphite2', 'pixman-1', 'epoxy',
