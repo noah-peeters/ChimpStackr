@@ -92,6 +92,7 @@ class SettingsPanel(qtw.QWidget):
             "contrast_threshold": 0.0,
             "feather_radius": 2,
             "depthmap_smoothing": 5,
+            "breathing_high_precision": 1,
         },
     }
 
@@ -296,6 +297,13 @@ class SettingsPanel(qtw.QWidget):
             self.ref_combo.setCurrentIndex(idx)
         self.ref_combo.currentTextChanged.connect(lambda v: self.change_setting("algorithm/alignment_ref", v))
 
+        self.breathing_spin = qtw.QSpinBox()
+        self.breathing_spin.setRange(1, 200)
+        saved_breath = float(settings.globalVars["QSettings"].value("algorithm/breathing_max_scale_step") or 5.0)
+        self.breathing_spin.setValue(int(round(saved_breath)))
+        self.breathing_spin.valueChanged.connect(
+            lambda v: self.change_setting("algorithm/breathing_max_scale_step", v))
+
         align_adv_section = SettingSection("ALIGNMENT")
         align_adv_section.add_row("Precision", self.scale_spin,
             "DFT subpixel upscale factor.\n"
@@ -303,18 +311,65 @@ class SettingsPanel(qtw.QWidget):
             "Only used when Rotation+Scale is off.")
         align_adv_section.add_row("Reference", self.ref_combo,
             "first: align all to first image\n"
-            "middle: align all to middle image")
+            "middle: align all to middle image\n"
+            "previous: chain-align each image to the previous one\n"
+            "(sequential — best with Breathing mode)")
 
         self.alignment_mode_combo = qtw.QComboBox()
-        self.alignment_mode_combo.addItems(["Similarity (recommended)", "Euclidean", "Full Affine"])
-        mode_map = {"similarity": 0, "euclidean": 1, "affine": 2}
+        self.alignment_mode_combo.addItems(
+            ["Similarity (recommended)", "Euclidean", "Full Affine",
+             "Breathing (focus breathing compensation)"])
+        mode_map = {"similarity": 0, "euclidean": 1, "affine": 2, "breathing": 3}
         saved_mode = settings.globalVars["QSettings"].value("algorithm/alignment_mode") or "similarity"
         self.alignment_mode_combo.setCurrentIndex(mode_map.get(saved_mode, 0))
         self.alignment_mode_combo.currentIndexChanged.connect(self._on_alignment_mode_changed)
         align_adv_section.add_row("Alignment mode", self.alignment_mode_combo,
             "Similarity (4 DOF): shift, rotation, uniform scale — best for most stacks\n"
             "Euclidean (3 DOF): shift, rotation only — no scale correction\n"
-            "Full Affine (6 DOF): shift, rotation, scale, shear — for extreme cases")
+            "Full Affine (6 DOF): shift, rotation, scale, shear — for extreme cases\n"
+            "Breathing: sequential chained alignment with scale-drift plausibility\n"
+            "checks — for lenses with strong focus breathing")
+        align_adv_section.add_row("Breathing max scale %", self.breathing_spin,
+            "Sequential alignment: maximum plausible magnification\n"
+            "change per consecutive frame pair (percent).\n"
+            "Higher values reject less; lower values are stricter.\n"
+            "Only used by Breathing mode / previous reference.")
+
+        self.precision_checkbox = qtw.QCheckBox()
+        saved_hp = settings.globalVars["QSettings"].value("algorithm/breathing_high_precision")
+        self.precision_checkbox.setChecked(True if saved_hp is None else bool(int(saved_hp)))
+        self.precision_checkbox.toggled.connect(self._on_precision_toggled)
+        precision_control = qtw.QWidget()
+        precision_control.setStyleSheet("background: transparent;")
+        hp_layout = qtw.QHBoxLayout(precision_control)
+        hp_layout.setContentsMargins(0, 0, 0, 0)
+        hp_layout.addStretch()
+        hp_layout.addWidget(self.precision_checkbox)
+        align_adv_section.add_row("Max precision (slow)", precision_control,
+            "Only for Breathing mode / Reference=previous.\n"
+            "Checked: float32 full-resolution ECC scale refinement +\n"
+            "Lanczos resampling — maximum sharpness, ~3-8x slower.\n"
+            "Unchecked: fast estimation for quick stacks on easy subjects.\n"
+            "Greyed out when sequential alignment is not active.")
+
+        # Slowness warning, shown only while the sequential (max-precision)
+        # engine is active: Breathing mode, or Reference=previous
+        self.breathing_warning = qtw.QLabel(
+            "⚠ Slow processing: sequential alignment runs full-resolution "
+            "float32 refinement on every frame pair. Expect roughly 3–8× "
+            "longer alignment than Similarity — maximum precision in "
+            "exchange for the wait."
+        )
+        self.breathing_warning.setWordWrap(True)
+        self.breathing_warning.setStyleSheet(
+            "color: #e0a458; font-size: 11px; padding: 8px 2px 4px 2px; "
+            "background: transparent;"
+        )
+        align_adv_section.container_layout.addWidget(self.breathing_warning)
+        self.breathing_warning.setVisible(False)
+        self.ref_combo.currentTextChanged.connect(
+            lambda _v: self._update_breathing_warning())
+        self._update_breathing_warning()
 
         self.autocrop_checkbox = qtw.QCheckBox()
         self.autocrop_checkbox.setChecked(
@@ -393,9 +448,26 @@ class SettingsPanel(qtw.QWidget):
 
     def _on_alignment_mode_changed(self, index):
         """Handle alignment mode dropdown change."""
-        mode_keys = ["similarity", "euclidean", "affine"]
+        mode_keys = ["similarity", "euclidean", "affine", "breathing"]
         if 0 <= index < len(mode_keys):
             self.change_setting("algorithm/alignment_mode", mode_keys[index])
+        self._update_breathing_warning()
+
+    def _on_precision_toggled(self, checked):
+        self.change_setting("algorithm/breathing_high_precision", int(checked))
+        self._update_breathing_warning()
+
+    def _update_breathing_warning(self):
+        """Enable the precision toggle only while the sequential engine is
+        active (Breathing mode, or Reference=previous), and show the slowness
+        warning only when the slow path is actually going to run."""
+        sequential = (
+            self.alignment_mode_combo.currentIndex() == 3
+            or self.ref_combo.currentText() == "previous"
+        )
+        self.precision_checkbox.setEnabled(sequential)
+        self.breathing_warning.setVisible(
+            sequential and self.precision_checkbox.isChecked())
 
     def _select_method(self, method_key):
         """Handle segmented control method selection."""
@@ -442,6 +514,10 @@ class SettingsPanel(qtw.QWidget):
             contrast_threshold=float(qs.value("algorithm/contrast_threshold") or 0.0),
             feather_radius=int(qs.value("algorithm/feather_radius") or 2),
             depthmap_smoothing=int(qs.value("algorithm/depthmap_smoothing") or 5),
+            breathing_max_scale_step=float(qs.value("algorithm/breathing_max_scale_step") or 5.0) / 100.0,
+            breathing_high_precision=bool(int(
+                1 if qs.value("algorithm/breathing_high_precision") is None
+                else qs.value("algorithm/breathing_high_precision"))),
         )
 
 

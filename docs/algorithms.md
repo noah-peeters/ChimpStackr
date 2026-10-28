@@ -122,6 +122,67 @@ Uses OpenCV's Mertens exposure fusion algorithm.
 | Frame ordering required | No | No | No | No |
 | Best stack size | Any | 2-20 | Any | 2-10 |
 
+## Focus Breathing Compensation (sequential alignment)
+
+**Best for:** Lenses with strong focus breathing, i.e. macro lenses and long lenses/macro zooms where the focal length (and therefore magnification) changes as you rack focus, so frames drift in scale across the stack.
+
+Traditional single-reference alignment (all frames vs. the first or middle frame) struggles when cumulative scale drift is large: frame 100 vs. frame 1 may differ by 10–20% while frame 100 vs. frame 99 differs by less than 1%. This is the same situation Helicon Focus's autoadjustments handle with sequential alignment.
+
+### How it works
+
+Based on the same idea as Helicon Focus: align each frame to its *neighbour* and compose the chain.
+
+1. For each consecutive pair of frames, estimate a small transform (shift, rotation, uniform scale) via ORB feature matching + ECC refinement. Per-pair deltas are tiny, so matching is much more robust than bridging the whole stack at once.
+
+2. Plausibility check ("autoadjustment limits"): magnification never changes by more than a few percent between consecutive frames. Suspected steps beyond **Breathing max scale** (default 5%) are rejected and re-estimated as translation-only; if that also fails, the previous delta is held (constant breathing rate assumption).
+
+3. Compose the per-pair transforms onto the anchor frame (first, or middle — see *Reference* below) and warp every frame into the anchor's coordinate space with one resample each.
+
+4. Frame-to-frame estimation runs in parallel (each pair is independent); only the cheap composition step is sequential.
+
+### When to use
+
+- Macro shots racked by focus (strong breathing) — the biggest wins
+- Stacks where standard alignment leaves ghosting or progressive blur in off-center corners
+- Enable via **Alignment mode → Breathing**, or by setting **Reference → previous** with any non-translation mode
+- Costs ~2–3× the alignment time of standard modes (pair estimation is repeated per frame)
+
+### Parameters
+
+- **Breathing max scale %** (default: 5): maximum plausible magnification change per consecutive pair. Higher = more forgiving of noisy estimates, lower = stricter plausibility gating. Note this is *per pair*, not across the whole stack (cumulative breathing of 10–20% is fine).
+
+### Precision (what the breathing path does differently)
+
+Breathing mode runs at maximum precision by default — this is slower than the
+standard modes (roughly 3–8× the alignment time) but measurably reduces the
+blur and edge halos that chained alignment can otherwise leave behind. For a
+quick stack on an easy subject, uncheck **Max precision (slow)** in the GUI
+(available whenever Breathing or Reference=previous is active) or pass
+`--fast-breathing` on the CLI; that uses the fast estimators instead.
+
+- **Scale is refined, not just measured once.** The coarse ORB feature match
+  only localizes scale to ~0.1%. The high-precision path refines it with a
+  6-DOF ECC optimization on **float32 grayscale** (no 8-bit quantization),
+  projects the result back onto the 4-DOF similarity manifold (dropping
+  shear), then re-refines rotation and translation *at that scale*. On
+  real-world texture this recovers scale to ~0.002%.
+- **Full-resolution optimization.** The ECC cascade extends to 4096 px
+  (standard modes stop at 2048 px), with a tighter convergence epsilon.
+- **Objective drift arbitration.** Every pair also computes a conservative
+  3-DOF estimate (scale frozen at the ORB value) and the two candidates are
+  compared by cross-correlation, with highpass detail error breaking ties.
+  Texture-poor frames automatically fall back to the drift-free candidate.
+- **Lanczos resampling + replicated borders** on the final warp: bilinear
+  softening is avoided, and replicated edges remove the dark border bleed
+  that constant-black borders used to feed into pyramid fusion.
+- **float64 chain composition**, and deterministic per-pair estimation
+  (seeded RANSAC, single-threaded OpenCV inside the parallel workers).
+
+### References
+
+- Sequential alignment with per-step limits: conceptually equivalent to Helicon Focus's autoadjustment limits.
+- Transform chaining follows the classical image-stitching approach (e.g. Brown & Lowe 2007, "Automatic Panoramic Image Stitching").
+
 ## References
 
 - Burt, P.J. & Adelson, E.H. (1983). The Laplacian Pyramid as a Compact Image Code.
@@ -129,3 +190,4 @@ Uses OpenCV's Mertens exposure fusion algorithm.
 - Nayar, S.K. & Nakagawa, Y. (1994). Shape from Focus (Sum Modified Laplacian).
 - Mertens, T., Kautz, J. & Van Reeth, F. (2007). Exposure Fusion.
 - Wang, W. & Chang, F. (2011). A Multi-focus Image Fusion Method Based on Laplacian Pyramid.
+- Brown, M. & Lowe, D.G. (2007). Automatic Panoramic Image Stitching using Invariant Features (transform chaining).

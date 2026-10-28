@@ -89,11 +89,28 @@ def parse_args():
     )
     parser.add_argument(
         "--alignment-mode",
-        choices=["translation", "euclidean", "similarity", "affine"],
+        choices=["translation", "euclidean", "similarity", "affine", "breathing"],
         default=None,
         help="Alignment mode: translation (shift only), euclidean (shift+rotation), "
              "similarity (shift+rotation+scale, default with --align), "
-             "affine (full 6 DOF for extreme cases)",
+             "affine (full 6 DOF for extreme cases), "
+             "breathing (sequential chained alignment for focus breathing "
+             "compensation, like Helicon Focus)",
+    )
+    parser.add_argument(
+        "--max-scale-step",
+        type=float,
+        default=0.05,
+        help="Breathing mode: max plausible scale change per frame pair "
+             "(default: 0.05 = 5%%). Larger steps are rejected and re-estimated "
+             "as translation-only",
+    )
+    parser.add_argument(
+        "--fast-breathing",
+        action="store_true",
+        help="Breathing/sequential mode: use fast estimation instead of the "
+             "default maximum-precision path (float32 full-res ECC + Lanczos). "
+             "For quick stacks on easy subjects",
     )
     parser.add_argument(
         "--rotation-scale",
@@ -229,7 +246,9 @@ def main():
         alignment_mode = "translation"
 
     if args.align:
-        print(f"  Alignment: ref={args.alignment_ref}, scale={scale_factor}, mode={alignment_mode}")
+        sequential = alignment_mode == "breathing" or args.alignment_ref == "previous"
+        print(f"  Alignment: ref={args.alignment_ref}, scale={scale_factor}, "
+              f"mode={alignment_mode}" + (", sequential (breathing compensation)" if sequential else ""))
 
     # Configure algorithm
     config = AlgorithmConfig(
@@ -242,6 +261,8 @@ def main():
         alignment_reference=args.alignment_ref,
         align_rotation_scale=alignment_mode in ("euclidean", "similarity", "affine"),
         alignment_mode=alignment_mode,
+        breathing_max_scale_step=args.max_scale_step,
+        breathing_high_precision=not args.fast_breathing,
     )
 
     algo = LaplacianPyramid(config=config)
@@ -322,6 +343,14 @@ def main():
     print(f"  Output saved: {args.output} ({depth_str}, {file_size / 1024:.0f} KB)")
     print(f"  Total time: {total_elapsed:.2f}s")
     print(f"  Output shape: {result.shape}")
+
+    # Breathing summary in sequential mode
+    if algo.sequential_log:
+        scales = [e.get("scale", 1.0) for e in algo.sequential_log]
+        fallbacks = sum(e.get("fallbacks", 0) for e in algo.sequential_log)
+        print(f"  Breathing compensation: cumulative scale "
+              f"{min(scales):.4f} – {max(scales):.4f} across {len(scales)} frames, "
+              f"{fallbacks} fallback step(s)")
 
     # Quality report on output
     if args.quality_report:
