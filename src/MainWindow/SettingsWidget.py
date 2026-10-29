@@ -356,18 +356,18 @@ class SettingsPanel(qtw.QWidget):
         hp_layout.addWidget(self.precision_checkbox)
         align_adv_section.add_row("Max precision (slow)", precision_control,
             "Only for Breathing mode / Reference=previous.\n"
-            "Checked: float32 full-resolution ECC scale refinement\n"
-            "per frame pair — roughly 5x slower overall.\n"
-            "Unchecked (default): fast estimation; output is equally\n"
-            "sharp on most stacks.\n"
+            "Checked: float32 ECC up to 4096 px per frame pair,\n"
+            "on the CPU — several times slower overall.\n"
+            "Unchecked (default): 8-bit ECC scale refinement, just as\n"
+            "accurate on most stacks (and GPU-accelerated).\n"
             "Greyed out when sequential alignment is not active.")
 
         # Slowness warning, shown only while the sequential (max-precision)
         # engine is active: Breathing mode, or Reference=previous
         self.breathing_warning = qtw.QLabel(
             "⚠ Slow processing: max precision runs full-resolution float32 "
-            "refinement on every frame pair. Expect roughly 5× longer "
-            "stacking than with it off."
+            "refinement on every frame pair, on the CPU. Expect several "
+            "times longer stacking than with it off."
         )
         self.breathing_warning.setWordWrap(True)
         self.breathing_warning.setStyleSheet(
@@ -416,8 +416,8 @@ class SettingsPanel(qtw.QWidget):
         gpu_section.add_row(
             "Use GPU" if HAS_GPU else "GPU (not available)",
             gpu_control,
-            "Pyramid and Hybrid stacking run on the GPU (OpenCL,\n"
-            "any vendor). Other methods use the CPU.\n"
+            "Stacking (every method) and alignment run on the GPU\n"
+            "(OpenCL, any vendor).\n"
             "Falls back to the CPU automatically if anything fails."
         )
 

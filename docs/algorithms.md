@@ -175,7 +175,7 @@ Traditional single-reference alignment (all frames vs. the first or middle frame
 
 Align each frame to its *neighbour* and compose the chain.
 
-1. For each consecutive pair of frames, estimate a small transform (shift, rotation, uniform scale) via ORB feature matching + ECC refinement. Per-pair deltas are tiny, so matching is much more robust than bridging the whole stack at once.
+1. For each consecutive pair of frames, estimate a small transform (shift, rotation, uniform scale) via ORB feature matching + ECC refinement. Per-pair deltas are tiny, so matching is much more robust than bridging the whole stack at once. ECC refines the scale as well (6-DOF ECC projected onto a similarity, then rotation and translation re-refined at that scale): ORB alone only gets the scale to ~0.03% per pair, and in a chain that error accumulates into pixels of drift (up to 10 px on ground-truth test stacks, ~0.1 px with the refinement).
 
 2. Plausibility check ("autoadjustment limits"): magnification never changes by more than a few percent between consecutive frames. Suspected steps beyond **Breathing max scale** (default 5%) are rejected and re-estimated as translation-only; if that also fails, the previous delta is held (constant breathing rate assumption).
 
@@ -209,23 +209,22 @@ standard modes.
 ### Max precision (optional)
 
 Checking **Max precision (slow)** in the GUI (available whenever Breathing or
-Reference=previous is active) or passing `--max-precision` on the CLI refines
-each frame pair much harder. It can help on difficult, texture-poor subjects,
-but on typical stacks the output is indistinguishable from the default while
-taking roughly 5× longer and using about twice the memory.
+Reference=previous is active) or passing `--max-precision` on the CLI runs
+the same scale refinement on harder settings, on the CPU. On synthetic
+ground-truth stacks both modes land within ~0.1 px of the true transforms,
+so it is rarely worth the much longer run time; it may help on difficult,
+texture-poor subjects.
 
-- **Scale is refined, not just measured once.** The coarse ORB feature match
-  only localizes scale to ~0.1%. The high-precision path refines it with a
-  6-DOF ECC optimization on **float32 grayscale** (no 8-bit quantization),
-  projects the result back onto the 4-DOF similarity manifold (dropping
-  shear), then re-refines rotation and translation *at that scale*. On
-  synthetic test content this recovers scale to ~0.002%.
+- **Float32 data.** The ECC optimization runs on **float32 grayscale** (no
+  8-bit quantization), pre-warped with Lanczos instead of bilinear.
 - **Full-resolution optimization.** The ECC cascade extends to 4096 px
-  (standard modes stop at 2048 px), with a tighter convergence epsilon.
+  (the default stops at 2048 px), with a tighter convergence epsilon.
 - **Objective drift arbitration.** Every pair also computes a conservative
   3-DOF estimate (scale frozen at the ORB value) and the two candidates are
   compared by cross-correlation, with highpass detail error breaking ties.
   Texture-poor frames automatically fall back to the drift-free candidate.
+  (The default instead keeps ORB's scale only when the refined scale jumps
+  by more than 1%.)
 
 Both precision modes use deterministic per-pair estimation (seeded RANSAC,
 single-threaded OpenCV inside the parallel workers), so results are

@@ -88,6 +88,36 @@ class TestKernels:
         ref = cv2.resize(small, (w, h), interpolation=cv2.INTER_AREA)
         assert np.array_equal(gpu.area_up(gpu.upload(small.astype(np.float32)), shape).get(), ref)
 
+    @pytest.mark.parametrize("s", [512 / 750, 0.3413, 0.17])
+    def test_estimation_levels_match_opencv(self, gpu, s):
+        img = cv2.imread(LOW_RES[1], cv2.IMREAD_GRAYSCALE)
+        est = gpu.estimation()
+        with est.session():
+            (ref, same), = est.ecc_levels(img, img, None, [s])
+            ref, same = ref.get(), same.get()
+        expected = cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+        assert np.array_equal(ref, expected)
+        assert np.array_equal(same, expected)
+
+    @pytest.mark.parametrize("motion", [cv2.MOTION_EUCLIDEAN, cv2.MOTION_AFFINE])
+    def test_ecc_matches_opencv(self, gpu, motion):
+        ref = cv2.imread(LOW_RES[2], cv2.IMREAD_GRAYSCALE)
+        h, w = ref.shape
+        M = cv2.getRotationMatrix2D((w / 2, h / 2), 0.3, 1.0)
+        M[:, 2] += (1.7, -0.9)
+        img = cv2.warpAffine(ref, M, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 100, 1e-6)
+        rho, expected = cv2.findTransformECC(ref, img, np.eye(2, 3, dtype=np.float32), motion,
+                                             criteria, None, 5)
+        est = gpu.estimation()
+        with est.session():
+            rho_gpu, warp = est.find_transform_ecc(
+                est._upload(ref.astype(np.float32)), est._upload(img.astype(np.float32)),
+                np.eye(2, 3, dtype=np.float32), motion, criteria, 5)
+        corners = np.array([[0, 0, 1], [w, 0, 1], [0, h, 1], [w, h, 1]], np.float64).T
+        assert np.abs((warp - expected) @ corners).max() < 0.01
+        assert abs(rho_gpu - rho) < 1e-5
+
     def test_thresholded_focusmap_matches_cpu(self, gpu):
         rs = np.random.RandomState(3)
         a, b = (rs.rand(2, 41, 57) * 4).astype(np.float32)
@@ -104,7 +134,7 @@ class TestKernels:
 
     def test_exposure_merge_matches_opencv(self, gpu):
         imgs = [cv2.imread(p) for p in LOW_RES[:3]]
-        out = OCL.ExposureGPU(gpu).merge([lambda im=im: gpu.warp(im) for im in imgs]).get()
+        out = OCL.ExposureGPU(gpu).merge([lambda im=im: gpu.upload(im) for im in imgs]).get()
         ref = np.clip(cv2.createMergeMertens(1.0, 1.0, 0.0).process(imgs) * 255, 0, 255)
         assert np.abs(out - ref).mean() < 0.01
 

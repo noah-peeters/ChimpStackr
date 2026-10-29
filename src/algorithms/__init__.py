@@ -623,11 +623,12 @@ class Algorithm:
         if gpu is not None:
             try:
                 scales = self._cascade_scales(ref_u8.shape)
-                levels = gpu.ecc_levels(ref_u8, align_u8, coarse_warp, scales)
-                return self._ecc_refine(None, None, motion_type,
-                                        levels=[(s, r, a) for s, (r, a) in zip(scales, levels)],
-                                        ecc=gpu.find_transform_ecc, iters=iters,
-                                        none_on_error=none_on_error)
+                with gpu.session():
+                    levels = gpu.ecc_levels(ref_u8, align_u8, coarse_warp, scales)
+                    return self._ecc_refine(
+                        None, None, motion_type,
+                        levels=[(s, r, a) for s, (r, a) in zip(scales, levels)],
+                        ecc=gpu.find_transform_ecc, iters=iters, none_on_error=none_on_error)
             except Exception as exc:   # OpenCL errors: carry on without the GPU
                 logger.warning(f"GPU alignment help failed ({exc}); using the CPU")
                 self.gpu_estimation = None

@@ -11,9 +11,12 @@ OpenCV).
 """
 import math
 import os
+import queue
 import threading
 import warnings
+from contextlib import contextmanager
 from functools import lru_cache
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -390,10 +393,16 @@ __kernel void depth_select(__global const float *img, __global const float *shar
 }
 
 // ── Exposure fusion (cv2.MergeMertens) ──
-// the 8-bit input MergeMertens gets (cpu._to_u8 truncates), scaled to 0..1
-__kernel void mertens_prep(__global const float *src, __global float *dst, int n) {
+// the 8-bit input MergeMertens gets (cpu._to_u8 truncates), and that
+// scaled to 0..1 as MergeMertens converts it
+__kernel void mertens_prep(__global const float *src, __global uchar *dst, int n) {
     int i = get_global_id(0);
-    if (i < n) dst[i] = floor(clamp(src[i], 0.f, 255.f)) * (1.f / 255.f);
+    if (i < n) dst[i] = (uchar)floor(clamp(src[i], 0.f, 255.f));
+}
+
+__kernel void mertens_unit(__global const uchar *src, __global float *dst, int n) {
+    int i = get_global_id(0);
+    if (i < n) dst[i] = src[i] * (1.f / 255.f);
 }
 
 // MergeMertens converts with COLOR_RGB2GRAY, also for BGR images
@@ -406,7 +415,7 @@ __kernel void mertens_gray(__global const float *src, __global float *dst, int n
 
 __kernel void mertens_weight(__global const float *img, __global const float *g,
                              __global float *wt, __global float *wsum, int w, int h, int ch,
-                             float wcon, float wsat, float wexp, int first) {
+                             float wcon, float wsat, float wexp, int sum) {
     int x = get_global_id(0), y = get_global_id(1);
     if (x >= w || y >= h) return;
     int i = y * w + x;
@@ -425,7 +434,7 @@ __kernel void mertens_weight(__global const float *img, __global const float *g,
     if (ch == 3) v *= pow(sqrt(sat), wsat);
     v += 1e-12f;
     wt[i] = v;
-    wsum[i] = first ? v : wsum[i] + v;
+    if (sum) wsum[i] = sum == 1 ? v : wsum[i] + v;   // 1: first frame, 2: others, 0: no sum
 }
 
 __kernel void divide(__global float *a, __global const float *b, int n) {
@@ -452,7 +461,7 @@ __kernel void to_255(__global const float *src, __global float *dst, int n) {
 // ── Alignment estimation ──
 // cv2.resize(src, INTER_AREA) shrink by a non-integer factor, bit-exact for
 // 8-bit images: OpenCV's per-axis weight tables, in its summation order
-__kernel void resize_area(__global const float *src, __global float *dst, int sw, int dw, int dh,
+__kernel void resize_area(__global const uchar *src, __global float *dst, int sw, int dw, int dh,
                           __global const int *xofs, __global const int *xsrc,
                           __global const float *xw, __global const int *yofs,
                           __global const int *ysrc, __global const float *yw) {
@@ -461,7 +470,7 @@ __kernel void resize_area(__global const float *src, __global float *dst, int sw
     if (x >= dw || y >= dh) return;
     float acc = 0.f;
     for (int j = yofs[y]; j < yofs[y + 1]; j++) {
-        __global const float *row = src + ysrc[j] * sw;
+        __global const uchar *row = src + ysrc[j] * sw;
         float buf = 0.f;
         for (int k = xofs[x]; k < xofs[x + 1]; k++) buf = buf + row[xsrc[k]] * xw[k];
         acc = j == yofs[y] ? yw[j] * buf : acc + yw[j] * buf;
@@ -469,16 +478,31 @@ __kernel void resize_area(__global const float *src, __global float *dst, int sw
     dst[y * dw + x] = clamp(rint(acc), 0.f, 255.f);
 }
 
+// 8-bit gray pre-warp for estimation (warp_u8's bilinear + replicate, rounded
+// to 8 bits like cv2.warpAffine on uint8)
+__kernel void warp_gray_u8(__global const uchar *src, __global uchar *dst, int w, int h,
+                           float m00, float m01, float m02, float m10, float m11, float m12) {
+    int x = get_global_id(0), y = get_global_id(1);
+    if (x >= w || y >= h) return;
+    float fx = m00 * x + m01 * y + m02, fy = m10 * x + m11 * y + m12;
+    int x0 = (int)floor(fx), y0 = (int)floor(fy);
+    float tx = fx - x0, ty = fy - y0, wx[2] = {1.f - tx, tx}, wy[2] = {1.f - ty, ty};
+    float acc = 0.f;
+    for (int j = 0; j < 2; j++) {
+        int yy = clamp(y0 + j, 0, h - 1);
+        float row = 0.f;
+        for (int i = 0; i < 2; i++) row += wx[i] * (float)src[yy * w + clamp(x0 + i, 0, w - 1)];
+        acc += wy[j] * row;
+    }
+    dst[y * w + x] = (uchar)clamp(rint(acc), 0.f, 255.f);
+}
+
 __kernel void u8_to_f32(__global const uchar *a, __global float *b, int n) {
     int i = get_global_id(0);
     if (i < n) b[i] = a[i];
 }
 
-// float -> 8-bit values (round half to even, saturate), in place
-__kernel void round_u8(__global float *a, int n) {
-    int i = get_global_id(0);
-    if (i < n) a[i] = clamp(rint(a[i]), 0.f, 255.f);
-}
+
 
 // ── ECC (cv2.findTransformECC, euclidean / affine) ──
 // gradients [-0.5 0 0.5] along x and y (cv2.filter2D, reflect-101 borders)
@@ -779,7 +803,7 @@ class GPU:
     Device images are pyopencl arrays shaped like numpy images (HxW or HxWxC).
     """
 
-    RING = 3   # frames in flight (upload buffers)
+    RING = 2   # frames in flight (upload buffers)
 
     def __init__(self, device):
         import pyopencl.array as cla
@@ -801,14 +825,20 @@ class GPU:
             "hybrid_add", "gate", "hybrid_level", "blend", "max_partial",
             "max_final", "area_up", "focusmap_thresh", "lap_energy", "wavg_add", "wavg_result",
             "mean3", "stats_partial", "stats_final", "bilateral_lut", "bilateral", "depth_select",
-            "mertens_prep", "mertens_gray", "mertens_weight", "divide", "mul_acc", "to_255",
-            "resize_area", "round_u8", "u8_to_f32", "tone_lab", "tone_hist", "tone_apply",
+            "mertens_prep", "mertens_unit", "mertens_gray", "mertens_weight", "divide", "mul_acc", "to_255",
+            "resize_area", "warp_gray_u8", "u8_to_f32", "tone_lab", "tone_hist", "tone_apply",
             "var_rows", "var_cols")}
         self._coef = {}
         self._estimation = None
         self.uq = cl.CommandQueue(self.ctx)   # frame uploads (see warp)
         self._ring = [{"buf": None, "host": None, "done": None} for _ in range(self.RING)]
         self._ring_pos = 0
+
+    def release(self):
+        """Free device memory kept for reuse (between stacks)."""
+        self.pool.free_held()
+        for slot in self._ring:
+            slot.update(buf=None, host=None, done=None)
 
     def estimation(self):
         """This device's EstimationGPU (created on first use)."""
@@ -876,25 +906,28 @@ class GPU:
                            np.int32(dw), np.int32(dh), np.int32(self._ch(a)))
         return out
 
-    def pyr_up_combine(self, small, base, sign):
-        """base + sign * cv2.pyrUp(small, dstsize=base size)."""
+    def pyr_up_combine(self, small, base, sign, out=None):
+        """base + sign * cv2.pyrUp(small, dstsize=base size) (out may be base)."""
         sh, sw = small.shape[:2]
         dh, dw = base.shape[:2]
-        out = self.empty(base.shape)
+        if out is None:
+            out = self.empty(base.shape)
         self.k["pyr_up_combine"](self.q, (dw, dh), None, small.data, base.data, out.data,
                                  np.int32(sw), np.int32(sh), np.int32(dw), np.int32(dh),
                                  np.int32(self._ch(base)), np.float32(sign))
         return out
 
     def laplacian_pyramid(self, img, levels):
-        """Same layout as cpu.generate_laplacian_pyramid: [top, ..., finest]."""
+        """Same layout as cpu.generate_laplacian_pyramid: [top, ..., finest].
+
+        Built in place over the Gaussian levels, so img is overwritten (its
+        finest level)."""
         g = [img]
         for _ in range(levels):
             g.append(self.pyr_down(g[-1]))
-        lap = [g[-1]]
-        for i in range(levels, 0, -1):
-            lap.append(self.pyr_up_combine(g[i], g[i - 1], -1.0))
-        return lap
+        for i in range(levels):   # fine to coarse: g[i + 1] is still Gaussian
+            self.pyr_up_combine(g[i + 1], g[i], -1.0, out=g[i])
+        return g[::-1]
 
     def reconstruct(self, lap):
         top = lap[0]
@@ -1022,8 +1055,8 @@ class HybridGPU:
 
     def add(self, img):
         g = self.g
-        pyr = g.laplacian_pyramid(img, self.num_levels)
         sharp = [g.fine_sharpness(img)]
+        pyr = g.laplacian_pyramid(img, self.num_levels)
         for _ in range(self.num_levels):
             sharp.append(g.pyr_down(sharp[-1]))
         sharp.reverse()
@@ -1242,36 +1275,52 @@ class ExposureGPU:
         self.g = gpu
         self.batch_size = batch_size
         self.weights = (contrast_weight, saturation_weight, exposure_weight)
-        self.batch = []
+        self.batch = []      # frames as MergeMertens gets them (8-bit, device)
         self.partials = []   # batch results as the next stage reads them (8-bit, host)
         self.last = None     # float result of the latest batch (used if it's the only one)
+        self.first = None    # the first frame (the result of a one-frame stack)
 
     def _prep(self, img):
-        out = self.g.empty(img.shape)
+        """The 8-bit frame cpu._to_u8 would hand MergeMertens."""
+        out = self.g._cla.empty(self.g.q, img.shape, np.uint8, allocator=self.g.pool)
         self.g.run("mertens_prep", img.size, img.data, out.data, np.int32(img.size))
+        return out
+
+    def _unit(self, u8):
+        out = self.g.empty(u8.shape)
+        self.g.run("mertens_unit", u8.size, u8.data, out.data, np.int32(u8.size))
         return out
 
     def merge(self, images):
         """cv2.createMergeMertens(...).process(images) * 255, clipped; images
-        are callables returning the device frames (0..255)."""
+        are callables returning 8-bit device frames."""
         g = self.g
-        wsum, weights = None, []
-        for i, load in enumerate(images):
-            img = self._prep(load())
+        wsum = None
+
+        def weight(img, sum_mode):
             h, w = img.shape[:2]
             gray, wt = g.empty((h, w)), g.empty((h, w))
-            if wsum is None:
-                wsum = g.empty((h, w))
             g.run("mertens_gray", gray, img.data, gray.data, np.int32(h * w), np.int32(g._ch(img)))
             g.run2d("mertens_weight", gray, img.data, gray.data, wt.data, wsum.data, np.int32(w),
                     np.int32(h), np.int32(g._ch(img)), *[np.float32(v) for v in self.weights],
-                    np.int32(i == 0))
-            weights.append(wt)
+                    np.int32(sum_mode))
+            return wt
+
+        # pass 1: the weight sum; pass 2 recomputes each weight (cheaper than
+        # keeping one full-size map per image)
+        for i, load in enumerate(images):
+            img = self._unit(load())
+            h, w = img.shape[:2]
+            if wsum is None:
+                wsum = g.empty((h, w))
+            weight(img, 1 if i == 0 else 2)
         levels = int(np.log(np.float32(min(h, w))) / np.log(np.float32(2)))
         res = None
-        for load, wt in zip(images, weights):
+        for load in images:
+            img = self._unit(load())
+            wt = weight(img, 0)
             g.run("divide", wt, wt.data, wsum.data, np.int32(h * w))
-            lap = g.laplacian_pyramid(self._prep(load()), levels)
+            lap = g.laplacian_pyramid(img, levels)
             wp = [wt]
             for _ in range(levels):
                 wp.append(g.pyr_down(wp[-1]))
@@ -1289,11 +1338,17 @@ class ExposureGPU:
 
     def _flush(self):
         batch, self.batch = self.batch, []
-        self.last = self.merge([lambda b=b: b for b in batch]) if len(batch) > 1 else batch[0]
-        self.partials.append(np.clip(self.last.get(), 0, 255).astype(np.uint8))
+        if len(batch) == 1:
+            # a lone frame passes through unmerged (8-bit for the next stage)
+            self.last = self.first
+            self.partials.append(batch[0].get())
+        else:
+            self.last = self.merge([lambda b=b: b for b in batch])
+            self.partials.append(np.clip(self.last.get(), 0, 255).astype(np.uint8))
 
     def add(self, img):
-        self.batch.append(img)
+        self.first = img if self.first is None and not self.partials else None
+        self.batch.append(self._prep(img))
         if len(self.batch) >= self.batch_size:
             self._flush()
 
@@ -1304,7 +1359,7 @@ class ExposureGPU:
             return None
         if len(self.partials) == 1:
             return self.last
-        return self.merge([lambda p=p: self.g.warp(p) for p in self.partials])
+        return self.merge([lambda p=p: self.g.upload(p) for p in self.partials])
 
 
 @lru_cache(maxsize=32)
@@ -1338,11 +1393,15 @@ class EstimationGPU:
     iterations (cv2.findTransformECC), so the CPU only decodes and runs ORB.
 
     Estimation workers call it from several threads at once, alongside GPU
-    stacking: each thread gets its own queue and kernel objects (kernel
-    arguments aren't thread-safe), so their work overlaps on the GPU.
+    stacking. Each call sequence runs in a session (see session()) holding
+    one of a few slots: a queue, kernel objects (kernel arguments aren't
+    thread-safe) and device memory, so sessions overlap on the GPU while
+    memory stays bounded however many workers there are.
     """
 
-    KERNELS = ("warp_u8", "round_u8", "resize_area", "u8_to_f32", "conv1d", "ecc_grad",
+    SLOTS = 4
+
+    KERNELS = ("warp_gray_u8", "resize_area", "u8_to_f32", "conv1d", "ecc_grad",
                "ecc_means_partial", "ecc_means_final", "ecc_sums_partial")
     GROUP = 64          # ECC_GROUP in the kernels
     PIXELS_PER_ITEM = 16
@@ -1354,19 +1413,36 @@ class EstimationGPU:
         self.ctx, self.prg = gpu.ctx, gpu.prg
         self._local = threading.local()
         self._lock = threading.Lock()
+        self._slots = queue.Queue()
+        self._made = 0
         self._tables = {}
         self._coef = {}
 
-    # ── per-thread resources ──
+    # ── slots ──
+    @contextmanager
+    def session(self):
+        """Hold a GPU slot for a sequence of calls (their device arrays
+        belong to it); waits while all slots are busy."""
+        with self._lock:
+            make = self._slots.empty() and self._made < self.SLOTS
+            self._made += make
+        if make:
+            slot = SimpleNamespace(q=cl.CommandQueue(self.ctx))
+            slot.pool = self._clt.MemoryPool(self._clt.ImmediateAllocator(slot.q))
+            slot.k = {n: cl.Kernel(self.prg, n) for n in self.KERNELS}
+            slot.frames = (None, None, None, None)   # last uploaded (ref, align), copies
+        else:
+            slot = self._slots.get()
+        self._local.slot = slot
+        try:
+            yield self
+        finally:
+            self._local.slot = None
+            self._slots.put(slot)
+
     @property
     def _t(self):
-        t = self._local
-        if not hasattr(t, "q"):
-            t.q = cl.CommandQueue(self.ctx)
-            t.pool = self._clt.MemoryPool(self._clt.ImmediateAllocator(t.q))
-            t.k = {n: cl.Kernel(self.prg, n) for n in self.KERNELS}
-            t.frames = (None, None, None, None)   # last uploaded (ref, align) and copies
-        return t
+        return self._local.slot
 
     def _empty(self, shape, dtype=np.float32):
         t = self._t
@@ -1388,30 +1464,29 @@ class EstimationGPU:
     def _to_float(self, u8):
         h, w = u8.shape
         out = self._empty((h, w))
-        self._t.k["u8_to_f32"](self._t.q, (h * w,), None, self._upload(u8).data, out.data,
-                               np.int32(h * w))
+        self._t.k["u8_to_f32"](self._t.q, (h * w,), None, u8.data, out.data, np.int32(h * w))
         return out
 
     def _frames(self, ref_u8, align_u8):
-        """Device copies of the pair (reused while the same pair is refined)."""
+        """8-bit device copies of the pair (reused while it's refined)."""
         t = self._t
         ref, align, ref_d, align_d = t.frames
         if ref is not ref_u8:
-            ref_d = self._to_float(ref_u8)
+            ref_d = self._upload(ref_u8)
         if align is not align_u8:
             align_d = self._upload(align_u8)
         t.frames = (ref_u8, align_u8, ref_d, align_d)
         return ref_d, align_d
 
     def _shrink(self, img, s):
-        """cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)."""
+        """cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA) of
+        an 8-bit device image, as float."""
         h, w = img.shape
         dw, dh = int(round(w * s)), int(round(h * s))
         scale = 1.0 / s
         if abs(scale - round(scale)) < 1e-12:
             # integer factors take OpenCV's separate fast path
-            small = cv2.resize(img.get().astype(np.uint8), None, fx=s, fy=s,
-                               interpolation=cv2.INTER_AREA)
+            small = cv2.resize(img.get(), None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
             return self._upload(small.astype(np.float32))
         out = self._empty((dh, dw))
         tabs = [self._shared(self._tables, (n, d, scale, i),
@@ -1439,18 +1514,14 @@ class EstimationGPU:
         then resize(INTER_AREA) unless the scale is 1. Device arrays."""
         t = self._t
         h, w = ref_u8.shape
-        ref, src = self._frames(ref_u8, align_u8)
-        warped = self._empty((h, w))
-        if M is None:
-            t.k["u8_to_f32"](t.q, (h * w,), None, src.data, warped.data, np.int32(h * w))
-        else:
+        ref, warped = self._frames(ref_u8, align_u8)
+        if M is not None:
+            src, warped = warped, self._empty((h, w), np.uint8)
             m = np.asarray(M, np.float64).ravel()
-            t.k["warp_u8"](t.q, (w, h), None, src.data, warped.data, np.int32(w), np.int32(h),
-                           np.int32(w), np.int32(h), np.int32(1), *[np.float32(v) for v in m],
-                           np.int32(0), np.int32(1))
-            t.k["round_u8"](t.q, (h * w,), None, warped.data, np.int32(h * w))
-        return [(self._shrink(ref, s), self._shrink(warped, s)) if s < 1.0 else (ref, warped)
-                for s in scales]
+            t.k["warp_gray_u8"](t.q, (w, h), None, src.data, warped.data,
+                                np.int32(w), np.int32(h), *[np.float32(v) for v in m])
+        return [(self._shrink(ref, s), self._shrink(warped, s)) if s < 1.0
+                else (self._to_float(ref), self._to_float(warped)) for s in scales]
 
     def find_transform_ecc(self, template, image, warp, motion, criteria, gauss):
         """cv2.findTransformECC(template, image, warp, motion, criteria, None,

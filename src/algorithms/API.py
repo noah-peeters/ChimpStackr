@@ -681,6 +681,11 @@ class LaplacianPyramid:
             return self._gpu_run_inner(align, signals, progress_callback)
         finally:
             self.Algorithm.gpu_estimation = None
+            if OCL.available():
+                try:
+                    OCL.get(self.config.selected_gpu_id).release()
+                except Exception:   # nothing to release if the device never worked
+                    pass
 
     def _gpu_run_inner(self, align, signals, progress_callback):
         progress_total = self._progress_total
