@@ -58,7 +58,14 @@ jobs:
       - name: CPU OpenCL for the GPU tests
         if: runner.os == 'Linux'
         run: |
+          probe='import pyopencl as cl; d = [x for p in cl.get_platforms() for x in p.get_devices()]; cl.Program(cl.Context(d[:1]), "__kernel void k(__global float *a) { a[0] = 1.f; }").build()'
           pip install pocl-binary-distribution
+          if ! python -c "$probe"; then
+            # its bundled compiler doesn't know every runner CPU: try the distro build
+            pip uninstall -y pocl-binary-distribution
+            sudo apt-get update -q && sudo apt-get install -y -q pocl-opencl-icd
+            python -c "$probe" || echo "::warning::No working CPU OpenCL on this runner; GPU tests are skipped"
+          fi
           echo "CHIMPSTACKR_OPENCL_ANY_DEVICE=1" >> "$GITHUB_ENV"
 
       # Runs everything under tests/ (pyproject testpaths) — new test files

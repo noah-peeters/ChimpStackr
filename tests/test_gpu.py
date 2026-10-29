@@ -26,7 +26,21 @@ from src.config import AlgorithmConfig
 
 METHODS = ["laplacian", "hybrid", "weighted_average", "depth_map", "exposure_fusion"]
 LOW_RES = sorted(glob.glob(os.path.join(parentdir, "tests", "low_res_images", "*.jpg")))
-needs_gpu = pytest.mark.skipif(not OCL.available(), reason="no OpenCL device")
+
+
+def _gpu_works():
+    """An OpenCL device that can build the kernels (a CPU implementation's
+    compiler may not support the machine it runs on)."""
+    if not OCL.available():
+        return False
+    try:
+        OCL.get()
+        return True
+    except Exception:
+        return False
+
+
+needs_gpu = pytest.mark.skipif(not _gpu_works(), reason="no working OpenCL device")
 
 
 def stack(paths, method, gpu, align, mode="similarity", **kw):
