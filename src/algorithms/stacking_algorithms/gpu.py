@@ -414,10 +414,9 @@ def _local_variance(gray, kernel_size):
     k = kernel_size | 1
     ksize = (k, k)
     mean = cv2.blur(gray, ksize)
-    sq_mean = cv2.blur(gray * gray, ksize)
-    var = sq_mean - mean * mean
-    np.maximum(var, 0, out=var)
-    return var
+    sq_mean = cv2.sqrBoxFilter(gray, cv2.CV_32F, ksize)   # == blur(gray * gray)
+    var = cv2.subtract(sq_mean, cv2.multiply(mean, mean))
+    return cv2.max(var, 0.0)
 
 
 def compute_focusmap_fast(level1, level2, kernel_size):

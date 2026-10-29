@@ -139,10 +139,11 @@ def fuse_pyramid_levels_soft(pyr_level1, pyr_level2, soft_focusmap):
     Fuse two pyramid levels using a soft (float) focusmap.
     soft_focusmap: float32 in [0, 1], where 1 = use pyr_level2.
     """
-    mask = soft_focusmap
-    if pyr_level1.ndim == 3:
-        mask = mask[:, :, np.newaxis]
-    return (pyr_level1 * (1.0 - mask) + pyr_level2 * mask).astype(np.float32)
+    # cv2.blendLinear is multi-threaded and avoids numpy temporaries (~8x
+    # faster). It divides by (w1 + w2 + 1e-5), so the weights are scaled up
+    # to make that constant negligible (no drift over sequential fusions).
+    mask = soft_focusmap.astype(np.float32, copy=False) * 1000.0
+    return cv2.blendLinear(pyr_level1, pyr_level2, 1000.0 - mask, mask)
 
 
 @nb.njit(
@@ -329,7 +330,7 @@ def _level_variance(level, kernel_size):
     gray = cv2.cvtColor(level, cv2.COLOR_BGR2GRAY) if level.ndim == 3 else level
     k = (kernel_size, kernel_size)
     mean = cv2.blur(gray, k)
-    return cv2.blur(gray * gray, k) - mean * mean
+    return cv2.subtract(cv2.sqrBoxFilter(gray, cv2.CV_32F, k), cv2.multiply(mean, mean))
 
 
 def _per_channel(weights, like):
@@ -358,35 +359,45 @@ class HybridFuser:
         self.frames = 0
 
     def prepare(self, image):
-        """Image pyramid and matching sharpness pyramid for one frame (thread-safe).
+        """All per-frame work, independent of other frames (thread-safe), so it
+        can run in parallel worker threads; add() then only accumulates.
 
-        The sharpness pyramid is a Gaussian pyramid of the fine-detail
-        sharpness map, so a coarse level's weight aggregates in-focus evidence
-        over the area that level covers: a sharp edge then also claims the
-        surrounding area where out-of-focus frames would spill their blur.
+        Per level: (coefficients, sharpness, blend weight, weighted
+        coefficients, local variance). The sharpness pyramid is a Gaussian
+        pyramid of the fine-detail sharpness map, so a coarse level's weight
+        aggregates in-focus evidence over the area that level covers: a sharp
+        edge then also claims the surrounding area where out-of-focus frames
+        would spill their blur.
         """
+        pyramid = generate_laplacian_pyramid(image, self.num_levels)
         sharp = [fine_sharpness(image)]
         for _ in range(self.num_levels):
             sharp.append(cv2.pyrDown(sharp[-1]))
-        return generate_laplacian_pyramid(image, self.num_levels), sharp[::-1]
+        sharp.reverse()
+        first_fine = len(pyramid) - hybrid_fine_level_count(image.shape, self.num_levels)
 
-    def add(self, pyramid, sharp_pyramid):
-        n = len(pyramid)
-        if self._n_fine is None:
-            self._n_fine = hybrid_fine_level_count(pyramid[-1].shape, n - 1)
-            # Background sharpness: a low percentile of the first frame, which in
-            # a focus stack is mostly out of focus
-            self._sharp_floor = float(np.percentile(sharp_pyramid[-1], 10)) + 1e-3
-        first_fine = n - self._n_fine
-
+        levels = []
         for i, level in enumerate(pyramid):
-            sharp = sharp_pyramid[i]
-            weight = sharp
+            weight = sharp[i] + 1e-3
             if i < first_fine:
                 weight = cv2.GaussianBlur(weight, (0, 0), HYBRID_SPREAD_SIGMA)
-            weight = np.power(weight + 1e-3, HYBRID_WEIGHT_POWER, dtype=np.float32)
-            weighted = level * _per_channel(weight, level)
-            var = _level_variance(level, self.kernel_size)
+            weight = cv2.multiply(weight, weight)          # sharpness^4
+            weight = cv2.multiply(weight, weight)
+            weighted = cv2.multiply(level, cv2.merge([weight] * 3) if level.ndim == 3 else weight)
+            levels.append((level, sharp[i], weight, weighted,
+                           _level_variance(level, self.kernel_size)))
+        return levels
+
+    def add(self, prepared):
+        n = len(prepared)
+        if self._n_fine is None:
+            self._n_fine = hybrid_fine_level_count(prepared[-1][0].shape, n - 1)
+            # Background sharpness: a low percentile of the first frame, which in
+            # a focus stack is mostly out of focus
+            self._sharp_floor = float(np.percentile(prepared[-1][1], 10)) + 1e-3
+        first_fine = n - self._n_fine
+
+        for i, (level, sharp, weight, weighted, var) in enumerate(prepared):
             if self.frames == 0:
                 self._num.append(weighted)
                 self._den.append(weight)
@@ -399,12 +410,13 @@ class HybridFuser:
                     sigma = float(np.median(np.abs(gray))) / 0.6745
                     self._noise_var[i] = max(sigma * sigma, 1e-6)
             else:
-                self._num[i] += weighted
-                self._den[i] += weight
-                mask = var > self._best_var[i]
-                self._best[i][mask] = level[mask]
-                np.maximum(self._best_var[i], var, out=self._best_var[i])
-                np.maximum(self._max_sharp[i], sharp, out=self._max_sharp[i])
+                # OpenCV ops: multi-threaded, unlike the numpy equivalents
+                cv2.add(self._num[i], weighted, dst=self._num[i])
+                cv2.add(self._den[i], weight, dst=self._den[i])
+                mask = cv2.compare(var, self._best_var[i], cv2.CMP_GT)
+                cv2.copyTo(level, mask, self._best[i])
+                cv2.max(self._best_var[i], var, dst=self._best_var[i])
+                cv2.max(self._max_sharp[i], sharp, dst=self._max_sharp[i])
         self.frames += 1
 
     def _subject_mask(self, i, blur):

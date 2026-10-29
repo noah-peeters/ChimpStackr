@@ -85,14 +85,14 @@ class TestHybridFuser:
     def test_single_frame_roundtrip(self):
         frames, _, _ = two_object_scene()
         fuser = CPU.HybridFuser(5, detail_gain=0)
-        fuser.add(*fuser.prepare(frames[0]))
+        fuser.add(fuser.prepare(frames[0]))
         assert np.abs(fuser.result() - frames[0]).max() < 1e-2
 
     def test_identical_frames_unchanged(self):
         frames, _, _ = two_object_scene(noise=2.0)
         fuser = CPU.HybridFuser(5, detail_gain=0)
         for _ in range(4):
-            fuser.add(*fuser.prepare(frames[0]))
+            fuser.add(fuser.prepare(frames[0]))
         assert np.abs(fuser.result() - frames[0]).max() < 1e-2
 
     def test_empty_result_is_none(self):
@@ -102,7 +102,7 @@ class TestHybridFuser:
         frames, _, _ = two_object_scene()
         fuser = CPU.HybridFuser(5)
         for f in frames:
-            fuser.add(*fuser.prepare(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)))
+            fuser.add(fuser.prepare(cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)))
         out = fuser.result()
         assert out.ndim == 2 and out.shape == frames[0].shape[:2]
 
@@ -112,7 +112,7 @@ class TestHybridQuality:
         frames, truth, ring = two_object_scene()
         fuser = CPU.HybridFuser(5, detail_gain=0)   # pure fusion, no contrast boost
         for f in frames:
-            fuser.add(*fuser.prepare(f))
+            fuser.add(fuser.prepare(f))
         err = np.abs(fuser.result() - truth).mean(axis=2)
         assert err.mean() < 0.5, f"overall error {err.mean():.2f}"
         assert err[ring].mean() < 1.0, f"halo (background ring) error {err[ring].mean():.2f}"
@@ -257,3 +257,26 @@ class TestCLI:
         result = self._run(*args)
         assert result.returncode != 0
         assert "--slab" in result.stderr
+
+
+class TestPerformancePaths:
+    def test_low_memory_mode_matches_parallel_mode(self, monkeypatch):
+        """With RAM for only one in-flight frame, workers just load and the
+        main thread prepares; the result must not change."""
+        parallel, _ = stack(LOW_RES, "hybrid", align=True, levels=4)
+        monkeypatch.setattr(LaplacianPyramid, "_frame_workers",
+                            staticmethod(lambda shape, bytes_per_pixel, cap=6: 1))
+        low_mem, _ = stack(LOW_RES, "hybrid", align=True, levels=4)
+        assert np.abs(low_mem.output_image - parallel.output_image).max() < 1e-3
+
+    def test_soft_blend_matches_reference_formula(self):
+        rs = np.random.RandomState(2)
+        a = (rs.rand(64, 80, 3) * 255).astype(np.float32)
+        b = (rs.rand(64, 80, 3) * 255).astype(np.float32)
+        m = rs.rand(64, 80).astype(np.float32)
+        expected = a * (1.0 - m[:, :, None]) + b * m[:, :, None]
+        out = CPU.fuse_pyramid_levels_soft(a, b, m)
+        assert out.dtype == np.float32
+        assert np.abs(out - expected).max() < 1e-3
+        # no systematic bias (would drift over many sequential fusions)
+        assert abs(float((out - expected).mean())) < 1e-5
