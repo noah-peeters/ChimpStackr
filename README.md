@@ -20,8 +20,28 @@ Open-source focus stacking application for Windows, macOS, and Linux.
 - **GUI + CLI:** Full graphical interface and headless command-line tool
 - **Cross-platform:** Native builds for Windows, macOS, Linux
 - **Pause/resume/cancel:** Control long-running stacks
-- **Before/after comparison:** Slider viewer for comparing input vs output
-- **Drag & drop:** Drop image files or folders directly into the app
+- **Before/after comparison:** Draggable divider over the result, at any zoom
+- **Drag & drop:** Drop image files or folders onto the window (or the Dock icon on macOS)
+- **Trackpad, mouse and touch:** Pinch to zoom, two-finger pan, wheel zoom at the cursor, double-click or double-tap for Fit / 100 %
+- **Light and dark:** Follows the system appearance, or pick one in Settings
+
+## Using the app
+
+Drop a folder of frames onto the window (or **Add Images…**), pick a method in the inspector on the right, and press **Stack**. Results appear under *Results* in the sidebar; **Export…** saves JPEG, PNG, TIFF or OpenEXR (16-bit PNG/TIFF keep the full precision of the stack).
+
+| Action | macOS | Windows / Linux |
+|---|---|---|
+| Add images / folder | ⌘O / ⇧⌘O | Ctrl+O / Ctrl+Shift+O |
+| Stack | ⌘↩ | Ctrl+Enter |
+| Stop stacking | ⌘. or Esc | Esc |
+| Export | ⌘E | Ctrl+E |
+| Compare before / after | \\ or Y | \\ or Y |
+| Zoom in / out | ⌘+ / ⌘− (or + / −) | Ctrl++ / Ctrl+− (or + / −) |
+| Fit / 100 % | ⌘0 / ⌘1 (or 0 / 1) | Ctrl+0 / Ctrl+1 (or 0 / 1) |
+| Previous / next frame | ← / → | ← / → |
+| Remove selected frames | ⌫ | Delete |
+| Show sidebar / inspector | ⌥⌘S / ⌥⌘I | Ctrl+Alt+S / Ctrl+Alt+I |
+| Settings | ⌘, | Ctrl+, |
 
 ## Download
 

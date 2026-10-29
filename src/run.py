@@ -98,43 +98,60 @@ def _apply_app_icon(qApp, icon_path):
     """Set the application icon on all platforms."""
     if not icon_path or not os.path.isfile(icon_path):
         return
+    icons_dir = os.path.dirname(icon_path)
+    settings.globalVars["AppIconPath"] = icon_path
+
+    if sys.platform == "darwin":
+        # The .app's .icns (on Apple's icon grid) is the Dock icon; setting a
+        # window icon would replace it at runtime. From source, use the
+        # macOS-shaped PNG so the Dock doesn't show Python's icon.
+        if getattr(sys, "frozen", False):
+            return
+        mac_png = os.path.join(icons_dir, "chimpstackr_icon_macos.png")
+        qApp.setWindowIcon(qtg.QIcon(mac_png if os.path.isfile(mac_png) else icon_path))
+        return
 
     # Build QIcon with all available sizes for sharpest rendering everywhere
     icon = qtg.QIcon()
-    icons_dir = os.path.dirname(icon_path)
-
     # On Windows, add .ico first (contains all sizes for taskbar/titlebar)
     if sys.platform == "win32":
         ico = os.path.join(icons_dir, "icon.ico")
         if os.path.isfile(ico):
             icon.addFile(ico)
-
     for name in ["icon_128x128.png", "icon_256x256.png", "icon_512x512.png", "chimpstackr_icon.png"]:
         p = os.path.join(icons_dir, name)
         if os.path.isfile(p):
             icon.addFile(p)
     if icon.isNull():
         icon = qtg.QIcon(icon_path)
-
     qApp.setWindowIcon(icon)
-
-    # macOS: override the dock icon (Python scripts show the generic Python icon)
-    if sys.platform == "darwin":
-        try:
-            from AppKit import NSImage, NSApplication
-            ns_image = NSImage.alloc().initWithContentsOfFile_(icon_path)
-            if ns_image:
-                NSApplication.sharedApplication().setApplicationIconImage_(ns_image)
-        except ImportError:
-            pass  # pyobjc not installed
 
     # Linux/Wayland: set desktopFileName so compositors match the .desktop entry
     if sys.platform == "linux":
         qApp.setDesktopFileName(DESKTOP_FILE_NAME)
 
 
+class _App(qtw.QApplication):
+    """Also takes files opened with the app (Finder "Open With", drops on
+    the Dock icon), which macOS sends as FileOpen events."""
+
+    def __init__(self, argv):
+        super().__init__(argv)
+        self.window = None
+        self.pending = []
+
+    def event(self, ev):
+        if ev.type() == qtc.QEvent.FileOpen and ev.file():
+            if self.window is not None:
+                self.window.add_paths([ev.file()])
+            else:
+                self.pending.append(ev.file())
+            return True
+        return super().event(ev)
+
+
 def main():
-    qApp = qtw.QApplication([])
+    qApp = _App(sys.argv[:1])
     qApp.setApplicationName("chimpstackr")
     qApp.setOrganizationName("noah.peeters")
     qApp.setOrganizationDomain("noah.peeters")
@@ -142,19 +159,22 @@ def main():
     settings.globalVars["QSettings"] = qtc.QSettings()
     settings.globalVars["MainApplication"] = qApp
 
-    icon_path = _find_icon_path()
+    import src.MainWindow.theme as theme
+    theme.install(qApp, str(settings.globalVars["QSettings"].value("ui/theme") or "system"))
+
+    _apply_app_icon(qApp, _find_icon_path())
 
     window = MainWindow.Window()
-
-    from src.MainWindow.style import get_stylesheet
-    qApp.setStyleSheet(get_stylesheet())
-
-    _apply_app_icon(qApp, icon_path)
     # Also set on the window directly (Windows taskbar needs this)
-    if icon_path and os.path.isfile(icon_path):
+    if not qApp.windowIcon().isNull():
         window.setWindowIcon(qApp.windowIcon())
+    window.show()
 
-    window.showMaximized()
+    # Files passed on the command line or opened with the app ("Open With")
+    qApp.window = window
+    args = [a for a in sys.argv[1:] if os.path.exists(a)] + qApp.pending
+    if args:
+        window.add_paths(args)
 
     # Warm up Numba JIT in background (prevents lag on first stack)
     def _warmup_jit():

@@ -66,7 +66,7 @@ hiddenimports = [
     'src.algorithms', 'src.algorithms.API', 'src.algorithms.dft_imreg',
     'src.algorithms.stacking_algorithms', 'src.algorithms.stacking_algorithms.cpu',
     'src.algorithms.stacking_algorithms.ocl',
-    'src.MainWindow', 'src.MainWindow.icons', 'src.MainWindow.style',
+    'src.MainWindow', 'src.MainWindow.icons', 'src.MainWindow.theme',
     'src.ImageLoadingHandler',
     'cv2', 'numpy', 'scipy', 'scipy.ndimage', 'scipy.ndimage.interpolation',
     'imageio', 'imageio.v2',

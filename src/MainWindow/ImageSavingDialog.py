@@ -1,255 +1,187 @@
 """
-Create dialog(s) for changing image export settings; and success/error message.
-Supports 8-bit (JPG, PNG, TIFF) and 16-bit (PNG, TIFF) output.
+Export: one dialog for format, bit depth and quality (remembered between
+exports), then the native save panel, then the file is written.
 """
 import os
+
 import cv2
 import numpy as np
 import PySide6.QtCore as qtc
 import PySide6.QtWidgets as qtw
 
+import src.settings as settings
 
-# Quality selection dialog (depends on type of exported img)
-class SelectQualityDialog(qtw.QDialog):
-    selectedQuality = None
-
-    def __init__(self, imType):
-        super().__init__()
-        self.setWindowTitle("Export image as " + imType)
-
-        self.slider = qtw.QSlider(qtc.Qt.Orientation.Horizontal)
-        self.slider.setSingleStep(1)
-        self.slider.valueChanged.connect(self.value_changed)
-
-        self.spinBox = qtw.QSpinBox()
-        self.spinBox.valueChanged.connect(self.value_changed)
-
-        horizontalLayout = qtw.QHBoxLayout()
-        if imType == "JPG":
-            horizontalLayout.addWidget(qtw.QLabel("Quality level:"))
-            self.setup_slider(0, 100, 95)
-        elif imType == "PNG":
-            horizontalLayout.addWidget(qtw.QLabel("Compression level:"))
-            self.setup_slider(0, 9, 4)
-
-        horizontalLayout.addWidget(self.slider)
-        horizontalLayout.addWidget(self.spinBox)
-
-        verticalLayout = qtw.QVBoxLayout()
-        verticalLayout.addLayout(horizontalLayout)
-
-        buttonBox = qtw.QDialogButtonBox(self)
-        buttonBox.addButton("Cancel", qtw.QDialogButtonBox.RejectRole)
-        buttonBox.addButton("Apply", qtw.QDialogButtonBox.AcceptRole)
-        verticalLayout.addWidget(buttonBox)
-        buttonBox.rejected.connect(self.close)
-        buttonBox.accepted.connect(self.apply_settings)
-
-        self.setLayout(verticalLayout)
-
-    def setup_slider(self, low, high, val):
-        """
-        Shorthand for QSlider/QSpinBox setup.
-        """
-        self.slider.setMinimum(low)
-        self.slider.setMaximum(high)
-        self.slider.setValue(val)
-
-        self.spinBox.setMinimum(low)
-        self.spinBox.setMaximum(high)
-        self.spinBox.setValue(val)
-
-    def apply_settings(self):
-        """
-        Apply current settings and close dialog.
-        """
-        self.selectedQuality = self.slider.value()
-        self.close()
-
-    def value_changed(self, newValue):
-        """
-        Value of slider or spinbox changed; update them both.
-        """
-        if self.slider.value() != newValue:
-            self.slider.setValue(newValue)
-        elif self.spinBox.value() != newValue:
-            self.spinBox.setValue(newValue)
-
-
-class SelectBitDepthDialog(qtw.QDialog):
-    """Dialog for selecting bit depth when saving TIFF or PNG."""
-    selectedBitDepth = None  # 8 or 16
-
-    def __init__(self, imType):
-        super().__init__()
-        self.setWindowTitle(f"Export image as {imType}")
-
-        verticalLayout = qtw.QVBoxLayout()
-
-        label = qtw.QLabel("Select bit depth:")
-        verticalLayout.addWidget(label)
-
-        self.radio_8bit = qtw.QRadioButton("8-bit (standard, smaller file)")
-        self.radio_16bit = qtw.QRadioButton("16-bit (higher precision, larger file)")
-        self.radio_8bit.setChecked(True)
-
-        verticalLayout.addWidget(self.radio_8bit)
-        verticalLayout.addWidget(self.radio_16bit)
-
-        # Add compression for PNG
-        self.compression_layout = None
-        self.slider = None
-        self.spinBox = None
-        if imType == "PNG":
-            self.compression_layout = qtw.QHBoxLayout()
-            self.compression_layout.addWidget(qtw.QLabel("Compression level:"))
-            self.slider = qtw.QSlider(qtc.Qt.Orientation.Horizontal)
-            self.slider.setMinimum(0)
-            self.slider.setMaximum(9)
-            self.slider.setValue(4)
-            self.slider.setSingleStep(1)
-            self.spinBox = qtw.QSpinBox()
-            self.spinBox.setMinimum(0)
-            self.spinBox.setMaximum(9)
-            self.spinBox.setValue(4)
-            self.slider.valueChanged.connect(
-                lambda v: self.spinBox.setValue(v) if self.spinBox.value() != v else None
-            )
-            self.spinBox.valueChanged.connect(
-                lambda v: self.slider.setValue(v) if self.slider.value() != v else None
-            )
-            self.compression_layout.addWidget(self.slider)
-            self.compression_layout.addWidget(self.spinBox)
-            verticalLayout.addLayout(self.compression_layout)
-
-        buttonBox = qtw.QDialogButtonBox(self)
-        buttonBox.addButton("Cancel", qtw.QDialogButtonBox.RejectRole)
-        buttonBox.addButton("Apply", qtw.QDialogButtonBox.AcceptRole)
-        verticalLayout.addWidget(buttonBox)
-        buttonBox.rejected.connect(self.close)
-        buttonBox.accepted.connect(self.apply_settings)
-
-        self.setLayout(verticalLayout)
-
-    def apply_settings(self):
-        self.selectedBitDepth = 16 if self.radio_16bit.isChecked() else 8
-        self.close()
-
-
-# Result dialog on image saved
-class ResultDialog(qtw.QMessageBox):
-    def __init__(self, imgPath=None, errorStackTrace=None):
-        super().__init__()
-
-        if imgPath is None:
-            # Error msg
-            self.setStandardButtons(qtw.QMessageBox.Ok)
-            self.setIcon(qtw.QMessageBox.Critical)
-            self.setWindowTitle("Export failed")
-            self.setText("Failed to export!\n")
-            if errorStackTrace is not None:
-                self.setInformativeText("Error stack trace:")
-                self.setDetailedText(str(errorStackTrace))
-
-        elif imgPath is not None and errorStackTrace is None:
-            # Success msg
-            self.setStandardButtons(qtw.QMessageBox.Ok)
-            self.setIcon(qtw.QMessageBox.Information)
-            self.setWindowTitle("Export success")
-            self.setText(
-                "Successfully exported output image.\n"
-                + "File size is: "
-                + str(round(os.path.getsize(imgPath) / 1024 / 1024, 2))
-                + "MB.\n"
-            )
-            self.setInformativeText("File location:\n" + imgPath)
+FORMATS = [
+    # key, label, extension, bit depths
+    ("JPG", "JPEG", "jpg", (8,)),
+    ("PNG", "PNG", "png", (8, 16)),
+    ("TIFF", "TIFF", "tif", (8, 16)),
+    ("EXR", "OpenEXR", "exr", (32,)),
+]
+_BY_KEY = {f[0]: f for f in FORMATS}
 
 
 def _convert_to_uint8(imageArray):
-    """Convert float32 image (0-255 range) to uint8."""
-    out = np.clip(imageArray, 0, 255)
-    return np.around(out).astype(np.uint8)
+    """float32 image (0-255) to uint8."""
+    return np.around(np.clip(imageArray, 0, 255)).astype(np.uint8)
 
 
 def _convert_to_uint16(imageArray):
-    """Convert float32 image (0-255 range) to uint16 (0-65535 range).
-
-    Scales from 0-255 float to 0-65535 uint16, preserving the extra
-    precision from the float32 stacking pipeline. This gives 256x more
-    tonal gradations than 8-bit output.
-    """
-    out = np.clip(imageArray, 0, 255)
-    # Scale 0-255 -> 0-65535 (multiply by 257 = 65535/255)
-    out = out * 257.0
-    return np.around(out).astype(np.uint16)
+    """float32 image (0-255) to uint16 (0-65535), keeping the extra
+    precision of the float pipeline (256x more tonal steps than 8-bit)."""
+    return np.around(np.clip(imageArray, 0, 255) * 257.0).astype(np.uint16)
 
 
-def createDialog(imageArray, imType, chosenPath):
-    # Something went wrong
-    if imType is None:
-        return
+def encode(image, fmt, bit_depth=8, quality=95, compression=4):
+    """(array to write, cv2.imwrite params) for an export."""
+    if fmt == "EXR":
+        return np.clip(image, 0, 255).astype(np.float32) / 255.0, []
+    out = _convert_to_uint16(image) if bit_depth == 16 else _convert_to_uint8(image)
+    if fmt == "JPG":
+        return out, [cv2.IMWRITE_JPEG_QUALITY, int(quality)]
+    if fmt == "PNG":
+        return out, [cv2.IMWRITE_PNG_COMPRESSION, int(compression)]
+    return out, []
 
-    imgPath = None
-    errorStackTrace = None
-    bit_depth = 8
-    compressionFactor = None
 
-    if imType == "JPG":
-        # JPG: quality dialog only (always 8-bit)
-        qualityDialog = SelectQualityDialog(imType)
-        qualityDialog.exec()
-        if qualityDialog.selectedQuality is not None:
-            compressionFactor = qualityDialog.selectedQuality
-        else:
-            return
+def write_image(path, image, fmt, bit_depth=8, quality=95, compression=4):
+    """Write the export; raises on failure."""
+    data, params = encode(image, fmt, bit_depth, quality, compression)
+    ok, buf = cv2.imencode("." + _BY_KEY[fmt][2], data, params)
+    if not ok:
+        raise IOError(f"Could not encode the image as {fmt}")
+    # imencode + write handles non-ASCII paths on Windows, which imwrite doesn't
+    with open(path, "wb") as f:
+        f.write(buf.tobytes())
 
-    elif imType == "PNG":
-        # PNG: bit depth + compression dialog
-        depthDialog = SelectBitDepthDialog("PNG")
-        depthDialog.exec()
-        if depthDialog.selectedBitDepth is not None:
-            bit_depth = depthDialog.selectedBitDepth
-            if depthDialog.slider is not None:
-                compressionFactor = depthDialog.slider.value()
-            else:
-                compressionFactor = 4
-        else:
-            return
 
-    elif imType == "TIFF":
-        # TIFF: bit depth dialog only (no compression needed)
-        depthDialog = SelectBitDepthDialog("TIFF")
-        depthDialog.exec()
-        if depthDialog.selectedBitDepth is not None:
-            bit_depth = depthDialog.selectedBitDepth
-        else:
-            return
+class ExportDialog(qtw.QDialog):
+    def __init__(self, image_shape, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Export Image")
+        self.setMinimumWidth(400)
+        qs = settings.globalVars["QSettings"]
 
-    elif imType == "EXR":
-        # EXR: always 32-bit float, no dialog needed
-        bit_depth = 32
+        layout = qtw.QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 16)
+        layout.setSpacing(14)
 
-    # Convert to target bit depth
-    if bit_depth == 32:
-        # EXR: keep as float32, scale to 0-1 range (EXR convention)
-        imageOut = np.clip(imageArray, 0, 255).astype(np.float32) / 255.0
-    elif bit_depth == 16:
-        imageOut = _convert_to_uint16(imageArray)
-    else:
-        imageOut = _convert_to_uint8(imageArray)
+        h, w = image_shape[:2]
+        info = qtw.QLabel(f"{w} × {h} px · {w * h / 1e6:.1f} MP")
+        info.setObjectName("Secondary")
+        layout.addWidget(info)
 
-    # Build compression/quality params
-    compression_list = None
-    if imType == "JPG":
-        compression_list = [cv2.IMWRITE_JPEG_QUALITY, compressionFactor]
-    elif imType == "PNG":
-        compression_list = [cv2.IMWRITE_PNG_COMPRESSION, compressionFactor or 4]
+        form = qtw.QFormLayout()
+        form.setHorizontalSpacing(14)
+        form.setVerticalSpacing(10)
+        form.setLabelAlignment(qtc.Qt.AlignRight | qtc.Qt.AlignVCenter)
 
-    # Try saving image to disk
-    try:
-        cv2.imwrite(chosenPath, imageOut, compression_list)
-        imgPath = chosenPath
-    except Exception as e:
-        errorStackTrace = e
+        self.format_combo = qtw.QComboBox()
+        for key, label, ext, _d in FORMATS:
+            self.format_combo.addItem(f"{label} (.{ext})", key)
+        saved = str(qs.value("export/format") or "JPG")
+        self.format_combo.setCurrentIndex(max(0, self.format_combo.findData(saved)))
+        form.addRow("Format", self.format_combo)
 
-    ResultDialog(imgPath, errorStackTrace).exec()
+        self.depth_combo = qtw.QComboBox()
+        form.addRow("Bit depth", self.depth_combo)
+        self.depth_label = form.labelForField(self.depth_combo)
+
+        self.quality = qtw.QSlider(qtc.Qt.Horizontal)
+        self.quality.setRange(50, 100)
+        self.quality.setValue(int(qs.value("export/jpeg_quality") or 95))
+        self.quality_value = qtw.QLabel()
+        self.quality_value.setMinimumWidth(32)
+        self.quality.valueChanged.connect(lambda v: self.quality_value.setText(str(v)))
+        self.quality_value.setText(str(self.quality.value()))
+        qrow = qtw.QWidget()
+        ql = qtw.QHBoxLayout(qrow)
+        ql.setContentsMargins(0, 0, 0, 0)
+        ql.addWidget(self.quality)
+        ql.addWidget(self.quality_value)
+        form.addRow("Quality", qrow)
+        self.quality_row = qrow
+        self.quality_label = form.labelForField(qrow)
+
+        self.compression = qtw.QComboBox()
+        for level, title in ((1, "Fast (larger file)"), (4, "Balanced"), (9, "Smallest (slow)")):
+            self.compression.addItem(title, level)
+        self.compression.setCurrentIndex(max(0, self.compression.findData(int(qs.value("export/png_compression") or 4))))
+        form.addRow("Compression", self.compression)
+        self.compression_label = form.labelForField(self.compression)
+
+        layout.addLayout(form)
+        self.note = qtw.QLabel()
+        self.note.setObjectName("Hint")
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
+
+        buttons = qtw.QDialogButtonBox()
+        self.ok = buttons.addButton("Export…", qtw.QDialogButtonBox.AcceptRole)
+        self.ok.setObjectName("PrimaryButton")
+        self.ok.setDefault(True)
+        buttons.addButton(qtw.QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.format_combo.currentIndexChanged.connect(self._update)
+        self._update()
+
+    def _update(self):
+        qs = settings.globalVars["QSettings"]
+        key = self.format_combo.currentData()
+        depths = _BY_KEY[key][3]
+        self.depth_combo.blockSignals(True)
+        self.depth_combo.clear()
+        for d in depths:
+            self.depth_combo.addItem({8: "8-bit", 16: "16-bit", 32: "32-bit float"}[d], d)
+        saved = int(qs.value(f"export/{key.lower()}_depth") or (16 if 16 in depths else depths[0]))
+        self.depth_combo.setCurrentIndex(max(0, self.depth_combo.findData(saved)))
+        self.depth_combo.blockSignals(False)
+        multi = len(depths) > 1
+        self.depth_combo.setEnabled(multi)
+        for widget, on in ((self.quality_row, key == "JPG"), (self.quality_label, key == "JPG"),
+                           (self.compression, key == "PNG"), (self.compression_label, key == "PNG")):
+            widget.setVisible(on)
+        self.note.setText({
+            "JPG": "Best for sharing. 8-bit, lossy.",
+            "PNG": "Lossless. 16-bit keeps the full precision of the stack.",
+            "TIFF": "Lossless, for editing in Lightroom, Photoshop or Capture One.",
+            "EXR": "32-bit float, linear 0–1 range, for compositing.",
+        }[key])
+        self.adjustSize()
+
+    def options(self):
+        key = self.format_combo.currentData()
+        return {
+            "fmt": key,
+            "ext": _BY_KEY[key][2],
+            "label": _BY_KEY[key][1],
+            "bit_depth": self.depth_combo.currentData(),
+            "quality": self.quality.value(),
+            "compression": self.compression.currentData(),
+        }
+
+    def accept(self):
+        qs = settings.globalVars["QSettings"]
+        o = self.options()
+        qs.setValue("export/format", o["fmt"])
+        qs.setValue(f"export/{o['fmt'].lower()}_depth", o["bit_depth"])
+        qs.setValue("export/jpeg_quality", o["quality"])
+        qs.setValue("export/png_compression", o["compression"])
+        super().accept()
+
+
+def ask_export_path(parent, options, directory, base_name):
+    """Native save panel; returns the chosen path with the right extension."""
+    ext = options["ext"]
+    start = os.path.join(directory, f"{base_name}.{ext}")
+    path, _ = qtw.QFileDialog.getSaveFileName(
+        parent, "Export Image", start, f"{options['label']} (*.{ext})")
+    if not path:
+        return None
+    allowed = {f".{ext}"} | ({".jpeg"} if ext == "jpg" else {".tiff"} if ext == "tif" else set())
+    if os.path.splitext(path)[1].lower() not in allowed:
+        path += f".{ext}"
+    return os.path.abspath(path)
