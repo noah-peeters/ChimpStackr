@@ -2,7 +2,9 @@
 Test the algorithm API: pyramid generation, stacking, alignment, fusion, and configuration.
 No PySide6/Qt dependency required.
 """
-import os, sys, glob
+import os
+import sys
+import glob
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
@@ -227,7 +229,6 @@ class TestLaplacianPyramidAPI:
 
     def test_cancel_stops_processing(self, test_image_paths):
         """Cancelling during processing should leave output_image as None."""
-        import threading
 
         config = AlgorithmConfig(fusion_kernel_size=6, pyramid_num_levels=4)
         lp = LaplacianPyramid(config=config)
@@ -853,5 +854,8 @@ class TestFeatureMatchPlausibility:
         monkeypatch.setattr(cv2, "estimateAffinePartial2D",
                             lambda *a, **k: (degenerate, np.ones((50, 1), np.uint8)))
         out = Algorithm().align_image_pair(base, moved, alignment_mode="similarity")
-        err = lambda a, b: float(np.mean(np.abs(a[30:-30, 30:-30] - b[30:-30, 30:-30])))
+
+        def err(a, b):
+            return float(np.mean(np.abs(a[30:-30, 30:-30] - b[30:-30, 30:-30])))
+
         assert err(base, out) < 0.3 * err(base, moved)

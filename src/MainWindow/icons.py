@@ -43,14 +43,14 @@ def icon_play():
 
 
 def icon_pause():
-    return _svg_to_icon(f'''<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+    return _svg_to_icon('''<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
         <rect x="6" y="5" width="2.5" height="10" rx="0.5" fill="#ffb84d"/>
         <rect x="11.5" y="5" width="2.5" height="10" rx="0.5" fill="#ffb84d"/>
     </svg>''')
 
 
 def icon_stop():
-    return _svg_to_icon(f'''<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+    return _svg_to_icon('''<svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
         <rect x="5.5" y="5.5" width="9" height="9" rx="1.5" stroke="#ff6961" stroke-width="1.5" fill="#ff6961" fill-opacity="0.2"/>
     </svg>''')
 

@@ -1,7 +1,6 @@
 """
     Sets up QActions, toolbar, and menus for the main window.
 """
-import os
 import PySide6.QtGui as qtg
 import PySide6.QtWidgets as qtw
 import PySide6.QtCore as qtc
@@ -20,7 +19,9 @@ class AboutAppWidget(qtw.QMessageBox):
         self.setIcon(qtw.QMessageBox.Information)
         self.setWindowTitle("About")
 
-        import PySide6, src, platform
+        import PySide6
+        import src
+        import platform
         self.setText(
             f"ChimpStackr {src.__version__}\n"
             f"Qt {PySide6.__version__}\n"

@@ -3,7 +3,7 @@ Application configuration using a dataclass instead of global dict.
 Provides structured access to settings and supported formats.
 """
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List
 
 
 # Opencv imread/imwrite supported formats

@@ -279,7 +279,8 @@ class LaplacianPyramid:
 
         def _align_and_pyramid(path):
             """Load, align, and build pyramid in one worker call."""
-            aligned = self._load_and_align(ref_image, path)
+            # ref_image is only deleted after the executor below has shut down
+            aligned = self._load_and_align(ref_image, path)  # noqa: F821
             pyr = self.Algorithm.generate_laplacian_pyramid(
                 aligned, self.pyramid_num_levels
             )

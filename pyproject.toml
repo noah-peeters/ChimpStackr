@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=61.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "chimpstackr"
@@ -23,6 +23,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.6",
+    "pre-commit>=3.0",
     "pyinstaller>=6.0",
 ]
 macos = [
@@ -36,7 +39,7 @@ chimpstackr-cli = "src.cli:main"
 chimpstackr = "src.run:main"
 
 [tool.setuptools.dynamic]
-version = {attr = "src._version.__version__"}
+version = {attr = "src._version.__pep440_version__"}
 
 [tool.setuptools.packages.find]
 include = ["src*"]
@@ -46,3 +49,18 @@ include = ["src*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["src/MainWindow/*", "src/run.py"]  # GUI is not covered by the headless test suite
+
+[tool.ruff]
+target-version = "py39"
+
+[tool.ruff.lint]
+# Ruff defaults (pyflakes + core pycodestyle errors) plus bugbear for likely bugs
+select = ["E4", "E7", "E9", "F", "B"]
+ignore = [
+    "E402",  # imports after sys.path / env setup (OPENCV_IO_ENABLE_OPENEXR, cv2.setNumThreads) are intentional
+    "E741",  # single-letter math names (l, I) in the registration code
+]

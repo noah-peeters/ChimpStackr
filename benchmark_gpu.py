@@ -26,7 +26,7 @@ def fmt_s(seconds):
 def benchmark():
     image_dir = r"C:\Users\noahe\Pictures\MierenkoninginHoofd"
     paths = sorted(glob.glob(os.path.join(image_dir, "*.JPG")))[:10]
-    print(f"=== GPU Pipeline Benchmark ===")
+    print("=== GPU Pipeline Benchmark ===")
     print(f"Images: {len(paths)} files from {os.path.basename(image_dir)}")
 
     img0 = cv2.imread(paths[0]).astype(np.float32)
@@ -56,7 +56,7 @@ def benchmark():
     pyramids = [GPU.generate_laplacian_pyramid(img, num_levels) for img in images]
     pyr_time = time.perf_counter() - t0
     print(f"  {len(images)} pyramids: {fmt_s(pyr_time)}  ({fmt_ms(pyr_time/len(images))} each)")
-    print(f"  Levels: ", end="")
+    print("  Levels: ", end="")
     for i, level in enumerate(pyramids[0]):
         print(f"L{i}={level.shape[1]}x{level.shape[0]}", end="  ")
     print()
@@ -113,7 +113,7 @@ def benchmark():
 
         # New: np.where
         t0 = time.perf_counter()
-        fused_new = GPU.fuse_levels_fast(pyr1[level_idx], pyr2[level_idx], fm)
+        GPU.fuse_levels_fast(pyr1[level_idx], pyr2[level_idx], fm)
         new_time = time.perf_counter() - t0
 
         speedup = old_time / new_time if new_time > 0 else float('inf')
@@ -142,7 +142,7 @@ def benchmark():
 
     # New: vectorized
     t0 = time.perf_counter()
-    fused_new = GPU.fuse_pyramid_pair_gpu(pyr1, pyr2, kernel_size)
+    GPU.fuse_pyramid_pair_gpu(pyr1, pyr2, kernel_size)
     new_fuse_time = time.perf_counter() - t0
     print(f"  New (cv2.blur+np.where):  {fmt_s(new_fuse_time)}")
     print(f"  Speedup:                  {old_fuse_time / new_fuse_time:.1f}x")

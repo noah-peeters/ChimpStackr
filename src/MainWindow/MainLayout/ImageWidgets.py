@@ -9,7 +9,7 @@ import PySide6.QtWidgets as qtw
 import PySide6.QtGui as qtg
 
 import src.settings as settings
-from src.MainWindow.style import ACCENT, ACCENT_DIM, TEXT_MUTED, BG_SIDEBAR
+from src.MainWindow.style import ACCENT, ACCENT_DIM, TEXT_MUTED
 
 
 # Background thumbnail loader
@@ -155,7 +155,7 @@ class LoadedImagesWidget(qtw.QWidget):
             image_paths = []
             for path in raw_paths:
                 if os.path.isdir(path):
-                    for root, dirs, files in os.walk(path):
+                    for root, _dirs, files in os.walk(path):
                         for f in files:
                             image_paths.append(os.path.abspath(os.path.join(root, f)))
                 elif os.path.isfile(path):

@@ -157,6 +157,7 @@ class Window(qtw.QMainWindow):
         if directory:
             from src.MainWindow.ImageSavingDialog import _convert_to_uint8, _convert_to_uint16
             import cv2
+            import numpy as np
             image_8 = _convert_to_uint8(self.LaplacianAlgorithm.output_image)
             image_16 = _convert_to_uint16(self.LaplacianAlgorithm.output_image)
             base = os.path.join(directory, "stacked_output")
@@ -237,7 +238,7 @@ class Window(qtw.QMainWindow):
             self.statusBar().showMessage("Cannot load images while stacking", self.statusbar_msg_display_time)
             return
         if len(new_loaded_images) > 0:
-            if self.clear_all_images() == False:
+            if self.clear_all_images() is False:
                 return
 
             # Filter out hidden/system files silently
