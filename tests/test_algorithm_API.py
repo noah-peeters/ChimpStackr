@@ -814,3 +814,44 @@ class TestDFTAlignment:
         tvec = result['tvec']
         assert abs(tvec[0]) < 1.0, f"Y shift {tvec[0]} should be ~0"
         assert abs(tvec[1]) < 1.0, f"X shift {tvec[1]} should be ~0"
+
+
+# -- Feature-match plausibility --
+
+class TestFeatureMatchPlausibility:
+    def test_rejects_degenerate_transforms(self):
+        shape = (4000, 6000)
+        # Real failure seen on a blurry frame: near-zero scale, huge shift
+        assert not Algorithm._is_plausible_warp(
+            np.float32([[1e-4, 0, 2280], [0, 1e-4, 2017]]), shape)
+        assert not Algorithm._is_plausible_warp(
+            cv2.getRotationMatrix2D((3000, 2000), 0, 2.0), shape)   # 2x zoom
+        assert not Algorithm._is_plausible_warp(
+            cv2.getRotationMatrix2D((3000, 2000), 40, 1.0), shape)  # 40 deg
+        assert not Algorithm._is_plausible_warp(
+            np.float32([[1, 0.6, 0], [0, 1, 0]]), shape)            # shear
+        assert not Algorithm._is_plausible_warp(
+            np.float32([[1, 0, 2000], [0, 1, 0]]), shape)           # 1/3 width shift
+
+    def test_accepts_realistic_transforms(self):
+        shape = (4000, 6000)
+        assert Algorithm._is_plausible_warp(np.float32([[1, 0, 0], [0, 1, 0]]), shape)
+        # strong focus breathing (15%), slight rotation, rail drift
+        M = cv2.getRotationMatrix2D((3000, 2000), 0.5, 1.15)
+        M[:, 2] += (-90, 45)
+        assert Algorithm._is_plausible_warp(M, shape)
+
+    def test_similarity_falls_back_when_match_is_degenerate(self, monkeypatch):
+        """A garbage feature match must not be applied: similarity falls back
+        to ECC and still aligns the frame."""
+        rs = np.random.RandomState(1)
+        base = cv2.GaussianBlur((rs.rand(300, 400) * 255).astype(np.float32), (0, 0), 3)
+        base = cv2.cvtColor(cv2.normalize(base, None, 0, 255, cv2.NORM_MINMAX), cv2.COLOR_GRAY2BGR)
+        moved = cv2.warpAffine(base, np.float32([[1, 0, 6], [0, 1, -4]]), (400, 300),
+                               borderMode=cv2.BORDER_REFLECT)
+        degenerate = np.float64([[1e-4, 0, 2280], [0, 1e-4, 2017]])
+        monkeypatch.setattr(cv2, "estimateAffinePartial2D",
+                            lambda *a, **k: (degenerate, np.ones((50, 1), np.uint8)))
+        out = Algorithm().align_image_pair(base, moved, alignment_mode="similarity")
+        err = lambda a, b: float(np.mean(np.abs(a[30:-30, 30:-30] - b[30:-30, 30:-30])))
+        assert err(base, out) < 0.3 * err(base, moved)
