@@ -7,6 +7,9 @@ import math
 import threading
 import logging
 import os
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 
@@ -31,6 +34,36 @@ try:
     HAS_GPU = True
 except Exception:
     HAS_GPU = False
+
+
+def _available_memory_bytes():
+    """Available physical memory in bytes, or None if it can't be determined."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                return int(stat.ullAvailPhys)
+            return None
+        if os.path.exists("/proc/meminfo"):
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) * 1024
+        # macOS / other POSIX: free pages only (underestimates, which is safe)
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_AVPHYS_PAGES")
+    except (OSError, ValueError, AttributeError):
+        return None
 
 
 class Algorithm:
@@ -242,6 +275,10 @@ class Algorithm:
 
         if ref_im is None or im_to_align is None:
             return im_to_align
+
+        # Handle different image dimensions (#29) before estimating, so the
+        # transform is applied to the same image it was estimated on
+        im_to_align = self._match_dimensions(ref_im, im_to_align)
 
         # Legacy compat: use_rst maps to euclidean if no explicit mode
         if use_rst and alignment_mode == "translation":
@@ -812,6 +849,22 @@ class Algorithm:
     # breathing lenses; instead we estimate a small transform per consecutive
     # pair and compose the chain onto the reference frame.
 
+    # Measured peak working memory per pair-estimation worker, in bytes per
+    # image pixel (24MP stack: ~0.96 GB/worker default, ~1.68 GB/worker max)
+    _PAIR_BYTES_PER_PIXEL = {"max": 70, "default": 40}
+
+    def _sequential_worker_count(self, ref_template, precision, n_pairs):
+        """Parallel pair-estimation workers: one per physical core (OpenCV
+        runs single-threaded inside each), capped so the workers' combined
+        working set stays within 70% of the currently available RAM."""
+        workers = min(8, n_pairs, max(1, (os.cpu_count() or 4) // 2))
+        avail = _available_memory_bytes()
+        if avail is not None:
+            h, w = ref_template.shape[:2]
+            per_worker = h * w * self._PAIR_BYTES_PER_PIXEL.get(precision, 70)
+            workers = min(workers, max(1, int(avail * 0.7 // per_worker)))
+        return max(1, workers)
+
     def estimate_sequential_transforms(self, paths, ref_index=0,
                                        alignment_mode="similarity",
                                        scale_factor=10,
@@ -846,11 +899,14 @@ class Algorithm:
             log is a list of per-frame dicts (step_scale, cumulative scale,
             method, fallback count). (None, None) if cancelled.
         """
-        import time
-        from concurrent.futures import ThreadPoolExecutor
-
         n = len(paths)
         if n < 2:
+            return [np.eye(2, 3, dtype=np.float32) for _ in range(n)], []
+
+        # Every frame is matched to frame 0's dimensions (#29) so all pair
+        # transforms live in one coordinate system and the chain composes
+        ref_template = self.load_image(paths[0])
+        if ref_template is None:
             return [np.eye(2, 3, dtype=np.float32) for _ in range(n)], []
 
         r = max(0, min(ref_index, n - 1))
@@ -866,11 +922,15 @@ class Algorithm:
             t0 = time.time()
             meta = {"method": "load_error", "scale": 1.0, "angle": 0.0, "success": 0.0}
             M = None
+            if self.is_cancelled:
+                return i, M, meta, 0.0
             try:
                 ref = self.load_image(paths[i])
                 src = self.load_image(paths[i + 1])
                 if ref is None or src is None:
                     raise ValueError("Image failed to load")
+                ref = self._match_dimensions(ref_template, ref)
+                src = self._match_dimensions(ref_template, src)
                 # Maximum precision for the breathing chain: float32 ECC
                 # + Lanczos pre-warp + 4096px cascade per pair (or the fast
                 # default estimators when the user opts for a quick stack)
@@ -903,7 +963,7 @@ class Algorithm:
         # ── Phase 1: estimate all pair deltas in parallel ──
         # Each pair delta is independent, so this stays parallel even though
         # the chain composition below is sequential.
-        n_workers = min(4, max(1, (os.cpu_count() or 4) // 4))
+        n_workers = self._sequential_worker_count(ref_template, precision, n - 1)
         deltas = [None] * (n - 1)   # pair i-1 ↔ i: forward map frame i-1 coords → frame i coords
         metas = [None] * (n - 1)
         total = n - 1
@@ -922,7 +982,7 @@ class Algorithm:
             for i in range(n - 1):
                 self.wait_if_paused()
                 if self.is_cancelled:
-                    logger.info("Sequential alignment cancelled at pair %d" % i)
+                    logger.info(f"Sequential alignment cancelled at pair {i}")
                     return None, None
                 idx, M, meta, _dt = futs[i].result()
                 deltas[idx] = M
@@ -930,8 +990,11 @@ class Algorithm:
                 done += 1
                 if emit is not None:
                     emit(done, total, time.time() - t_last)
+                    t_last = time.time()
         finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+            # Wait for pairs already running (pending ones are dropped) so a
+            # cancelled stack doesn't leave workers holding full-size images
+            executor.shutdown(wait=True, cancel_futures=True)
             cv2.setNumThreads(prev_cv_threads)
 
         # ── Phase 2: compose the chain onto the reference frame (cheap) ──

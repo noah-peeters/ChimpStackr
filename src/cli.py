@@ -106,11 +106,10 @@ def parse_args():
              "as translation-only",
     )
     parser.add_argument(
-        "--fast-breathing",
+        "--max-precision",
         action="store_true",
-        help="Breathing/sequential mode: use fast estimation instead of the "
-             "default maximum-precision path (float32 full-res ECC + Lanczos). "
-             "For quick stacks on easy subjects",
+        help="Breathing/sequential mode: refine each frame pair with float32 "
+             "full-resolution ECC (roughly 5x slower). Off by default",
     )
     parser.add_argument(
         "--rotation-scale",
@@ -217,6 +216,10 @@ def main():
     if len(input_paths) < 2:
         print(f"Error: Need at least 2 images, got {len(input_paths)}", file=sys.stderr)
         sys.exit(1)
+    if not 0 < args.max_scale_step < 1:
+        print(f"Error: --max-scale-step must be between 0 and 1, got {args.max_scale_step}",
+              file=sys.stderr)
+        sys.exit(1)
 
     print(f"ChimpStackr CLI - Focus Stacking")
     print(f"  Input: {len(input_paths)} images")
@@ -262,7 +265,7 @@ def main():
         align_rotation_scale=alignment_mode in ("euclidean", "similarity", "affine"),
         alignment_mode=alignment_mode,
         breathing_max_scale_step=args.max_scale_step,
-        breathing_high_precision=not args.fast_breathing,
+        breathing_high_precision=args.max_precision,
     )
 
     algo = LaplacianPyramid(config=config)

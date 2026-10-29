@@ -92,7 +92,8 @@ class SettingsPanel(qtw.QWidget):
             "contrast_threshold": 0.0,
             "feather_radius": 2,
             "depthmap_smoothing": 5,
-            "breathing_high_precision": 1,
+            "breathing_max_scale_step": 5,
+            "breathing_high_precision": 0,
         },
     }
 
@@ -298,7 +299,7 @@ class SettingsPanel(qtw.QWidget):
         self.ref_combo.currentTextChanged.connect(lambda v: self.change_setting("algorithm/alignment_ref", v))
 
         self.breathing_spin = qtw.QSpinBox()
-        self.breathing_spin.setRange(1, 200)
+        self.breathing_spin.setRange(1, 50)
         saved_breath = float(settings.globalVars["QSettings"].value("algorithm/breathing_max_scale_step") or 5.0)
         self.breathing_spin.setValue(int(round(saved_breath)))
         self.breathing_spin.valueChanged.connect(
@@ -337,7 +338,7 @@ class SettingsPanel(qtw.QWidget):
 
         self.precision_checkbox = qtw.QCheckBox()
         saved_hp = settings.globalVars["QSettings"].value("algorithm/breathing_high_precision")
-        self.precision_checkbox.setChecked(True if saved_hp is None else bool(int(saved_hp)))
+        self.precision_checkbox.setChecked(False if saved_hp is None else bool(int(saved_hp)))
         self.precision_checkbox.toggled.connect(self._on_precision_toggled)
         precision_control = qtw.QWidget()
         precision_control.setStyleSheet("background: transparent;")
@@ -347,18 +348,18 @@ class SettingsPanel(qtw.QWidget):
         hp_layout.addWidget(self.precision_checkbox)
         align_adv_section.add_row("Max precision (slow)", precision_control,
             "Only for Breathing mode / Reference=previous.\n"
-            "Checked: float32 full-resolution ECC scale refinement +\n"
-            "Lanczos resampling — maximum sharpness, ~3-8x slower.\n"
-            "Unchecked: fast estimation for quick stacks on easy subjects.\n"
+            "Checked: float32 full-resolution ECC scale refinement\n"
+            "per frame pair — roughly 5x slower overall.\n"
+            "Unchecked (default): fast estimation; output is equally\n"
+            "sharp on most stacks.\n"
             "Greyed out when sequential alignment is not active.")
 
         # Slowness warning, shown only while the sequential (max-precision)
         # engine is active: Breathing mode, or Reference=previous
         self.breathing_warning = qtw.QLabel(
-            "⚠ Slow processing: sequential alignment runs full-resolution "
-            "float32 refinement on every frame pair. Expect roughly 3–8× "
-            "longer alignment than Similarity — maximum precision in "
-            "exchange for the wait."
+            "⚠ Slow processing: max precision runs full-resolution float32 "
+            "refinement on every frame pair. Expect roughly 5× longer "
+            "stacking than with it off."
         )
         self.breathing_warning.setWordWrap(True)
         self.breathing_warning.setStyleSheet(
@@ -466,6 +467,7 @@ class SettingsPanel(qtw.QWidget):
             or self.ref_combo.currentText() == "previous"
         )
         self.precision_checkbox.setEnabled(sequential)
+        self.breathing_spin.setEnabled(sequential)
         self.breathing_warning.setVisible(
             sequential and self.precision_checkbox.isChecked())
 
@@ -516,7 +518,7 @@ class SettingsPanel(qtw.QWidget):
             depthmap_smoothing=int(qs.value("algorithm/depthmap_smoothing") or 5),
             breathing_max_scale_step=float(qs.value("algorithm/breathing_max_scale_step") or 5.0) / 100.0,
             breathing_high_precision=bool(int(
-                1 if qs.value("algorithm/breathing_high_precision") is None
+                0 if qs.value("algorithm/breathing_high_precision") is None
                 else qs.value("algorithm/breathing_high_precision"))),
         )
 

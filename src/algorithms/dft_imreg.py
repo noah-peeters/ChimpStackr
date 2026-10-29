@@ -961,10 +961,12 @@ class im_reg:
 
         y_shift, x_shift = translation_result["tvec"] * scale_factor
 
+        # tvec is the shift that moves im1 onto im0, so the forward map
+        # (im0 coords → im1 coords) is its negation
         translation_matrix = np.float64(
             [
-                [1, 0, x_shift],
-                [0, 1, y_shift],
+                [1, 0, -x_shift],
+                [0, 1, -y_shift],
             ]
         )
         self.last_shift = (float(x_shift), float(y_shift))
@@ -986,7 +988,8 @@ class im_reg:
 
         height, width = im1.shape[:2]
         # warpAffine on float32 input returns float32 — no astype needed
-        result = cv2.warpAffine(im1, translation_matrix, (width, height))
+        result = cv2.warpAffine(im1, translation_matrix, (width, height),
+                                flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
 
         return result
 

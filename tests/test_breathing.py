@@ -3,13 +3,12 @@ Tests for sequential (chained) alignment — Helicon-style focus breathing compe
 
 No PySide6/Qt dependency required.
 """
-import os, sys
+import os, sys, subprocess
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
 sys.path.insert(0, parentdir)
 
-import glob
 import numpy as np
 import cv2
 import pytest
@@ -20,7 +19,6 @@ settings.init()
 from src.algorithms import Algorithm
 from src.algorithms.API import LaplacianPyramid
 from src.config import AlgorithmConfig
-from src.ImageLoadingHandler import ImageLoadingHandler
 
 
 # -- Fixtures --
@@ -367,12 +365,11 @@ class TestSequentialPipeline:
         assert algo.output_image is not None
 
     def test_fast_sequential_mode(self, tmp_path):
-        """Opt-out of max precision: fast estimation, no _hp methods, valid stack."""
+        """Default (max precision off): fast estimation, no _hp methods, valid stack."""
         paths = self._write_series(tmp_path)
         cfg = AlgorithmConfig(
             stacking_method="laplacian",
             alignment_mode="breathing",
-            breathing_high_precision=False,
             fusion_kernel_size=3,
             pyramid_num_levels=4,
             alignment_scale_factor=5,
@@ -419,3 +416,129 @@ class TestSequentialPipeline:
         algo1.align_and_stack_images()
         assert algo1.output_image is not None
         assert algo1.sequential_log is None  # not sequential
+
+    def test_max_precision_opt_in(self, tmp_path):
+        """Max precision runs the _hp estimators only when explicitly enabled."""
+        paths = self._write_series(tmp_path, n=3)
+        cfg = AlgorithmConfig(
+            stacking_method="laplacian",
+            alignment_mode="breathing",
+            breathing_high_precision=True,
+            fusion_kernel_size=3,
+            pyramid_num_levels=4,
+        )
+        algo = LaplacianPyramid(config=cfg)
+        algo.update_image_paths(paths)
+        algo.align_and_stack_images()
+        methods = [e["method"] for e in algo.sequential_log if e["method"] != "reference"]
+        assert methods and all(m.endswith("_hp") for m in methods), methods
+
+
+def _shifted_pair(dx, dy, seed=3):
+    """A textured frame and a copy whose content is moved by (dx, dy) pixels.
+
+    The texture is blurred so it survives the DFT estimator's downsampling
+    (pixel-scale noise vanishes at the default scale_factor=10).
+    """
+    base = cv2.GaussianBlur(make_textured_image(seed=seed), (0, 0), 4.0)
+    base = cv2.normalize(base, None, 0, 255, cv2.NORM_MINMAX)
+    h, w = base.shape[:2]
+    moved = cv2.warpAffine(base, np.float32([[1, 0, dx], [0, 1, dy]]), (w, h),
+                           flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    return base, moved
+
+
+def _centre_error(a, b, m=40):
+    return float(np.mean(np.abs(a[m:-m, m:-m] - b[m:-m, m:-m])))
+
+
+class TestAlignmentDirection:
+    """Aligned output must actually land on the reference (catches sign errors
+    that an 'output is not None' check cannot)."""
+
+    @pytest.mark.parametrize("mode", ["translation", "euclidean", "similarity", "affine"])
+    @pytest.mark.parametrize("dx,dy", [(7, -4), (-12, 9)])
+    def test_align_image_pair_moves_onto_reference(self, mode, dx, dy):
+        base, moved = _shifted_pair(dx, dy)
+        before = _centre_error(base, moved)
+        aligned = Algorithm().align_image_pair(base, moved, scale_factor=10,
+                                               alignment_mode=mode)
+        after = _centre_error(base, aligned)
+        # Correct alignment leaves <0.3x the error (DFT translation is the
+        # coarsest); a sign error makes it worse than not aligning (>1x)
+        assert after < before * 0.6, (
+            f"{mode} ({dx},{dy}): error {before:.2f} -> {after:.2f}")
+
+    def test_translation_estimate_is_forward_map(self):
+        """The DFT estimate follows the shared forward-map convention."""
+        base, moved = _shifted_pair(7, -4)
+        alg = Algorithm()
+        M_t, _ = alg.estimate_pair_transform(base, moved, alignment_mode="translation")
+        M_s, _ = alg.estimate_pair_transform(base, moved, alignment_mode="similarity")
+        # DFT at the default scale_factor is only ~1.5px precise; a flipped
+        # convention would be off by ~2x the shift (~14px here)
+        assert np.allclose(M_t[:, 2], M_s[:, 2], atol=2.5), (M_t, M_s)
+
+
+class TestMixedDimensions:
+    """Frames with different dimensions (#29) are matched to the reference."""
+
+    def _write_mixed(self, tmp_path):
+        base = make_textured_image(h=300, w=400, seed=5)
+        paths = []
+        for i, (h, w) in enumerate([(300, 400), (300, 400), (290, 384), (310, 412)]):
+            fr = base[:h, :w] if h <= 300 else cv2.copyMakeBorder(
+                base, 0, h - 300, 0, w - 400, cv2.BORDER_REFLECT)
+            p = str(tmp_path / f"mixed_{i}.png")
+            cv2.imwrite(p, np.clip(fr, 0, 255).astype(np.uint8))
+            paths.append(p)
+        return paths
+
+    @pytest.mark.parametrize("mode,ref", [
+        ("translation", "first"), ("similarity", "first"),
+        ("breathing", "first"), ("breathing", "middle"), ("similarity", "previous"),
+    ])
+    def test_mixed_dimensions_stack(self, tmp_path, mode, ref):
+        paths = self._write_mixed(tmp_path)
+        cfg = AlgorithmConfig(stacking_method="laplacian", alignment_mode=mode,
+                              alignment_reference=ref, fusion_kernel_size=3,
+                              pyramid_num_levels=4)
+        algo = LaplacianPyramid(config=cfg)
+        algo.update_image_paths(paths)
+        algo.align_and_stack_images()
+        assert algo.output_image is not None
+        assert algo.output_image.shape[:2] == (300, 400)
+
+
+class TestSequentialCancel:
+    def test_cancel_returns_none_and_stops_workers(self, tmp_path):
+        import threading
+        base = make_textured_image(h=256, w=340, seed=29)
+        paths = []
+        for i in range(8):
+            T = cv2.getRotationMatrix2D((170, 128), 0.0, 1.0 + 0.004 * i)
+            p = str(tmp_path / f"c_{i:02d}.png")
+            cv2.imwrite(p, np.clip(cv2.warpAffine(base, T, (340, 256)), 0, 255).astype(np.uint8))
+            paths.append(p)
+        alg = Algorithm()
+        threads_before = threading.active_count()
+        transforms, log = alg.estimate_sequential_transforms(
+            paths, precision="default", emit=lambda *a: alg.cancel())
+        assert transforms is None and log is None
+        # executor is shut down with wait=True: no workers left behind
+        assert threading.active_count() <= threads_before
+
+
+class TestBreathingCLI:
+    def _run(self, *extra):
+        return subprocess.run(
+            [sys.executable, "-m", "src.cli", "--input", "tests/low_res_images/*.jpg",
+             "--output", os.devnull, "--align", "--alignment-mode", "breathing", *extra],
+            capture_output=True, text=True, cwd=parentdir, timeout=120,
+        )
+
+    @pytest.mark.parametrize("step", ["0", "1.5", "-0.1"])
+    def test_rejects_invalid_max_scale_step(self, step):
+        result = self._run("--max-scale-step", step)
+        assert result.returncode != 0
+        assert "--max-scale-step" in result.stderr

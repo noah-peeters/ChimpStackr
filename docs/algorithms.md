@@ -138,45 +138,69 @@ Based on the same idea as Helicon Focus: align each frame to its *neighbour* and
 
 3. Compose the per-pair transforms onto the anchor frame (first, or middle — see *Reference* below) and warp every frame into the anchor's coordinate space with one resample each.
 
-4. Frame-to-frame estimation runs in parallel (each pair is independent); only the cheap composition step is sequential.
+4. Frame-to-frame estimation runs in parallel (each pair is independent); only the cheap composition step is sequential. The number of parallel workers follows the CPU core count, capped by currently available RAM.
+
+5. Frames with different dimensions are matched to the first frame's size (center crop/pad) before estimation and warping, as in the standard modes.
 
 ### When to use
 
 - Macro shots racked by focus (strong breathing) — the biggest wins
 - Stacks where standard alignment leaves ghosting or progressive blur in off-center corners
 - Enable via **Alignment mode → Breathing**, or by setting **Reference → previous** with any non-translation mode
-- Costs ~2–3× the alignment time of standard modes (pair estimation is repeated per frame)
+- Costs somewhat more than Similarity (see *Performance* below)
 
 ### Parameters
 
 - **Breathing max scale %** (default: 5): maximum plausible magnification change per consecutive pair. Higher = more forgiving of noisy estimates, lower = stricter plausibility gating. Note this is *per pair*, not across the whole stack (cumulative breathing of 10–20% is fine).
 
-### Precision (what the breathing path does differently)
+- **Max precision (slow)** (default: off): see below.
 
-Breathing mode runs at maximum precision by default — this is slower than the
-standard modes (roughly 3–8× the alignment time) but measurably reduces the
-blur and edge halos that chained alignment can otherwise leave behind. For a
-quick stack on an easy subject, uncheck **Max precision (slow)** in the GUI
-(available whenever Breathing or Reference=previous is active) or pass
-`--fast-breathing` on the CLI; that uses the fast estimators instead.
+### Resampling
+
+Every frame is warped once, with **Lanczos resampling + replicated borders**:
+bilinear softening is avoided, and replicated edges remove the dark border
+bleed that constant-black borders would feed into pyramid fusion. On real
+stacks this resampling accounts for nearly all of the sharpness gain over the
+standard modes.
+
+### Max precision (optional)
+
+Checking **Max precision (slow)** in the GUI (available whenever Breathing or
+Reference=previous is active) or passing `--max-precision` on the CLI refines
+each frame pair much harder. It can help on difficult, texture-poor subjects,
+but on typical stacks the output is indistinguishable from the default while
+taking roughly 5× longer and using about twice the memory.
 
 - **Scale is refined, not just measured once.** The coarse ORB feature match
   only localizes scale to ~0.1%. The high-precision path refines it with a
   6-DOF ECC optimization on **float32 grayscale** (no 8-bit quantization),
   projects the result back onto the 4-DOF similarity manifold (dropping
   shear), then re-refines rotation and translation *at that scale*. On
-  real-world texture this recovers scale to ~0.002%.
+  synthetic test content this recovers scale to ~0.002%.
 - **Full-resolution optimization.** The ECC cascade extends to 4096 px
   (standard modes stop at 2048 px), with a tighter convergence epsilon.
 - **Objective drift arbitration.** Every pair also computes a conservative
   3-DOF estimate (scale frozen at the ORB value) and the two candidates are
   compared by cross-correlation, with highpass detail error breaking ties.
   Texture-poor frames automatically fall back to the drift-free candidate.
-- **Lanczos resampling + replicated borders** on the final warp: bilinear
-  softening is avoided, and replicated edges remove the dark border bleed
-  that constant-black borders used to feed into pyramid fusion.
-- **float64 chain composition**, and deterministic per-pair estimation
-  (seeded RANSAC, single-threaded OpenCV inside the parallel workers).
+
+Both precision modes use deterministic per-pair estimation (seeded RANSAC,
+single-threaded OpenCV inside the parallel workers), so results are
+reproducible run to run.
+
+### Performance
+
+Measured on a real 50-frame, 24 MP macro stack (16-thread desktop CPU,
+Laplacian stacking, CPU path):
+
+| Alignment | Total time | Peak RAM |
+|---|---|---|
+| Similarity | ~60 s | 4.0 GB |
+| Breathing (default) | ~90 s | 6.6 GB |
+| Breathing + Max precision | ~405 s | 6.1 GB |
+
+Peak RAM scales with the number of parallel estimation workers, which is
+chosen from the CPU core count and the RAM available when the stack starts.
 
 ### References
 

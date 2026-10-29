@@ -90,7 +90,7 @@ class AlgorithmConfig:
     align_rotation_scale: bool = False  # Enable rotation + scale alignment (legacy, use alignment_mode)
     alignment_mode: str = "auto"  # "auto", "translation", "euclidean", "similarity", "affine", "breathing"
     breathing_max_scale_step: float = 0.05  # breathing mode: max plausible scale change per frame pair (0.05 = 5%)
-    breathing_high_precision: bool = True  # breathing/sequential: float32 full-res ECC + Lanczos (slow); False = fast quick-stack path
+    breathing_high_precision: bool = False  # breathing/sequential: True = float32 full-res ECC refinement (slow, opt-in)
     contrast_threshold: float = 0.0  # Laplacian: min contrast to switch (0 = off)
     feather_radius: int = 2  # Laplacian: blur radius for soft focusmap edges (0 = hard)
     depthmap_smoothing: int = 5  # Depth map: smoothing radius for focus map (higher = smoother)

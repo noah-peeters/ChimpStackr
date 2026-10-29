@@ -171,12 +171,14 @@ class LaplacianPyramid:
         return True
 
     def _sequential_warp_kwargs(self):
-        """Warp options for the sequential path, following the precision toggle."""
-        if self.config.breathing_high_precision:
-            # Lanczos + replicate: maximum sharpness, no dark edge halos
-            return {"interpolation": cv2.INTER_LANCZOS4,
-                    "border_mode": cv2.BORDER_REPLICATE}
-        return {}   # fast path: default bilinear + constant borders
+        """Warp options for the sequential path.
+
+        Lanczos + replicate in both precision modes: the resampling, not the
+        estimator, accounts for nearly all of the sharpness gain over
+        bilinear, at little extra cost (measured on a 50-frame 24MP stack).
+        """
+        return {"interpolation": cv2.INTER_LANCZOS4,
+                "border_mode": cv2.BORDER_REPLICATE}
 
     def _load_ref_frame(self):
         """Load frame 0, warped into reference space when chaining."""
@@ -201,10 +203,12 @@ class LaplacianPyramid:
     def _load_and_align(self, ref_image, path):
         """Load an image and align it to the reference. Returns float32."""
         if self._is_sequential() and self._breathing_transforms is not None:
-            # Sequential mode: each frame has its composed transform ready;
-            # resampling follows the precision toggle (Lanczos+replicate in
-            # high precision, bilinear+constant for quick stacks)
+            # Sequential mode: each frame has its composed transform ready.
+            # Transforms were estimated on frames matched to frame 0's
+            # dimensions (#29), so match before warping too.
             img = self.Algorithm.load_image(path)
+            if img is not None and ref_image is not None:
+                img = self.Algorithm._match_dimensions(ref_image, img)
             idx = self._breathing_index.get(path)
             M = self._breathing_transforms[idx] if idx is not None else None
             return self.Algorithm.apply_transform_matrix(
