@@ -24,6 +24,7 @@ import src.algorithms.stacking_algorithms.ocl as OCL
 from src.algorithms.API import LaplacianPyramid
 from src.config import AlgorithmConfig
 
+METHODS = ["laplacian", "hybrid", "weighted_average", "depth_map", "exposure_fusion"]
 LOW_RES = sorted(glob.glob(os.path.join(parentdir, "tests", "low_res_images", "*.jpg")))
 needs_gpu = pytest.mark.skipif(not OCL.available(), reason="no OpenCL device")
 
@@ -80,10 +81,37 @@ class TestKernels:
         # OpenCV interpolates with 1/32-pixel fixed-point positions
         assert np.abs(out - ref)[4:-4, 4:-4].mean() < 0.1
 
+    @pytest.mark.parametrize("shape", [(64, 80), (65, 80), (64, 81), (121, 160)])
+    def test_area_upscale_matches_opencv(self, gpu, shape):
+        h, w = shape
+        small = (np.random.RandomState(2).rand((h + 1) // 2, (w + 1) // 2) > 0.5).astype(np.uint8)
+        ref = cv2.resize(small, (w, h), interpolation=cv2.INTER_AREA)
+        assert np.array_equal(gpu.area_up(gpu.upload(small.astype(np.float32)), shape).get(), ref)
+
+    def test_thresholded_focusmap_matches_cpu(self, gpu):
+        rs = np.random.RandomState(3)
+        a, b = (rs.rand(2, 41, 57) * 4).astype(np.float32)
+        fuser = OCL.PyramidGPU(gpu, 1, 6, 0, contrast_threshold=1.0)
+        fm = fuser._focusmap(gpu.upload(a), gpu.upload(b)).get()
+        ref = CPU.compute_focusmap_thresholded(a, b, 6, np.float32(1.0))
+        assert (fm != ref).mean() < 0.002
+
+    def test_depth_sharpness_matches_cpu(self, gpu):
+        img = cv2.imread(LOW_RES[0]).astype(np.float32)
+        out = OCL.DepthMapGPU(gpu, 6, 5).sharpness(gpu.upload(img)).get()
+        ref = CPU.compute_multires_sharpness(img, scales=(5, 7, 19), smoothing=5)
+        assert np.abs(out - ref).max() < 1e-2 * ref.max()
+
+    def test_exposure_merge_matches_opencv(self, gpu):
+        imgs = [cv2.imread(p) for p in LOW_RES[:3]]
+        out = OCL.ExposureGPU(gpu).merge([lambda im=im: gpu.warp(im) for im in imgs]).get()
+        ref = np.clip(cv2.createMergeMertens(1.0, 1.0, 0.0).process(imgs) * 255, 0, 255)
+        assert np.abs(out - ref).mean() < 0.01
+
 
 @needs_gpu
 class TestPipelineMatchesCPU:
-    @pytest.mark.parametrize("method", ["hybrid", "laplacian"])
+    @pytest.mark.parametrize("method", METHODS)
     @pytest.mark.parametrize("align,mode", [(False, "similarity"), (True, "similarity"),
                                             (True, "translation"), (True, "breathing")])
     def test_same_result_as_cpu(self, method, align, mode):
@@ -106,10 +134,20 @@ class TestPipelineMatchesCPU:
         gpu, _ = stack(paths, "hybrid", True, False)
         assert np.abs(cpu.output_image - gpu.output_image).mean() < 0.05
 
-    def test_contrast_threshold_uses_cpu(self, monkeypatch):
-        monkeypatch.setattr(OCL, "get", lambda *a, **k: pytest.fail("GPU used"))
-        algo, _ = stack(LOW_RES[:3], "laplacian", True, False, contrast_threshold=1.0)
-        assert algo.output_image is not None
+    @pytest.mark.parametrize("method", ["laplacian", "hybrid", "weighted_average", "depth_map"])
+    def test_slabbing(self, method):
+        kw = dict(slab_size=4, slab_overlap=1)
+        cpu, cpu_progress = stack(LOW_RES, method, False, True, "breathing", **kw)
+        gpu, progress = stack(LOW_RES, method, True, True, "breathing", **kw)
+        diff = np.abs(cpu.output_image - gpu.output_image)
+        assert diff.mean() < 0.3
+        assert progress[-1] == cpu_progress[-1]
+        assert all(a[0] <= b[0] for a, b in zip(progress, progress[1:]))
+
+    def test_contrast_threshold(self):
+        cpu, _ = stack(LOW_RES[:4], "laplacian", False, False, contrast_threshold=1.0)
+        gpu, _ = stack(LOW_RES[:4], "laplacian", True, False, contrast_threshold=1.0)
+        assert np.abs(cpu.output_image - gpu.output_image).mean() < 0.05
 
 
 class TestFallback:

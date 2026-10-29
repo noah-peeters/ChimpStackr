@@ -207,13 +207,257 @@ __kernel void max_partial(__global const float *a, __global float *out, int n) {
     out[gid] = m;
 }
 
-// out = a * (1 - m / mmax) + b * m / mmax
+// single work-group: reduce the partial maxima to mx[0]
+__kernel void max_final(__global const float *parts, __global float *mx, int n,
+                        __local float *tmp) {
+    int lid = get_local_id(0), ls = get_local_size(0);
+    float m = -INFINITY;
+    for (int i = lid; i < n; i += ls) m = fmax(m, parts[i]);
+    tmp[lid] = m;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (int s = ls / 2; s > 0; s >>= 1) {
+        if (lid < s) tmp[lid] = fmax(tmp[lid], tmp[lid + s]);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (lid == 0) mx[0] = tmp[0];
+}
+
+// cv2.resize(map, (dw, dh), INTER_AREA) enlargement of a 0/1 map; exact for
+// even sizes and when only one dimension is odd (integer coefficients,
+// OpenCV's 1/2048 fixed-point weights)
+inline void area_coef(int d, int sn, int dn, int *s0, int *s1, int *w) {
+    int sx = (int)(((long)d * sn) / dn);
+    long num = (long)(d + 1) * sn - (long)(sx + 1) * dn;
+    float fx = num <= 0 ? 0.f : (float)(num % sn) / (float)sn;
+    *s0 = min(sx, sn - 1); *s1 = min(sx + 1, sn - 1);
+    *w = (int)rint(fx * 2048.f);
+}
+__kernel void area_up(__global const float *src, __global float *dst, int sw, int sh,
+                      int dw, int dh) {
+    int x = get_global_id(0), y = get_global_id(1);
+    if (x >= dw || y >= dh) return;
+    int x0, x1, y0, y1, wx, wy;
+    area_coef(x, sw, dw, &x0, &x1, &wx);
+    area_coef(y, sh, dh, &y0, &y1, &wy);
+    int top = (int)src[y0 * sw + x0] * (2048 - wx) + (int)src[y0 * sw + x1] * wx;
+    int bot = (int)src[y1 * sw + x0] * (2048 - wx) + (int)src[y1 * sw + x1] * wx;
+    dst[y * dw + x] = (float)((top * (2048 - wy) + bot * wy + (1 << 21)) >> 22);
+}
+
+// out = a * (1 - m / mx) + b * m / mx   (mx: device scalar, no host round trip;
+// NULL = no normalisation)
 __kernel void blend(__global const float *a, __global const float *b, __global const float *m,
-                    __global float *out, int n, int ch, float inv_max) {
+                    __global float *out, int n, int ch, __global const float *mx) {
     int i = get_global_id(0);
     if (i >= n) return;
-    float t = m[i] * inv_max;
+    float t = m[i];
+    if (mx) t = mx[0] > 0.f ? t / mx[0] : 0.f;
     for (int c = 0; c < ch; c++) out[i * ch + c] = a[i * ch + c] * (1.f - t) + b[i * ch + c] * t;
+}
+
+// compute_focusmap_thresholded: deviation over the slice [y-k, y+k) x
+// [x-k, x+k) (Python slice rules, so a negative start wraps), zero-padded
+// to ks x ks; 0 where neither is above thr, else 1 where g2 deviates more
+inline void py_slice(int c, int k, int n, int *s, int *e) {
+    int a = c - k;
+    if (a < 0) a = max(a + n, 0);
+    *s = a; *e = max(min(c + k, n), a);
+}
+inline float py_dev(__global const float *g, int w, int ys, int ye, int xs, int xe, int ks) {
+    int ph = ye - ys, pw = xe - xs;
+    float area = (ph < ks || pw < ks) ? (float)(ks * ks) : (float)(ph * pw);
+    float sum = 0.f;
+    for (int y = ys; y < ye; y++) for (int x = xs; x < xe; x++) sum += g[y * w + x];
+    float mean = sum / area, dev = (area - ph * pw) * mean * mean;
+    for (int y = ys; y < ye; y++) for (int x = xs; x < xe; x++) {
+        float d = g[y * w + x] - mean; dev += d * d;
+    }
+    return dev / area;
+}
+__kernel void focusmap_thresh(__global const float *g1, __global const float *g2,
+                              __global float *fm, int w, int h, int ks, float thr) {
+    int x = get_global_id(0), y = get_global_id(1);
+    if (x >= w || y >= h) return;
+    int ys, ye, xs, xe, k = ks / 2;
+    py_slice(y, k, h, &ys, &ye);
+    py_slice(x, k, w, &xs, &xe);
+    float d1 = py_dev(g1, w, ys, ye, xs, xe, ks), d2 = py_dev(g2, w, ys, ye, xs, xe, ks);
+    fm[y * w + x] = (d1 < thr && d2 < thr) ? 0.f : (d2 > d1 ? 1.f : 0.f);
+}
+
+// ── Weighted average ──
+// cv2.Laplacian(gray, CV_32F) squared
+__kernel void lap_energy(__global const float *g, __global float *dst, int w, int h) {
+    int x = get_global_id(0), y = get_global_id(1);
+    if (x >= w || y >= h) return;
+    float l = g[y * w + r101(x - 1, w)] + g[y * w + r101(x + 1, w)] + g[r101(y - 1, h) * w + x]
+            + g[r101(y + 1, h) * w + x] - 4.f * g[y * w + x];
+    dst[y * w + x] = l * l;
+}
+
+__kernel void wavg_add(__global const float *img, __global const float *wt, __global float *sum,
+                       __global float *tot, int n, int ch, int first) {
+    int i = get_global_id(0);
+    if (i >= n) return;
+    float w = wt[i];
+    for (int c = 0; c < ch; c++)
+        sum[i * ch + c] = (first ? 0.f : sum[i * ch + c]) + img[i * ch + c] * w;
+    tot[i] = (first ? 0.f : tot[i]) + w;
+}
+
+__kernel void wavg_result(__global const float *sum, __global const float *tot,
+                          __global float *out, int n, int ch) {
+    int i = get_global_id(0);
+    if (i >= n) return;
+    float d = tot[i] + 1e-12f;
+    for (int c = 0; c < ch; c++) out[i * ch + c] = sum[i * ch + c] / d;
+}
+
+// ── Depth map ──
+__kernel void mean3(__global const float *a, __global const float *b, __global const float *c,
+                    __global float *out, int n) {
+    int i = get_global_id(0);
+    if (i < n) out[i] = (a[i] + b[i] + c[i]) / 3.f;
+}
+
+// statistics for cv2.bilateralFilter, st = [min, max, mean, std]; first pass
+// (st == NULL) min/max/sum, second pass the squared deviations from st[2]
+__kernel void stats_partial(__global const float *a, __global float *parts, int n,
+                            __global const float *st) {
+    int gid = get_global_id(0), gs = get_global_size(0);
+    float lo = INFINITY, hi = -INFINITY, s = 0.f;
+    for (int i = gid; i < n; i += gs) {
+        float v = a[i];
+        if (st) { v -= st[2]; s += v * v; }
+        else { lo = fmin(lo, v); hi = fmax(hi, v); s += v; }
+    }
+    parts[gid] = lo; parts[gs + gid] = hi; parts[2 * gs + gid] = s;
+}
+
+__kernel void stats_final(__global const float *parts, __global float *st, int np, int n,
+                          int second, __local float *tmp) {
+    int lid = get_local_id(0), ls = get_local_size(0);
+    float lo = INFINITY, hi = -INFINITY, s = 0.f;
+    for (int i = lid; i < np; i += ls) {
+        lo = fmin(lo, parts[i]); hi = fmax(hi, parts[np + i]); s += parts[2 * np + i];
+    }
+    tmp[lid] = lo; tmp[ls + lid] = hi; tmp[2 * ls + lid] = s;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (int k = ls / 2; k > 0; k >>= 1) {
+        if (lid < k) {
+            tmp[lid] = fmin(tmp[lid], tmp[lid + k]);
+            tmp[ls + lid] = fmax(tmp[ls + lid], tmp[ls + lid + k]);
+            tmp[2 * ls + lid] += tmp[2 * ls + lid + k];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (lid == 0) {
+        if (second) st[3] = sqrt(tmp[2 * ls] / n);
+        else { st[0] = tmp[0]; st[1] = tmp[ls]; st[2] = tmp[2 * ls] / n; }
+    }
+}
+
+// OpenCV's float bilateral colour table: exp(-d^2 / (2 sigma^2)) in `bins`
+// steps over the value range, with sigma = 2 * std + 1e-6 (as cpu.py passes)
+__kernel void bilateral_lut(__global const float *st, __global float *lut, int bins) {
+    int i = get_global_id(0);
+    if (i > bins + 1) return;
+    float sc = st[3] * 2.f + 1e-6f, range = st[1] - st[0];
+    float v = range > 0.f ? i * range / bins : 0.f;
+    lut[i] = exp(-0.5f * v * v / (sc * sc));
+}
+
+__kernel void bilateral(__global const float *src, __global float *dst, __global const float *st,
+                        __global const float *lut, int w, int h, int radius, float space_coeff,
+                        int bins) {
+    int x = get_global_id(0), y = get_global_id(1);
+    if (x >= w || y >= h) return;
+    float v0 = src[y * w + x], range = st[1] - st[0];
+    if (range < FLT_EPSILON) { dst[y * w + x] = v0; return; }
+    float scale = bins / range, sum = 0.f, wsum = 0.f;
+    for (int j = -radius; j <= radius; j++) {
+        int yy = r101(y + j, h);
+        for (int i = -radius; i <= radius; i++) {
+            if (i * i + j * j > radius * radius) continue;
+            float v = src[yy * w + r101(x + i, w)];
+            float a = fabs(v - v0) * scale;
+            int idx = (int)floor(a);
+            a -= idx;
+            float wt = exp((i * i + j * j) * space_coeff) * (lut[idx] + a * (lut[idx + 1] - lut[idx]));
+            sum += v * wt; wsum += wt;
+        }
+    }
+    dst[y * w + x] = sum / wsum;
+}
+
+// keep each pixel from the source with the highest sharpness so far
+__kernel void depth_select(__global const float *img, __global const float *sharp,
+                           __global float *res, __global float *best, int n, int ch, int first) {
+    int i = get_global_id(0);
+    if (i >= n) return;
+    if (!first && !(sharp[i] > best[i])) return;
+    for (int c = 0; c < ch; c++) res[i * ch + c] = img[i * ch + c];
+    best[i] = sharp[i];
+}
+
+// ── Exposure fusion (cv2.MergeMertens) ──
+// the 8-bit input MergeMertens gets (cpu._to_u8 truncates), scaled to 0..1
+__kernel void mertens_prep(__global const float *src, __global float *dst, int n) {
+    int i = get_global_id(0);
+    if (i < n) dst[i] = floor(clamp(src[i], 0.f, 255.f)) * (1.f / 255.f);
+}
+
+// MergeMertens converts with COLOR_RGB2GRAY, also for BGR images
+__kernel void mertens_gray(__global const float *src, __global float *dst, int n, int ch) {
+    int i = get_global_id(0);
+    if (i >= n) return;
+    __global const float *p = src + i * ch;
+    dst[i] = ch == 3 ? 0.299f * p[0] + 0.587f * p[1] + 0.114f * p[2] : p[0];
+}
+
+__kernel void mertens_weight(__global const float *img, __global const float *g,
+                             __global float *wt, __global float *wsum, int w, int h, int ch,
+                             float wcon, float wsat, float wexp, int first) {
+    int x = get_global_id(0), y = get_global_id(1);
+    if (x >= w || y >= h) return;
+    int i = y * w + x;
+    float con = fabs(g[y * w + r101(x - 1, w)] + g[y * w + r101(x + 1, w)]
+                     + g[r101(y - 1, h) * w + x] + g[r101(y + 1, h) * w + x] - 4.f * g[i]);
+    __global const float *p = img + i * ch;
+    float mean = 0.f, sat = 0.f, well = 1.f;
+    for (int c = 0; c < ch; c++) mean += p[c];
+    mean /= ch;
+    for (int c = 0; c < ch; c++) {
+        float d = p[c] - mean, e = p[c] - 0.5f;
+        sat += d * d;
+        well *= exp(-e * e / 0.08f);
+    }
+    float v = pow(con, wcon) * pow(well, wexp);
+    if (ch == 3) v *= pow(sqrt(sat), wsat);
+    v += 1e-12f;
+    wt[i] = v;
+    wsum[i] = first ? v : wsum[i] + v;
+}
+
+__kernel void divide(__global float *a, __global const float *b, int n) {
+    int i = get_global_id(0);
+    if (i < n) a[i] /= b[i];
+}
+
+// res (+)= level * weight (weight shared by all channels)
+__kernel void mul_acc(__global float *res, __global const float *lv, __global const float *wt,
+                      int n, int ch, int first) {
+    int i = get_global_id(0);
+    if (i >= n) return;
+    for (int c = 0; c < ch; c++) {
+        float v = lv[i * ch + c] * wt[i];
+        res[i * ch + c] = first ? v : res[i * ch + c] + v;
+    }
+}
+
+__kernel void to_255(__global const float *src, __global float *dst, int n) {
+    int i = get_global_id(0);
+    if (i < n) dst[i] = clamp(src[i] * 255.f, 0.f, 255.f);
 }
 """
 
@@ -269,22 +513,29 @@ class GPU:
 
     def __init__(self, device):
         import pyopencl.array as cla
+        import pyopencl.tools as clt
         self._cla = cla
         self.name = device.name.strip()
         self.ctx = cl.Context([device])
         self.q = cl.CommandQueue(self.ctx)
+        # Reuse device buffers: drivers commit memory on a buffer's first use,
+        # which for fresh frame-sized buffers costs ~1 ms per kernel launch
+        self.pool = clt.MemoryPool(clt.ImmediateAllocator(self.q))
         prg = cl.Program(self.ctx, _SRC).build()
         self.k = {name: getattr(prg, name) for name in (
             "warp_u8", "warp_f32", "pyr_down", "pyr_up_combine", "to_gray", "conv1d", "sml",
-            "variance", "hybrid_add", "gate", "hybrid_level", "focusmap", "blend", "max_partial")}
+            "variance", "hybrid_add", "gate", "hybrid_level", "focusmap", "blend", "max_partial",
+            "max_final", "area_up", "focusmap_thresh", "lap_energy", "wavg_add", "wavg_result",
+            "mean3", "stats_partial", "stats_final", "bilateral_lut", "bilateral", "depth_select",
+            "mertens_prep", "mertens_gray", "mertens_weight", "divide", "mul_acc", "to_255")}
         self._coef = {}
 
     # ── buffers ──
     def empty(self, shape):
-        return self._cla.empty(self.q, shape, np.float32)
+        return self._cla.empty(self.q, shape, np.float32, allocator=self.pool)
 
     def upload(self, a):
-        return self._cla.to_device(self.q, np.ascontiguousarray(a))
+        return self._cla.to_device(self.q, np.ascontiguousarray(a), allocator=self.pool)
 
     @staticmethod
     def _ch(a):
@@ -401,10 +652,35 @@ class GPU:
         self.k["sml"](self.q, (w, h), None, g.data, s.data, np.int32(w), np.int32(h))
         return self.box(s, CPU.HYBRID_SHARPNESS_KSIZE)
 
-    def max(self, a):
-        parts = self.empty((4096,))
+    def max_device(self, a):
+        """Max of a as a 1-element device array (no host synchronisation)."""
+        parts, mx = self.empty((4096,)), self.empty((1,))
         self.k["max_partial"](self.q, (4096,), None, a.data, parts.data, np.int32(a.size))
-        return float(parts.get().max())
+        self.k["max_final"](self.q, (256,), (256,), parts.data, mx.data, np.int32(4096),
+                            cl.LocalMemory(256 * 4))
+        return mx
+
+    def max(self, a):
+        return float(self.max_device(a).get()[0])
+
+    def run(self, name, like, *args):
+        """Launch a 1-D kernel over like's pixels (or over `like` items)."""
+        n = like if isinstance(like, int) else self._n(like)
+        self.k[name](self.q, (n,), None, *args)
+
+    def run2d(self, name, like, *args):
+        """Launch a 2-D kernel over like's (w, h)."""
+        h, w = like.shape[:2]
+        self.k[name](self.q, (w, h), None, *args)
+
+    def area_up(self, a, shape):
+        """cv2.resize(a, INTER_AREA) enlargement of a 0/1 map to shape (h, w)."""
+        sh, sw = a.shape[:2]
+        dh, dw = shape
+        out = self.empty((dh, dw))
+        self.k["area_up"](self.q, (dw, dh), None, a.data, out.data, np.int32(sw), np.int32(sh),
+                          np.int32(dw), np.int32(dh))
+        return out
 
 
 class HybridGPU:
@@ -460,7 +736,7 @@ class HybridGPU:
         return self.g.gauss(out, blur)
 
     def result(self):
-        """Fused image (float32 numpy), or None if no frames were added."""
+        """Fused image (device array), or None if no frames were added."""
         if self.frames == 0:
             return None
         g = self.g
@@ -481,21 +757,35 @@ class HybridGPU:
                                 boost.data if boost is not None else None, out.data,
                                 np.int32(npx), np.int32(g._ch(num)), np.float32(self.detail_gain))
             levels.append(out)
-        return g.reconstruct(levels).get()
+        return g.reconstruct(levels)
 
 
 class PyramidGPU:
     """GPU version of the CPU pairwise max-contrast fusion (soft or hard map).
 
-    Matches Algorithm.focus_fuse_pyramid_pair without a contrast threshold.
+    Matches Algorithm.focus_fuse_pyramid_pair.
     """
 
-    def __init__(self, gpu, num_levels, kernel_size=6, feather_radius=2):
+    def __init__(self, gpu, num_levels, kernel_size=6, feather_radius=2, contrast_threshold=0.0):
         self.g = gpu
         self.num_levels = num_levels
         self.kernel_size = kernel_size
         self.feather = feather_radius
+        self.threshold = contrast_threshold
         self.fused = None
+
+    def _focusmap(self, a, b):
+        g = self.g
+        fm = g.empty(a.shape[:2])
+        if self.threshold > 0:
+            h, w = a.shape[:2]
+            g.run2d("focusmap_thresh", a, g.gray(a).data, g.gray(b).data, fm.data, np.int32(w),
+                    np.int32(h), np.int32(self.kernel_size), np.float32(self.threshold))
+        else:
+            k = self.kernel_size | 1
+            v1, v2 = g.variance(a, k, clamp0=True), g.variance(b, k, clamp0=True)
+            g.run("focusmap", a, v1.data, v2.data, fm.data, np.int32(g._n(a)))
+        return fm
 
     def add(self, img):
         g = self.g
@@ -503,7 +793,6 @@ class PyramidGPU:
         if self.fused is None:
             self.fused = pyr
             return
-        k = self.kernel_size | 1
         last = len(pyr) - 1
         prev_map = None
         new = []
@@ -511,26 +800,188 @@ class PyramidGPU:
             a, b = self.fused[i], pyr[i]
             npx = g._n(a)
             if i < last:
-                v1, v2 = g.variance(a, k, clamp0=True), g.variance(b, k, clamp0=True)
-                fm = g.empty(a.shape[:2])
-                g.k["focusmap"](g.q, (npx,), None, v1.data, v2.data, fm.data, np.int32(npx))
-                if i == last - 1:
-                    prev_map = fm.get().astype(np.uint8)
+                fm = prev_map = self._focusmap(a, b)
             else:
                 # finest level reuses the previous level's map (same resize as CPU)
                 h, w = a.shape[:2]
-                fm = g.upload(cv2.resize(prev_map, (w, h), interpolation=cv2.INTER_AREA)
-                              .astype(np.float32))
-            inv = 1.0
+                if h % 2 and w % 2:
+                    # both dimensions odd: OpenCV's INTER_AREA isn't reproduced
+                    # exactly on the GPU, so resize this one map on the host
+                    fm = g.upload(cv2.resize(prev_map.get().astype(np.uint8), (w, h),
+                                             interpolation=cv2.INTER_AREA).astype(np.float32))
+                else:
+                    fm = g.area_up(prev_map, (h, w))
+            mx = None
             if self.feather > 0:
                 fm = g.gauss(fm, 0, 2 * self.feather + 1)
-                mmax = g.max(fm)
-                inv = 1.0 / mmax if mmax > 0 else 0.0
+                mx = g.max_device(fm)
             out = g.empty(a.shape)
             g.k["blend"](g.q, (npx,), None, a.data, b.data, fm.data, out.data, np.int32(npx),
-                         np.int32(g._ch(a)), np.float32(inv))
+                         np.int32(g._ch(a)), mx.data if mx is not None else None)
             new.append(out)
         self.fused = new
 
     def result(self):
-        return None if self.fused is None else self.g.reconstruct(self.fused).get()
+        return None if self.fused is None else self.g.reconstruct(self.fused)
+
+
+class WeightedAverageGPU:
+    """API._weighted_avg_core: average weighted by local Laplacian energy."""
+
+    def __init__(self, gpu, kernel_size=5):
+        self.g = gpu
+        self.ksize = kernel_size | 1
+        self.sum = self.tot = None
+
+    def add(self, img):
+        g = self.g
+        gray = g.gray(img)
+        h, w = gray.shape
+        energy = g.empty((h, w))
+        g.run2d("lap_energy", gray, gray.data, energy.data, np.int32(w), np.int32(h))
+        weight = g.gauss(energy, 0, self.ksize)
+        first = self.sum is None
+        if first:
+            self.sum, self.tot = g.empty(img.shape), g.empty((h, w))
+        g.run("wavg_add", img, img.data, weight.data, self.sum.data, self.tot.data,
+              np.int32(g._n(img)), np.int32(g._ch(img)), np.int32(first))
+
+    def result(self):
+        if self.sum is None:
+            return None
+        out = self.g.empty(self.sum.shape)
+        self.g.run("wavg_result", out, self.sum.data, self.tot.data, out.data,
+                   np.int32(self.g._n(out)), np.int32(self.g._ch(out)))
+        return out
+
+
+class DepthMapGPU:
+    """API._depthmap_core: per pixel, the source with the highest multi-scale
+    sum-modified-Laplacian sharpness (bilateral-smoothed as on the CPU)."""
+
+    BINS = 1 << 12   # OpenCV's float bilateral table size (one channel)
+
+    def __init__(self, gpu, kernel_size=6, smoothing=5):
+        self.g = gpu
+        self.scales = (5, kernel_size | 1, kernel_size * 3 + 1)
+        self.smoothing = smoothing
+        self.res = self.best = None
+
+    def sharpness(self, img):
+        """cpu.compute_multires_sharpness."""
+        g = self.g
+        gray = g.gray(img)
+        h, w = gray.shape
+        ml = g.empty((h, w))
+        g.run2d("sml", gray, gray.data, ml.data, np.int32(w), np.int32(h))
+        boxes = [g.box(ml, s | 1) for s in self.scales]
+        combined = g.empty((h, w))
+        g.run("mean3", combined, *[b.data for b in boxes], combined.data, np.int32(h * w))
+        if self.smoothing <= 0:
+            return combined
+        st = self._stats(combined)
+        lut = g.empty((self.BINS + 2,))
+        g.k["bilateral_lut"](g.q, (self.BINS + 2,), None, st.data, lut.data, np.int32(self.BINS))
+        sigma_space = float(self.smoothing * 2)
+        out = g.empty((h, w))
+        g.run2d("bilateral", combined, combined.data, out.data, st.data, lut.data, np.int32(w),
+                np.int32(h), np.int32(max(self.smoothing, 1)),
+                np.float32(-0.5 / (sigma_space * sigma_space)), np.int32(self.BINS))
+        return out
+
+    def _stats(self, a):
+        """[min, max, mean, std] of a, kept on the device."""
+        g, n_parts = self.g, 4096
+        st, parts = g.empty((4,)), g.empty((3 * n_parts,))
+        for second in (0, 1):
+            g.k["stats_partial"](g.q, (n_parts,), None, a.data, parts.data, np.int32(a.size),
+                                 st.data if second else None)
+            g.k["stats_final"](g.q, (256,), (256,), parts.data, st.data, np.int32(n_parts),
+                               np.int32(a.size), np.int32(second), cl.LocalMemory(3 * 256 * 4))
+        return st
+
+    def add(self, img):
+        g = self.g
+        sharp = self.sharpness(img)
+        first = self.res is None
+        if first:
+            self.res, self.best = g.empty(img.shape), g.empty(img.shape[:2])
+        g.run("depth_select", img, img.data, sharp.data, self.res.data, self.best.data,
+              np.int32(g._n(img)), np.int32(g._ch(img)), np.int32(first))
+
+    def result(self):
+        return self.res
+
+
+class ExposureGPU:
+    """API._exposure_core: cv2.MergeMertens over batches of frames, then over
+    the batch results (same batching, so the same output as the CPU)."""
+
+    def __init__(self, gpu, batch_size=4, contrast_weight=1.0, saturation_weight=1.0,
+                 exposure_weight=0.0):
+        self.g = gpu
+        self.batch_size = batch_size
+        self.weights = (contrast_weight, saturation_weight, exposure_weight)
+        self.batch = []
+        self.partials = []   # batch results as the next stage reads them (8-bit, host)
+        self.last = None     # float result of the latest batch (used if it's the only one)
+
+    def _prep(self, img):
+        out = self.g.empty(img.shape)
+        self.g.run("mertens_prep", img.size, img.data, out.data, np.int32(img.size))
+        return out
+
+    def merge(self, images):
+        """cv2.createMergeMertens(...).process(images) * 255, clipped; images
+        are callables returning the device frames (0..255)."""
+        g = self.g
+        wsum, weights = None, []
+        for i, load in enumerate(images):
+            img = self._prep(load())
+            h, w = img.shape[:2]
+            gray, wt = g.empty((h, w)), g.empty((h, w))
+            if wsum is None:
+                wsum = g.empty((h, w))
+            g.run("mertens_gray", gray, img.data, gray.data, np.int32(h * w), np.int32(g._ch(img)))
+            g.run2d("mertens_weight", gray, img.data, gray.data, wt.data, wsum.data, np.int32(w),
+                    np.int32(h), np.int32(g._ch(img)), *[np.float32(v) for v in self.weights],
+                    np.int32(i == 0))
+            weights.append(wt)
+        levels = int(np.log(np.float32(min(h, w))) / np.log(np.float32(2)))
+        res = None
+        for load, wt in zip(images, weights):
+            g.run("divide", wt, wt.data, wsum.data, np.int32(h * w))
+            lap = g.laplacian_pyramid(self._prep(load()), levels)
+            wp = [wt]
+            for _ in range(levels):
+                wp.append(g.pyr_down(wp[-1]))
+            wp.reverse()
+            first = res is None
+            if first:
+                res = [g.empty(lv.shape) for lv in lap]
+            for r, lv, wl in zip(res, lap, wp):
+                g.run("mul_acc", lv, r.data, lv.data, wl.data, np.int32(g._n(lv)),
+                      np.int32(g._ch(lv)), np.int32(first))
+        fused = g.reconstruct(res)
+        out = g.empty(fused.shape)
+        g.run("to_255", out.size, fused.data, out.data, np.int32(out.size))
+        return out
+
+    def _flush(self):
+        batch, self.batch = self.batch, []
+        self.last = self.merge([lambda b=b: b for b in batch]) if len(batch) > 1 else batch[0]
+        self.partials.append(np.clip(self.last.get(), 0, 255).astype(np.uint8))
+
+    def add(self, img):
+        self.batch.append(img)
+        if len(self.batch) >= self.batch_size:
+            self._flush()
+
+    def result(self):
+        if self.batch:
+            self._flush()
+        if not self.partials:
+            return None
+        if len(self.partials) == 1:
+            return self.last
+        return self.merge([lambda p=p: self.g.warp(p) for p in self.partials])

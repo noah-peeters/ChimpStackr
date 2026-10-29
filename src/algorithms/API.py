@@ -439,12 +439,16 @@ class LaplacianPyramid:
         if not self._prepare_alignment(signals, progress_callback,
                                        later_steps=self._slab_plan()[1]):
             return
+        if self._gpu_run(True, signals, progress_callback):
+            return
         ref_image = self._load_ref_frame()
         self._run_slabs(ref_image, lambda path: self._load_and_align(ref_image, path),
                         signals, progress_callback)
 
     def _stack_slabbed(self, signals=None, progress_callback=None):
         self.Algorithm.reset_cancel()
+        if self._gpu_run(False, signals, progress_callback):
+            return
         self._run_slabs(self.Algorithm.load_image(self.image_paths[0]),
                         self.Algorithm.load_image, signals, progress_callback)
 
@@ -558,23 +562,32 @@ class LaplacianPyramid:
 
     # ─── GPU (OpenCL) ───
     #
-    # Pyramid and Hybrid can run on any OpenCL GPU: worker threads decode
+    # Every stacking method can run on any OpenCL GPU: worker threads decode
     # frames (and estimate alignment), the GPU warps, decomposes and fuses
     # them, and only the result comes back. Falls back to the CPU path when
     # no GPU is available or anything goes wrong on it.
 
     def _gpu_wanted(self):
+        return self.config.use_gpu and OCL.available()
+
+    def _gpu_fuser(self, gpu):
         c = self.config
-        if not c.use_gpu or not OCL.available():
-            return False
-        if c.stacking_method == "laplacian":
-            return c.contrast_threshold <= 0   # thresholded focus map is CPU-only
-        return c.stacking_method == "hybrid"
+        if c.stacking_method == "hybrid":
+            return OCL.HybridGPU(gpu, self.pyramid_num_levels, self.fusion_kernel_size)
+        if c.stacking_method == "weighted_average":
+            return OCL.WeightedAverageGPU(gpu, self.fusion_kernel_size)
+        if c.stacking_method == "depth_map":
+            return OCL.DepthMapGPU(gpu, self.fusion_kernel_size, c.depthmap_smoothing)
+        if c.stacking_method == "exposure_fusion":
+            return OCL.ExposureGPU(gpu, self.EXPOSURE_BATCH_SIZE)
+        return OCL.PyramidGPU(gpu, self.pyramid_num_levels, self.fusion_kernel_size,
+                              c.feather_radius, c.contrast_threshold)
 
     def _gpu_run(self, align, signals, progress_callback):
         """Stack on the GPU. Returns False if the CPU path should run instead."""
         if not self._gpu_wanted():
             return False
+        progress_total = self._progress_total
         try:
             gpu = OCL.get(self.config.selected_gpu_id)
             logger.info(f"Stacking on GPU: {gpu.name}")
@@ -582,11 +595,13 @@ class LaplacianPyramid:
         except Exception as exc:   # OpenCL/driver errors, out of GPU memory, ...
             logger.warning(f"GPU stacking failed ({exc}); falling back to the CPU")
             self.Algorithm.alignment_shifts = []
+            self._progress_total = progress_total
             return False
         if fused is not None:
             if self.config.stacking_method == "laplacian":
                 fused = CPU.local_tone_map(fused, strength=0.3)
             self.output_image = fused
+            self.depth_map = None
         return True
 
     def _gpu_core(self, gpu, align, signals, progress_callback):
@@ -600,11 +615,6 @@ class LaplacianPyramid:
         # single-reference alignment estimates from float frames, exactly as
         # the CPU path does (the estimators are sensitive to their input)
         ref_f32 = ref.astype(np.float32) if align and not sequential else None
-        if self.config.stacking_method == "hybrid":
-            fuser = OCL.HybridGPU(gpu, self.pyramid_num_levels, self.fusion_kernel_size)
-        else:
-            fuser = OCL.PyramidGPU(gpu, self.pyramid_num_levels, self.fusion_kernel_size,
-                                   self.config.feather_radius)
 
         def frame(i):
             """Decode (and, for single-reference alignment, estimate) frame i."""
@@ -612,7 +622,8 @@ class LaplacianPyramid:
             if img is None:
                 raise RuntimeError(f"failed to load {paths[i]}")
             if img.dtype != ref.dtype:
-                img = img.astype(np.float32) if ref.dtype == np.float32 else                     np.clip(img, 0, 255).astype(np.uint8)
+                img = img.astype(np.float32) if ref.dtype == np.float32 else \
+                    np.clip(img, 0, 255).astype(np.uint8)
             img = self.Algorithm._match_dimensions(ref, img)
             M = None
             if sequential:
@@ -624,10 +635,26 @@ class LaplacianPyramid:
                 )
             return img, M
 
+        # Slabbing fuses each slab, then the slab results in order; slabs are
+        # streamed into the final fuser, so nothing waits on disk or memory
+        if self._slabbing_active():
+            groups, steps = self._slab_plan()
+            self._progress_total = self._progress_offset + steps
+        else:
+            groups, steps = [list(range(len(paths)))], len(paths)
+        order = [i for group in groups for i in group]
+        final = self._gpu_fuser(gpu) if len(groups) > 1 else None
+        fuser, group_ends = self._gpu_fuser(gpu), set()
+        pos = 0
+        for group in groups:
+            pos += len(group)
+            group_ends.add(pos - 1)
+
         workers = 4
+        done = 0
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            pending = {j: pool.submit(frame, j) for j in range(min(workers + 1, len(paths)))}
-            for i in range(len(paths)):
+            pending = {j: pool.submit(frame, order[j]) for j in range(min(workers + 1, len(order)))}
+            for j in range(len(order)):
                 self.Algorithm.wait_if_paused()
                 if self.Algorithm.is_cancelled:
                     logger.info("Stacking cancelled")
@@ -635,18 +662,24 @@ class LaplacianPyramid:
                         f.cancel()
                     return None
                 start_time = time.time()
-                img, M = pending.pop(i).result()
-                j = i + workers + 1
-                if j < len(paths):
-                    pending[j] = pool.submit(frame, j)
+                img, M = pending.pop(j).result()
+                nxt = j + workers + 1
+                if nxt < len(order):
+                    pending[nxt] = pool.submit(frame, order[nxt])
                 # breathing: Lanczos + replicated borders, as on the CPU path
                 fuser.add(gpu.warp(img, M, lanczos=sequential, replicate=sequential))
                 if M is not None:
                     self.Algorithm._track_warp_shifts(M, img.shape)
                 del img
-                self._emit_progress(signals, progress_callback, i + 1, len(paths),
+                done += 1
+                if final is not None and j in group_ends:
+                    final.add(fuser.result())
+                    fuser = self._gpu_fuser(gpu)
+                    done += 1
+                self._emit_progress(signals, progress_callback, done, steps,
                                     time.time() - start_time)
-        return fuser.result()
+        fused = (final or fuser).result()
+        return None if fused is None else fused.get()
 
     # ─── Weighted Average Method ───
     #
@@ -693,6 +726,8 @@ class LaplacianPyramid:
         self.Algorithm.alignment_shifts = []
         if not self._prepare_alignment(signals, progress_callback, total_mult=2):
             return
+        if self._gpu_run(True, signals, progress_callback):
+            return
 
         ref_image = self._load_ref_frame()
 
@@ -708,6 +743,8 @@ class LaplacianPyramid:
 
     def _stack_weighted_average(self, signals=None, progress_callback=None):
         self.Algorithm.reset_cancel()
+        if self._gpu_run(False, signals, progress_callback):
+            return
 
         def image_iter():
             for i, path in enumerate(self.image_paths):
@@ -767,6 +804,8 @@ class LaplacianPyramid:
         self.Algorithm.alignment_shifts = []
         if not self._prepare_alignment(signals, progress_callback, total_mult=2):
             return
+        if self._gpu_run(True, signals, progress_callback):
+            return
 
         ref_image = self._load_ref_frame()
 
@@ -782,6 +821,8 @@ class LaplacianPyramid:
 
     def _stack_depthmap(self, signals=None, progress_callback=None):
         self.Algorithm.reset_cancel()
+        if self._gpu_run(False, signals, progress_callback):
+            return
 
         def image_iter():
             for i, path in enumerate(self.image_paths):
@@ -832,6 +873,8 @@ class LaplacianPyramid:
         self.Algorithm.alignment_shifts = []
         if not self._prepare_alignment(signals, progress_callback, total_mult=2):
             return
+        if self._gpu_run(True, signals, progress_callback):
+            return
 
         ref_image = self._load_ref_frame()
 
@@ -846,6 +889,8 @@ class LaplacianPyramid:
 
     def _stack_exposure(self, signals=None, progress_callback=None):
         self.Algorithm.reset_cancel()
+        if self._gpu_run(False, signals, progress_callback):
+            return
 
         def image_iter():
             for i, path in enumerate(self.image_paths):
