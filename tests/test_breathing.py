@@ -1,5 +1,5 @@
 """
-Tests for sequential (chained) alignment — Helicon-style focus breathing compensation.
+Tests for sequential (chained) alignment — focus breathing compensation.
 
 No PySide6/Qt dependency required.
 """

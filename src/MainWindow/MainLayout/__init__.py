@@ -191,6 +191,7 @@ class CenterWidget(qtw.QWidget):
                 "weighted_average": "WeightedAvg",
                 "depth_map": "DepthMap",
                 "exposure_fusion": "Mertens",
+                "hybrid": "Hybrid",
             }
             method_short = method_names.get(method, method)
             if aligned and mainWin:

@@ -7,6 +7,8 @@
       - weighted_average: Contrast-weighted blending (smooth results)
       - depth_map: Per-pixel selection from sharpest source (best color fidelity)
 """
+import os
+import tempfile
 import time
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -131,11 +133,15 @@ class LaplacianPyramid:
             return mode in ("translation", "euclidean", "similarity", "affine")
         return False
 
-    def _prepare_alignment(self, signals=None, progress_callback=None, total_mult=2):
+    def _prepare_alignment(self, signals=None, progress_callback=None, total_mult=2,
+                           later_steps=None):
         """Precompute per-frame transforms for sequential (breathing) alignment.
 
         Pair deltas are estimated in parallel by the Algorithm, then composed
         into a chain anchored at the configured reference frame.
+
+        later_steps: progress steps reported after estimation; defaults to
+        (total_mult - 1) * frames. Set up front so the bar stays monotonic.
 
         Returns False if the stack was cancelled.
         """
@@ -149,7 +155,9 @@ class LaplacianPyramid:
             return True
 
         n = len(self.image_paths)
-        self._progress_total = total_mult * n  # estimation (n) + apply (n-1 or n)
+        if later_steps is None:
+            later_steps = (total_mult - 1) * n  # apply (n-1 or n)
+        self._progress_total = n + later_steps  # estimation (n) + later phases
         transforms, log = self.Algorithm.estimate_sequential_transforms(
             self.image_paths,
             ref_index=self._get_reference_index(),
@@ -224,6 +232,8 @@ class LaplacianPyramid:
 
     def align_and_stack_images(self, signals=None, progress_callback=None):
         """Align and stack using the configured stacking method."""
+        if self._slabbing_active():
+            return self._align_and_stack_slabbed(signals, progress_callback)
         method = self.config.stacking_method
         if method == "weighted_average":
             self._align_and_stack_weighted_average(signals, progress_callback)
@@ -231,11 +241,18 @@ class LaplacianPyramid:
             self._align_and_stack_depthmap(signals, progress_callback)
         elif method == "exposure_fusion":
             self._align_and_stack_exposure(signals, progress_callback)
+        elif method == "hybrid":
+            self._align_and_stack_hybrid(signals, progress_callback)
         else:
             self._align_and_stack_laplacian(signals, progress_callback)
 
     def stack_images(self, signals=None, progress_callback=None):
         """Stack without alignment using the configured method."""
+        # No alignment phase: clear progress offsets left by a previous run
+        self._progress_offset = 0
+        self._progress_total = None
+        if self._slabbing_active():
+            return self._stack_slabbed(signals, progress_callback)
         method = self.config.stacking_method
         if method == "weighted_average":
             self._stack_weighted_average(signals, progress_callback)
@@ -243,6 +260,8 @@ class LaplacianPyramid:
             self._stack_depthmap(signals, progress_callback)
         elif method == "exposure_fusion":
             self._stack_exposure(signals, progress_callback)
+        elif method == "hybrid":
+            self._stack_hybrid(signals, progress_callback)
         else:
             self._stack_laplacian(signals, progress_callback)
 
@@ -271,50 +290,59 @@ class LaplacianPyramid:
             logger.info(f"Using CPU pipeline (use_gpu={self.config.use_gpu}, CuPy={_HAS_CUPY})")
 
         ref_image = self._load_ref_frame()
-        fused_pyr = self.Algorithm.generate_laplacian_pyramid(
-            ref_image, self.pyramid_num_levels
+        fused = self._laplacian_core(
+            ref_image, lambda path: self._load_and_align(ref_image, path),
+            self.image_paths, signals, progress_callback,
         )
-        new_pyr = None
-        paths = self.image_paths
+        if fused is not None:
+            self.output_image = CPU.local_tone_map(fused, strength=0.3)
 
-        def _align_and_pyramid(path):
-            """Load, align, and build pyramid in one worker call."""
-            # ref_image is only deleted after the executor below has shut down
-            aligned = self._load_and_align(ref_image, path)  # noqa: F821
-            pyr = self.Algorithm.generate_laplacian_pyramid(
-                aligned, self.pyramid_num_levels
-            )
-            del aligned
+    def _laplacian_core(self, first_image, load_fn, keys, signals, progress_callback):
+        """CPU pairwise pyramid fusion over keys[0..] (first_image is keys[0]).
+
+        Returns the fused image before tone mapping, or None if cancelled.
+        """
+        fused_pyr = self.Algorithm.generate_laplacian_pyramid(
+            first_image, self.pyramid_num_levels
+        )
+        del first_image
+        new_pyr = None
+
+        def _load_and_pyramid(key):
+            """Load (and align) and build the pyramid in one worker call."""
+            img = load_fn(key)
+            pyr = self.Algorithm.generate_laplacian_pyramid(img, self.pyramid_num_levels)
+            del img
             return pyr
 
         try:
-            # Use 2 workers: pre-compute alignment + pyramid for next images
-            # while main thread fuses current pair. cv2 ops release GIL.
+            # Use 2 workers: pre-compute load + pyramid for the next images
+            # while the main thread fuses the current pair. cv2 ops release GIL.
             with ThreadPoolExecutor(max_workers=2) as pool:
                 pending = {}
                 lookahead = 3
-                for j in range(1, min(1 + lookahead, len(paths))):
-                    pending[j] = pool.submit(_align_and_pyramid, paths[j])
+                for j in range(1, min(1 + lookahead, len(keys))):
+                    pending[j] = pool.submit(_load_and_pyramid, keys[j])
 
-                for i in range(1, len(paths)):
+                for i in range(1, len(keys)):
                     self.Algorithm.wait_if_paused()
                     if self.Algorithm.is_cancelled:
                         logger.info("Stacking cancelled")
                         for f in pending.values():
                             f.cancel()
-                        return
+                        return None
 
                     start_time = time.time()
 
                     if i in pending:
                         new_pyr = pending.pop(i).result()
                     else:
-                        new_pyr = _align_and_pyramid(paths[i])
+                        new_pyr = _load_and_pyramid(keys[i])
 
                     # Refill lookahead
-                    for j in range(i + 1, min(i + 1 + lookahead, len(paths))):
+                    for j in range(i + 1, min(i + 1 + lookahead, len(keys))):
                         if j not in pending:
-                            pending[j] = pool.submit(_align_and_pyramid, paths[j])
+                            pending[j] = pool.submit(_load_and_pyramid, keys[j])
 
                     fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
                         fused_pyr, new_pyr, self.fusion_kernel_size,
@@ -323,15 +351,13 @@ class LaplacianPyramid:
                     del new_pyr
                     new_pyr = None
                     elapsed = time.time() - start_time
-                    self._emit_progress(signals, progress_callback, i + 1, len(paths), elapsed)
+                    self._emit_progress(signals, progress_callback, i + 1, len(keys), elapsed)
         finally:
-            del new_pyr, ref_image
+            del new_pyr
 
         if self.Algorithm.is_cancelled:
-            return
-
-        self.output_image = self.Algorithm.reconstruct_pyramid(fused_pyr)
-        self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
+            return None
+        return self.Algorithm.reconstruct_pyramid(fused_pyr)
 
     def _align_and_stack_laplacian_cupy(self, signals=None, progress_callback=None):
         """Two-phase GPU pipeline: align ALL on CPU, then stream-fuse on GPU.
@@ -443,60 +469,12 @@ class LaplacianPyramid:
         else:
             logger.info(f"Using CPU pipeline (use_gpu={self.config.use_gpu}, CuPy={_HAS_CUPY})")
 
-        im0 = self.Algorithm.load_image(self.image_paths[0])
-        fused_pyr = self.Algorithm.generate_laplacian_pyramid(im0, self.pyramid_num_levels)
-        del im0
-        new_pyr = None
-        paths = self.image_paths
-
-        def _load_and_pyramid(path):
-            """Load image and build pyramid in worker thread."""
-            img = self.Algorithm.load_image(path)
-            pyr = self.Algorithm.generate_laplacian_pyramid(img, self.pyramid_num_levels)
-            del img
-            return pyr
-
-        try:
-            # Pre-compute load+pyramid in background while main thread fuses
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                pending = {}
-                lookahead = 3
-                for j in range(1, min(1 + lookahead, len(paths))):
-                    pending[j] = pool.submit(_load_and_pyramid, paths[j])
-
-                for i in range(1, len(paths)):
-                    self.Algorithm.wait_if_paused()
-                    if self.Algorithm.is_cancelled:
-                        for f in pending.values():
-                            f.cancel()
-                        return
-
-                    start_time = time.time()
-
-                    if i in pending:
-                        new_pyr = pending.pop(i).result()
-                    else:
-                        new_pyr = _load_and_pyramid(paths[i])
-
-                    for j in range(i + 1, min(i + 1 + lookahead, len(paths))):
-                        if j not in pending:
-                            pending[j] = pool.submit(_load_and_pyramid, paths[j])
-
-                    fused_pyr = self.Algorithm.focus_fuse_pyramid_pair(
-                        fused_pyr, new_pyr, self.fusion_kernel_size,
-                        self.config.contrast_threshold, self.config.feather_radius,
-                    )
-                    del new_pyr
-                    new_pyr = None
-                    elapsed = time.time() - start_time
-                    self._emit_progress(signals, progress_callback, i + 1, len(paths), elapsed)
-        finally:
-            del new_pyr
-
-        if self.Algorithm.is_cancelled:
-            return
-        self.output_image = self.Algorithm.reconstruct_pyramid(fused_pyr)
-        self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
+        fused = self._laplacian_core(
+            self.Algorithm.load_image(self.image_paths[0]), self.Algorithm.load_image,
+            self.image_paths, signals, progress_callback,
+        )
+        if fused is not None:
+            self.output_image = CPU.local_tone_map(fused, strength=0.3)
 
     def _stack_laplacian_cupy(self, signals=None, progress_callback=None):
         """GPU-resident stacking with parallel image loading."""
@@ -572,6 +550,183 @@ class LaplacianPyramid:
         self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
         logger.info(f"[CuPy GPU] Reconstruct+tonemap: {time.time()-t_recon:.3f}s")
         logger.info(f"[CuPy GPU] Total: {time.time()-t_start:.2f}s")
+
+    # ─── Slabbing ───
+    #
+    # Deep stacks are fused in overlapping chunks ("slabs"), then the slab
+    # results are fused with the same method. Every frame is aligned once to
+    # the global reference, so slabs need no second alignment/resample. Slab
+    # results go to temp files to keep memory flat for very deep stacks.
+
+    SLAB_METHODS = ("laplacian", "hybrid", "weighted_average", "depth_map")
+
+    @staticmethod
+    def slab_groups(n, size, overlap):
+        """Index ranges of overlapping slabs covering frames 0..n-1."""
+        size = max(2, int(size))
+        overlap = min(max(0, int(overlap)), size - 1)
+        groups, start = [], 0
+        while True:
+            end = min(start + size, n)
+            groups.append(list(range(start, end)))
+            if end >= n:
+                return groups
+            start = end - overlap
+
+    def _slabbing_active(self):
+        return (self.config.slab_size >= 2
+                and self.config.stacking_method in self.SLAB_METHODS
+                and len(self.image_paths) > self.config.slab_size)
+
+    def _fuse_keys(self, first_image, load_fn, keys, signals, progress_callback):
+        """Fuse keys with the configured method's CPU core; returns the image."""
+        method = self.config.stacking_method
+        if method == "hybrid":
+            return self._hybrid_core(first_image, load_fn, keys, signals, progress_callback)
+        if method == "laplacian":
+            return self._laplacian_core(first_image, load_fn, keys, signals, progress_callback)
+
+        def image_iter():
+            yield 0, first_image
+            for i in range(1, len(keys)):
+                yield i, load_fn(keys[i])
+
+        self.output_image = None
+        core = self._weighted_avg_core if method == "weighted_average" else self._depthmap_core
+        core(image_iter(), len(keys), signals, progress_callback)
+        return self.output_image
+
+    def _slab_plan(self):
+        """(slab groups, progress steps: every slab frame + the final pass)."""
+        groups = self.slab_groups(len(self.image_paths), self.config.slab_size,
+                                  self.config.slab_overlap)
+        return groups, sum(len(g) for g in groups) + len(groups)
+
+    def _run_slabs(self, first_image, load_fn, signals, progress_callback):
+        groups, steps = self._slab_plan()
+        logger.info(f"Slabbing: {len(self.image_paths)} frames in {len(groups)} slabs")
+        base = self._progress_offset   # > 0 after a sequential alignment phase
+        self._progress_total = base + steps
+        self.output_image = None
+        fused = None
+        with tempfile.TemporaryDirectory(prefix="chimpstackr_slabs_") as tmp:
+            slab_files = []
+            done = 0
+            for s, group in enumerate(groups):
+                keys = [self.image_paths[k] for k in group]
+                first = first_image if group[0] == 0 else load_fn(keys[0])
+                self._progress_offset = base + done
+                slab = self._fuse_keys(first, load_fn, keys, signals, progress_callback)
+                del first
+                if slab is None:
+                    return
+                path = os.path.join(tmp, f"slab_{s:03d}.npy")
+                np.save(path, slab.astype(np.float32, copy=False))
+                slab_files.append(path)
+                del slab
+                done += len(group)
+            first_image = None
+
+            self._progress_offset = base + done
+            fused = self._fuse_keys(np.load(slab_files[0]), np.load, slab_files,
+                                    signals, progress_callback)
+        if fused is None:
+            return
+        if self.config.stacking_method == "laplacian":
+            fused = CPU.local_tone_map(fused, strength=0.3)
+        self.output_image = fused
+
+    def _align_and_stack_slabbed(self, signals=None, progress_callback=None):
+        self.apply_gpu_settings()
+        self.Algorithm.reset_cancel()
+        self.Algorithm.alignment_shifts = []
+        if not self._prepare_alignment(signals, progress_callback,
+                                       later_steps=self._slab_plan()[1]):
+            return
+        ref_image = self._load_ref_frame()
+        self._run_slabs(ref_image, lambda path: self._load_and_align(ref_image, path),
+                        signals, progress_callback)
+
+    def _stack_slabbed(self, signals=None, progress_callback=None):
+        self.Algorithm.reset_cancel()
+        self._run_slabs(self.Algorithm.load_image(self.image_paths[0]),
+                        self.Algorithm.load_image, signals, progress_callback)
+
+    # ─── Hybrid Method ───
+    #
+    # Pyramid detail on the fine levels, focus-weighted blend on the coarse
+    # levels (see CPU.HybridFuser). Single pass; frames are loaded, aligned
+    # and decomposed in worker threads while the main thread accumulates.
+
+    def _hybrid_core(self, first_image, load_fn, keys, signals, progress_callback):
+        """Hybrid fusion over keys[0..] (first_image is keys[0]).
+
+        Returns the fused image, or None if cancelled.
+        """
+        if self.config.use_gpu:
+            logger.info("Hybrid stacking runs on the CPU")
+        fuser = CPU.HybridFuser(self.pyramid_num_levels, self.fusion_kernel_size)
+        fuser.add(*fuser.prepare(first_image))
+        del first_image
+        self._emit_progress(signals, progress_callback, 1, len(keys), 0.0)
+
+        def _prepare(key):
+            img = load_fn(key)
+            prepared = fuser.prepare(img)
+            del img
+            return prepared
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            pending = {}
+            lookahead = 3
+            for j in range(1, min(1 + lookahead, len(keys))):
+                pending[j] = pool.submit(_prepare, keys[j])
+
+            for i in range(1, len(keys)):
+                self.Algorithm.wait_if_paused()
+                if self.Algorithm.is_cancelled:
+                    logger.info("Stacking cancelled")
+                    for f in pending.values():
+                        f.cancel()
+                    return None
+                start_time = time.time()
+
+                prepared = pending.pop(i).result() if i in pending else _prepare(keys[i])
+                for j in range(i + 1, min(i + 1 + lookahead, len(keys))):
+                    if j not in pending:
+                        pending[j] = pool.submit(_prepare, keys[j])
+
+                fuser.add(*prepared)
+                del prepared
+                self._emit_progress(signals, progress_callback, i + 1, len(keys),
+                                    time.time() - start_time)
+
+        if self.Algorithm.is_cancelled:
+            return None
+        return fuser.result()
+
+    def _align_and_stack_hybrid(self, signals=None, progress_callback=None):
+        self.apply_gpu_settings()
+        self.Algorithm.reset_cancel()
+        self.Algorithm.alignment_shifts = []
+        if not self._prepare_alignment(signals, progress_callback, total_mult=2):
+            return
+        ref_image = self._load_ref_frame()
+        fused = self._hybrid_core(
+            ref_image, lambda path: self._load_and_align(ref_image, path),
+            self.image_paths, signals, progress_callback,
+        )
+        if fused is not None:
+            self.output_image = fused
+
+    def _stack_hybrid(self, signals=None, progress_callback=None):
+        self.Algorithm.reset_cancel()
+        fused = self._hybrid_core(
+            self.Algorithm.load_image(self.image_paths[0]), self.Algorithm.load_image,
+            self.image_paths, signals, progress_callback,
+        )
+        if fused is not None:
+            self.output_image = fused
 
     # ─── Weighted Average Method ───
     #

@@ -10,8 +10,9 @@ Open-source focus stacking application for Windows, macOS, and Linux.
 
 ## Features
 
-- **4 stacking algorithms:** Laplacian Pyramid, Weighted Average, Depth Map, Exposure Fusion (HDR)
-- **Automatic alignment:** Translation, Euclidean (rotation), Similarity (rotation + scale), Affine correction, or Breathing (sequential chained alignment for focus breathing compensation, like Helicon Focus)
+- **5 stacking algorithms:** Laplacian Pyramid, Hybrid (pyramid detail without halos), Weighted Average, Depth Map, Exposure Fusion (HDR)
+- **Slabbing:** Stack very deep stacks in overlapping chunks
+- **Automatic alignment:** Translation, Euclidean (rotation), Similarity (rotation + scale), Affine correction, or Breathing (sequential chained alignment for focus breathing compensation)
 - **16-bit pipeline:** Full bit-depth preservation from RAW to output
 - **Auto-crop:** Removes black edges from alignment shifts
 - **Auto-tuning:** Parameters auto-detected from image resolution
@@ -56,15 +57,19 @@ chimpstackr-cli -i images/*.jpg -o result.png \
 # chained alignment with a 5% max scale change per frame pair
 chimpstackr-cli -i images/*.jpg -o result.tif \
   --align --alignment-mode breathing --alignment-ref middle --max-scale-step 0.05
+
+# Halo-free detail; very deep stack fused in chunks of 40 frames
+chimpstackr-cli -i images/*.jpg -o result.tif --align --method hybrid --slab-size 40
 ```
 
-**Available methods:** `laplacian` (default), `weighted_average`, `depth_map`
+**Available methods:** `laplacian` (default), `hybrid`, `weighted_average`, `depth_map`
 
 ## Stacking Algorithms
 
 | Method | Best for | How it works |
 |---|---|---|
 | **Pyramid** | Fine detail (hairs, bristles, edges) | Laplacian pyramid decomposition, max-contrast selection per frequency band, local tone-mapping |
+| **Hybrid** | Fine detail with clean backgrounds | Max-contrast selection on fine bands, sharpness-weighted blend on coarse bands (no halos) |
 | **Weighted** | Smooth subjects, good color | Per-pixel contrast weighting with proper accumulation |
 | **Depth Map** | Opaque surfaces, best color fidelity | Multi-scale sharpness with edge-aware bilateral smoothing |
 | **HDR** | Varying exposure/lighting | Mertens exposure fusion (not for focus stacking) |

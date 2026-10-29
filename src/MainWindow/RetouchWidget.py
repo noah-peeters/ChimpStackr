@@ -1,7 +1,7 @@
 """
 Retouching tool: paint regions from aligned source frames onto the stacked result.
-Works like Zerene Stacker's retouching brush — select a source frame, paint
-over areas with artifacts, and it replaces those pixels from the source.
+Select a source frame and paint over areas with artifacts; the painted
+pixels are replaced from that source.
 """
 import cv2
 import numpy as np
