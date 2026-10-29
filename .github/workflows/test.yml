@@ -54,6 +54,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest pytest-cov
 
+      # Runners have no GPU: a CPU OpenCL implementation runs the GPU kernels
+      - name: CPU OpenCL for the GPU tests
+        if: runner.os == 'Linux'
+        run: |
+          pip install pocl-binary-distribution
+          echo "CHIMPSTACKR_OPENCL_ANY_DEVICE=1" >> "$GITHUB_ENV"
+
       # Runs everything under tests/ (pyproject testpaths) — new test files
       # are picked up automatically, no need to list them here
       - name: Run tests

@@ -118,6 +118,31 @@ def compute_focusmap_thresholded(pyr_level1, pyr_level2, kernel_size, contrast_t
     return focusmap
 
 
+def local_variance(gray, kernel_size):
+    """Per-pixel local variance Var(X) = E[X^2] - E[X]^2 over a (k|1)^2 box."""
+    k = kernel_size | 1
+    ksize = (k, k)
+    mean = cv2.blur(gray, ksize)
+    sq_mean = cv2.sqrBoxFilter(gray, cv2.CV_32F, ksize)   # == blur(gray * gray)
+    var = cv2.subtract(sq_mean, cv2.multiply(mean, mean))
+    return cv2.max(var, 0.0)
+
+
+def compute_focusmap_fast(level1, level2, kernel_size):
+    """Focus map (1 where level2 has more local contrast), vectorized."""
+    if level1.ndim == 3:
+        gray1 = cv2.cvtColor(level1, cv2.COLOR_BGR2GRAY)
+        gray2 = cv2.cvtColor(level2, cv2.COLOR_BGR2GRAY)
+    else:
+        gray1 = level1
+        gray2 = level2
+    if gray1.dtype != np.float32:
+        gray1 = gray1.astype(np.float32)
+    if gray2.dtype != np.float32:
+        gray2 = gray2.astype(np.float32)
+    return (local_variance(gray2, kernel_size) > local_variance(gray1, kernel_size)).astype(np.uint8)
+
+
 def feather_focusmap(focusmap, radius=3):
     """
     Blur a binary focusmap to create soft transitions between sources.
@@ -248,33 +273,46 @@ def _clahe_luts(gray_u8, clip_limit=2.0, grid=8):
 
 def _clahe_apply(lut_info, values):
     """Evaluate CLAHE at float values (0..255): bilinear between tiles, linear
-    between LUT entries."""
+    between LUT entries.
+
+    Pixels between the same four tile centres share their LUTs, so each such
+    block is evaluated with cv2.LUT (multi-threaded) instead of per-pixel
+    gathers.
+    """
     luts, tw, th = lut_info
     grid = luts.shape[0]
     h, w = values.shape
+    lo_f = np.floor(values)
+    frac = (values - lo_f).astype(np.float32)
+    lo = np.clip(lo_f, 0, 255).astype(np.uint8)
+    hi = cv2.add(lo, 1)                      # saturates at 255
 
-    def axis(n, size):
-        f = np.arange(n, dtype=np.float32) / size - 0.5
-        t1 = np.floor(f)
-        a = f - t1
-        t1 = t1.astype(np.int64)
-        t2 = np.minimum(t1 + 1, grid - 1)
-        return np.maximum(t1, 0), t2, a.astype(np.float32)
+    def regions(n, size):
+        """(start, stop, tile1, tile2, weight-of-tile2) along one axis."""
+        coords = np.arange(n, dtype=np.float32) / size - 0.5
+        edges = [0] + [min(n, int(np.ceil((t + 0.5) * size))) for t in range(grid)] + [n]
+        out = []
+        for k in range(grid + 1):
+            a, b = edges[k], edges[k + 1]
+            if a < b:
+                f = coords[a:b]
+                out.append((a, b, max(k - 1, 0), min(k, grid - 1), (f - (k - 1)).astype(np.float32)))
+        return out
 
-    x1, x2, xa = axis(w, tw)
-    y1, y2, ya = axis(h, th)
-    lo = np.floor(values).astype(np.int64)
-    np.clip(lo, 0, 255, out=lo)
-    hi = np.minimum(lo + 1, 255)
-    frac = (values - lo).astype(np.float32)
+    def tile_values(lut, lo_r, hi_r, fr):
+        a, b = cv2.LUT(lo_r, lut), cv2.LUT(hi_r, lut)
+        return a + (b - a) * fr
 
-    table = luts.reshape(-1)
-    out = np.zeros((h, w), np.float32)
-    for ty, wy in ((y1, 1.0 - ya), (y2, ya)):
-        for tx, wx in ((x1, 1.0 - xa), (x2, xa)):
-            offset = (ty[:, None] * grid + tx[None, :]) * 256    # start of each pixel's tile LUT
-            v = table[offset + lo] * (1.0 - frac) + table[offset + hi] * frac
-            out += v * (wy[:, None] * wx[None, :])
+    out = np.empty((h, w), np.float32)
+    for y0, y1, ty1, ty2, ya in regions(h, th):
+        for x0, x1, tx1, tx2, xa in regions(w, tw):
+            block = (lo[y0:y1, x0:x1], hi[y0:y1, x0:x1], frac[y0:y1, x0:x1])
+            wx, wy = xa[None, :], ya[:, None]
+            top = (tile_values(luts[ty1, tx1], *block) * (1.0 - wx)
+                   + tile_values(luts[ty1, tx2], *block) * wx)
+            bottom = (tile_values(luts[ty2, tx1], *block) * (1.0 - wx)
+                      + tile_values(luts[ty2, tx2], *block) * wx)
+            out[y0:y1, x0:x1] = top * (1.0 - wy) + bottom * wy
     return out
 
 

@@ -11,3 +11,6 @@ imageio>=2.29
 # Alignment / FFT
 scipy>=1.10
 pyfftw>=0.13
+
+# GPU stacking (OpenCL, any vendor; optional at runtime, CPU fallback)
+pyopencl>=2022.1

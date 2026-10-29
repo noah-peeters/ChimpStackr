@@ -19,21 +19,9 @@ cv2.setNumThreads(_cv_threads)
 
 logger = logging.getLogger(__name__)
 
-try:
-    import numba.cuda as cuda
-    HAS_CUDA = True
-except ImportError:
-    HAS_CUDA = False
-
 import src.algorithms.dft_imreg as dft_imreg
 import src.ImageLoadingHandler as ImageLoadingHandler
 import src.algorithms.stacking_algorithms.cpu as CPU
-
-try:
-    import src.algorithms.stacking_algorithms.gpu as GPU
-    HAS_GPU = True
-except Exception:
-    HAS_GPU = False
 
 
 def _available_memory_bytes():
@@ -71,7 +59,6 @@ class Algorithm:
         self.ImageLoadingHandler = ImageLoadingHandler.ImageLoadingHandler()
         self.DFT_Imreg = dft_imreg.im_reg()
         self.DFT_Imreg.last_shift = (0.0, 0.0)
-        self.useGpu = False
         self._cancel_event = threading.Event()
         self._pause_event = threading.Event()
         self._pause_event.set()  # Start unpaused (set = running)
@@ -109,13 +96,6 @@ class Algorithm:
         while not self._pause_event.wait(timeout=60.0):
             if self._cancel_event.is_set():
                 return
-
-    def toggle_cpu_gpu(self, use_gpu, selected_gpu_id):
-        if use_gpu and HAS_CUDA and HAS_GPU:
-            cuda.select_device(selected_gpu_id)
-            self.useGpu = True
-        else:
-            self.useGpu = False
 
     def load_image(self, path):
         """Load image from path as float32 (preserving full bit depth)."""
@@ -1090,21 +1070,13 @@ class Algorithm:
     def generate_laplacian_pyramid(self, im1, num_levels):
         if isinstance(im1, str):
             im1 = self.load_image(im1)
-        if self.useGpu and HAS_GPU:
-            return GPU.generate_laplacian_pyramid(im1, num_levels)
         return CPU.generate_laplacian_pyramid(im1, num_levels)
 
     def reconstruct_pyramid(self, laplacian_pyr):
-        if self.useGpu and HAS_GPU:
-            return GPU.reconstruct_pyramid(laplacian_pyr)
         return CPU.reconstruct_pyramid(laplacian_pyr)
 
     def focus_fuse_pyramid_pair(self, pyr1, pyr2, kernel_size,
                                contrast_threshold=0.0, feather_radius=0):
-        # GPU path doesn't support contrast_threshold/feather_radius —
-        # fall back to CPU when those are enabled for consistent results
-        if self.useGpu and HAS_GPU and contrast_threshold <= 0 and feather_radius <= 0:
-            return self._fuse_gpu(pyr1, pyr2, kernel_size)
         return self._fuse_cpu(pyr1, pyr2, kernel_size, contrast_threshold, feather_radius)
 
     def _fuse_cpu(self, pyr1, pyr2, kernel_size, contrast_threshold=0.0, feather_radius=0):
@@ -1122,16 +1094,10 @@ class Algorithm:
                     current_focusmap = CPU.compute_focusmap_thresholded(
                         gray1, gray2, kernel_size, np.float32(contrast_threshold),
                     )
-                elif HAS_GPU:
-                    # Use fast vectorized focusmap (cv2.blur variance, O(1)/pixel)
-                    current_focusmap = GPU.compute_focusmap_fast(
-                        pyr1[pyramid_level], pyr2[pyramid_level], kernel_size,
-                    )
                 else:
-                    gray1 = cv2.cvtColor(pyr1[pyramid_level], cv2.COLOR_BGR2GRAY)
-                    gray2 = cv2.cvtColor(pyr2[pyramid_level], cv2.COLOR_BGR2GRAY)
-                    current_focusmap = CPU.compute_focusmap(
-                        gray1, gray2, kernel_size,
+                    # Vectorized focusmap (cv2.blur variance, O(1)/pixel)
+                    current_focusmap = CPU.compute_focusmap_fast(
+                        pyr1[pyramid_level], pyr2[pyramid_level], kernel_size,
                     )
             else:
                 s = pyr2[pyramid_level].shape
@@ -1150,9 +1116,3 @@ class Algorithm:
                 )
             new_pyr.append(new_pyr_level)
         return new_pyr
-
-    def _fuse_gpu(self, pyr1, pyr2, kernel_size):
-        """GPU fusion — batched pipeline that keeps data on-GPU.
-        Batch-uploads all pyramid levels, runs all kernels without
-        intermediate host↔device transfers, downloads only at the end."""
-        return GPU.fuse_pyramid_pair_gpu(pyr1, pyr2, kernel_size)

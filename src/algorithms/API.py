@@ -19,13 +19,8 @@ import cv2
 import src.utilities as utilities
 import src.algorithms as algorithms
 import src.algorithms.stacking_algorithms.cpu as CPU
+import src.algorithms.stacking_algorithms.ocl as OCL
 from src.config import AlgorithmConfig
-
-try:
-    import src.algorithms.stacking_algorithms.gpu as _GPU_module
-    _HAS_CUPY = _GPU_module.HAS_CUPY
-except Exception:
-    _HAS_CUPY = False
 
 logger = logging.getLogger(__name__)
 
@@ -59,11 +54,6 @@ class LaplacianPyramid:
         for key, value in kwargs.items():
             if hasattr(self.config, key):
                 setattr(self.config, key, value)
-
-    def apply_gpu_settings(self):
-        self.Algorithm.toggle_cpu_gpu(
-            self.config.use_gpu, self.config.selected_gpu_id,
-        )
 
     def cancel(self):
         self.Algorithm.cancel()
@@ -267,27 +257,14 @@ class LaplacianPyramid:
 
     # ─── Laplacian Pyramid Method ───
 
-    def _can_use_cupy_path(self):
-        """Check if the fully GPU-resident CuPy path can be used."""
-        return _HAS_CUPY and self.config.use_gpu
-
     def _align_and_stack_laplacian(self, signals=None, progress_callback=None):
-        self.apply_gpu_settings()
         self.Algorithm.reset_cancel()
         self.Algorithm.alignment_shifts = []
-
-        # Use fully GPU-resident path when CuPy is available
-        use_cupy = self._can_use_cupy_path()
         # Sequential (breathing) alignment adds an estimation phase up front
-        if not self._prepare_alignment(signals, progress_callback,
-                                       total_mult=3 if use_cupy else 2):
+        if not self._prepare_alignment(signals, progress_callback, total_mult=2):
             return
-
-        if use_cupy:
-            logger.info("Using CuPy GPU-resident pipeline (use_gpu=True, CuPy available)")
-            return self._align_and_stack_laplacian_cupy(signals, progress_callback)
-        else:
-            logger.info(f"Using CPU pipeline (use_gpu={self.config.use_gpu}, CuPy={_HAS_CUPY})")
+        if self._gpu_run(True, signals, progress_callback):
+            return
 
         ref_image = self._load_ref_frame()
         fused = self._laplacian_core(
@@ -360,197 +337,16 @@ class LaplacianPyramid:
             return None
         return self.Algorithm.reconstruct_pyramid(fused_pyr)
 
-    def _align_and_stack_laplacian_cupy(self, signals=None, progress_callback=None):
-        """Two-phase GPU pipeline: align ALL on CPU, then stream-fuse on GPU.
-
-        Phase 1: Align all images using ALL CPU cores in parallel.
-                 Saturates CPU — all cores busy with alignment.
-        Phase 2: Stream aligned images through GPU one by one for fusion.
-                 GPU runs at ~100ms/image, continuously fed from RAM.
-
-        Separated phases avoid CPU↔GPU contention and maximize both.
-        """
-        import cupy as cp
-        GPU = _GPU_module
-        import os
-
-        paths = self.image_paths
-        n = len(paths)
-        n_workers = min(max(4, os.cpu_count() // 2), 12)
-        logger.info(f"[CuPy GPU] Two-phase pipeline: {n_workers} CPU workers, then GPU stream")
-        t_total = time.time()
-
-        # ── Phase 1: Align ALL images on CPU (parallel) ──
-        t_align = time.time()
-        ref_image = self._load_ref_frame()
-        aligned_images = [ref_image]
-
-        with ThreadPoolExecutor(max_workers=n_workers) as pool:
-            futures = {}
-            for j in range(1, n):
-                futures[j] = pool.submit(self._load_and_align, ref_image, paths[j])
-
-            t_last = time.time()
-            for i in range(1, n):
-                self.Algorithm.wait_if_paused()
-                if self.Algorithm.is_cancelled:
-                    logger.info("Stacking cancelled during alignment")
-                    for f in futures.values():
-                        f.cancel()
-                    return
-
-                aligned = futures[i].result()
-                aligned_images.append(aligned)
-                t_now = time.time()
-                per_image_time = t_now - t_last
-                t_last = t_now
-                logger.info(f"[CuPy GPU] Aligned {i+1}/{n} ({t_now - t_align:.1f}s elapsed)")
-                # Report progress over total pipeline (n items align + n items fuse)
-                # Pass per-image time so TimeRemainingHandler estimates correctly
-                self._emit_progress(signals, progress_callback, i + 1, n * 2, per_image_time)
-
-        align_time = time.time() - t_align
-        logger.info(f"[CuPy GPU] Phase 1 (align): {align_time:.2f}s "
-                     f"({align_time/max(n-1,1):.3f}s/image avg)")
-        del ref_image
-
-        if self.Algorithm.is_cancelled:
-            return
-
-        # ── Phase 2: Stream-fuse on GPU (pairwise, all data in RAM already) ──
-        t_gpu = time.time()
-        GPU._cupy_warmup()
-
-        img0_gpu = cp.asarray(aligned_images[0])
-        fused_pyr = GPU._cupy_laplacian_pyramid(img0_gpu, self.pyramid_num_levels)
-        del img0_gpu
-
-        t_last_gpu = time.time()
-        for i in range(1, n):
-            if self.Algorithm.is_cancelled:
-                return
-            img_gpu = cp.asarray(aligned_images[i])
-            aligned_images[i] = None  # free RAM as we go
-            new_pyr = GPU._cupy_laplacian_pyramid(img_gpu, self.pyramid_num_levels)
-            del img_gpu
-            fused_pyr = GPU._cupy_fuse_pyramid_pair(
-                fused_pyr, new_pyr, self.fusion_kernel_size,
-                self.config.contrast_threshold, self.config.feather_radius
-            )
-            del new_pyr
-            t_now = time.time()
-            self._emit_progress(signals, progress_callback, n + i, n * 2,
-                                t_now - t_last_gpu)
-            t_last_gpu = t_now
-
-        cp.cuda.Stream.null.synchronize()
-        del aligned_images
-        gpu_time = time.time() - t_gpu
-        logger.info(f"[CuPy GPU] Phase 2 (GPU fuse): {gpu_time:.2f}s "
-                     f"({gpu_time/max(n-1,1):.3f}s/image)")
-
-        # ── Reconstruct ──
-        t_recon = time.time()
-        result_gpu = GPU._cupy_reconstruct(fused_pyr)
-        self.output_image = cp.asnumpy(result_gpu)
-        del result_gpu, fused_pyr
-        self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
-        logger.info(f"[CuPy GPU] Reconstruct+tonemap: {time.time()-t_recon:.3f}s")
-        logger.info(f"[CuPy GPU] Total: {time.time()-t_total:.2f}s "
-                     f"(align={align_time:.1f}s + gpu={gpu_time:.1f}s)")
-
     def _stack_laplacian(self, signals=None, progress_callback=None):
-        self.apply_gpu_settings()
         self.Algorithm.reset_cancel()
-
-        # Use fully GPU-resident path when CuPy is available
-        if self._can_use_cupy_path():
-            logger.info("Using CuPy GPU-resident pipeline (stack-only)")
-            return self._stack_laplacian_cupy(signals, progress_callback)
-        else:
-            logger.info(f"Using CPU pipeline (use_gpu={self.config.use_gpu}, CuPy={_HAS_CUPY})")
-
+        if self._gpu_run(False, signals, progress_callback):
+            return
         fused = self._laplacian_core(
             self.Algorithm.load_image(self.image_paths[0]), self.Algorithm.load_image,
             self.image_paths, signals, progress_callback,
         )
         if fused is not None:
             self.output_image = CPU.local_tone_map(fused, strength=0.3)
-
-    def _stack_laplacian_cupy(self, signals=None, progress_callback=None):
-        """GPU-resident stacking with parallel image loading."""
-        import cupy as cp
-        GPU = _GPU_module
-        import os
-
-        paths = self.image_paths
-        n = len(paths)
-        n_workers = min(max(3, os.cpu_count() // 3), 8)
-        logger.info(f"[CuPy GPU] Pipelined stack: {n_workers} load workers")
-        t_start = time.time()
-        GPU._cupy_warmup()
-
-        im0 = self.Algorithm.load_image(paths[0])
-        img0_gpu = cp.asarray(im0)
-        fused_pyr = GPU._cupy_laplacian_pyramid(img0_gpu, self.pyramid_num_levels)
-        del im0, img0_gpu
-
-        try:
-            with ThreadPoolExecutor(max_workers=n_workers) as pool:
-                pending = {}
-                lookahead = n_workers + 1
-                for j in range(1, min(1 + lookahead, n)):
-                    pending[j] = pool.submit(self.Algorithm.load_image, paths[j])
-
-                for i in range(1, n):
-                    self.Algorithm.wait_if_paused()
-                    if self.Algorithm.is_cancelled:
-                        for f in pending.values():
-                            f.cancel()
-                        return
-
-                    start_time = time.time()
-
-                    if i in pending:
-                        im1 = pending.pop(i).result()
-                    else:
-                        im1 = self.Algorithm.load_image(paths[i])
-
-                    for j in range(i + 1, min(i + 1 + lookahead, n)):
-                        if j not in pending:
-                            pending[j] = pool.submit(self.Algorithm.load_image, paths[j])
-
-                    t_gpu = time.time()
-                    img_gpu = cp.asarray(im1)
-                    del im1
-                    new_pyr = GPU._cupy_laplacian_pyramid(img_gpu, self.pyramid_num_levels)
-                    del img_gpu
-                    fused_pyr = GPU._cupy_fuse_pyramid_pair(
-                        fused_pyr, new_pyr, self.fusion_kernel_size,
-                        self.config.contrast_threshold, self.config.feather_radius
-                    )
-                    del new_pyr
-                    cp.cuda.Stream.null.synchronize()
-
-                    elapsed = time.time() - start_time
-                    gpu_elapsed = time.time() - t_gpu
-                    logger.info(f"[CuPy GPU] Image {i+1}/{n}: "
-                                f"total={elapsed:.3f}s (load={elapsed-gpu_elapsed:.3f}s, "
-                                f"gpu={gpu_elapsed:.3f}s)")
-                    self._emit_progress(signals, progress_callback, i + 1, n, elapsed)
-        finally:
-            pass
-
-        if self.Algorithm.is_cancelled:
-            return
-
-        t_recon = time.time()
-        result_gpu = GPU._cupy_reconstruct(fused_pyr)
-        self.output_image = cp.asnumpy(result_gpu)
-        del result_gpu, fused_pyr
-        self.output_image = CPU.local_tone_map(self.output_image, strength=0.3)
-        logger.info(f"[CuPy GPU] Reconstruct+tonemap: {time.time()-t_recon:.3f}s")
-        logger.info(f"[CuPy GPU] Total: {time.time()-t_start:.2f}s")
 
     # ─── Slabbing ───
     #
@@ -638,7 +434,6 @@ class LaplacianPyramid:
         self.output_image = fused
 
     def _align_and_stack_slabbed(self, signals=None, progress_callback=None):
-        self.apply_gpu_settings()
         self.Algorithm.reset_cancel()
         self.Algorithm.alignment_shifts = []
         if not self._prepare_alignment(signals, progress_callback,
@@ -681,8 +476,6 @@ class LaplacianPyramid:
 
         Returns the fused image, or None if cancelled.
         """
-        if self.config.use_gpu:
-            logger.info("Hybrid stacking runs on the CPU")
         fuser = CPU.HybridFuser(self.pyramid_num_levels, self.fusion_kernel_size)
         frame_shape = first_image.shape
         fuser.add(fuser.prepare(first_image))
@@ -738,10 +531,11 @@ class LaplacianPyramid:
         return fuser.result()
 
     def _align_and_stack_hybrid(self, signals=None, progress_callback=None):
-        self.apply_gpu_settings()
         self.Algorithm.reset_cancel()
         self.Algorithm.alignment_shifts = []
         if not self._prepare_alignment(signals, progress_callback, total_mult=2):
+            return
+        if self._gpu_run(True, signals, progress_callback):
             return
         ref_image = self._load_ref_frame()
         fused = self._hybrid_core(
@@ -753,12 +547,106 @@ class LaplacianPyramid:
 
     def _stack_hybrid(self, signals=None, progress_callback=None):
         self.Algorithm.reset_cancel()
+        if self._gpu_run(False, signals, progress_callback):
+            return
         fused = self._hybrid_core(
             self.Algorithm.load_image(self.image_paths[0]), self.Algorithm.load_image,
             self.image_paths, signals, progress_callback,
         )
         if fused is not None:
             self.output_image = fused
+
+    # ─── GPU (OpenCL) ───
+    #
+    # Pyramid and Hybrid can run on any OpenCL GPU: worker threads decode
+    # frames (and estimate alignment), the GPU warps, decomposes and fuses
+    # them, and only the result comes back. Falls back to the CPU path when
+    # no GPU is available or anything goes wrong on it.
+
+    def _gpu_wanted(self):
+        c = self.config
+        if not c.use_gpu or not OCL.available():
+            return False
+        if c.stacking_method == "laplacian":
+            return c.contrast_threshold <= 0   # thresholded focus map is CPU-only
+        return c.stacking_method == "hybrid"
+
+    def _gpu_run(self, align, signals, progress_callback):
+        """Stack on the GPU. Returns False if the CPU path should run instead."""
+        if not self._gpu_wanted():
+            return False
+        try:
+            gpu = OCL.get(self.config.selected_gpu_id)
+            logger.info(f"Stacking on GPU: {gpu.name}")
+            fused = self._gpu_core(gpu, align, signals, progress_callback)
+        except Exception as exc:   # OpenCL/driver errors, out of GPU memory, ...
+            logger.warning(f"GPU stacking failed ({exc}); falling back to the CPU")
+            self.Algorithm.alignment_shifts = []
+            return False
+        if fused is not None:
+            if self.config.stacking_method == "laplacian":
+                fused = CPU.local_tone_map(fused, strength=0.3)
+            self.output_image = fused
+        return True
+
+    def _gpu_core(self, gpu, align, signals, progress_callback):
+        paths = self.image_paths
+        load = self.Algorithm.ImageLoadingHandler.read_image_native
+        sequential = align and self._breathing_transforms is not None
+        mode = self._resolve_alignment_mode()
+        ref = load(paths[0])
+        if ref is None:
+            raise RuntimeError(f"failed to load {paths[0]}")
+        # single-reference alignment estimates from float frames, exactly as
+        # the CPU path does (the estimators are sensitive to their input)
+        ref_f32 = ref.astype(np.float32) if align and not sequential else None
+        if self.config.stacking_method == "hybrid":
+            fuser = OCL.HybridGPU(gpu, self.pyramid_num_levels, self.fusion_kernel_size)
+        else:
+            fuser = OCL.PyramidGPU(gpu, self.pyramid_num_levels, self.fusion_kernel_size,
+                                   self.config.feather_radius)
+
+        def frame(i):
+            """Decode (and, for single-reference alignment, estimate) frame i."""
+            img = ref if i == 0 else load(paths[i])
+            if img is None:
+                raise RuntimeError(f"failed to load {paths[i]}")
+            if img.dtype != ref.dtype:
+                img = img.astype(np.float32) if ref.dtype == np.float32 else                     np.clip(img, 0, 255).astype(np.uint8)
+            img = self.Algorithm._match_dimensions(ref, img)
+            M = None
+            if sequential:
+                M = self._breathing_transforms[i]
+            elif align and i > 0:
+                M, _ = self.Algorithm.estimate_pair_transform(
+                    ref_f32, img.astype(np.float32), alignment_mode=mode,
+                    scale_factor=self.config.alignment_scale_factor,
+                )
+            return img, M
+
+        workers = 4
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            pending = {j: pool.submit(frame, j) for j in range(min(workers + 1, len(paths)))}
+            for i in range(len(paths)):
+                self.Algorithm.wait_if_paused()
+                if self.Algorithm.is_cancelled:
+                    logger.info("Stacking cancelled")
+                    for f in pending.values():
+                        f.cancel()
+                    return None
+                start_time = time.time()
+                img, M = pending.pop(i).result()
+                j = i + workers + 1
+                if j < len(paths):
+                    pending[j] = pool.submit(frame, j)
+                # breathing: Lanczos + replicated borders, as on the CPU path
+                fuser.add(gpu.warp(img, M, lanczos=sequential, replicate=sequential))
+                if M is not None:
+                    self.Algorithm._track_warp_shifts(M, img.shape)
+                del img
+                self._emit_progress(signals, progress_callback, i + 1, len(paths),
+                                    time.time() - start_time)
+        return fuser.result()
 
     # ─── Weighted Average Method ───
     #
@@ -801,7 +689,6 @@ class LaplacianPyramid:
         self.output_image = (weighted_sum / denom).astype(np.float32)
 
     def _align_and_stack_weighted_average(self, signals=None, progress_callback=None):
-        self.apply_gpu_settings()
         self.Algorithm.reset_cancel()
         self.Algorithm.alignment_shifts = []
         if not self._prepare_alignment(signals, progress_callback, total_mult=2):
@@ -876,7 +763,6 @@ class LaplacianPyramid:
         self.depth_map = None
 
     def _align_and_stack_depthmap(self, signals=None, progress_callback=None):
-        self.apply_gpu_settings()
         self.Algorithm.reset_cancel()
         self.Algorithm.alignment_shifts = []
         if not self._prepare_alignment(signals, progress_callback, total_mult=2):
@@ -942,7 +828,6 @@ class LaplacianPyramid:
             self.output_image = CPU.mertens_fuse_batch(intermediates)
 
     def _align_and_stack_exposure(self, signals=None, progress_callback=None):
-        self.apply_gpu_settings()
         self.Algorithm.reset_cancel()
         self.Algorithm.alignment_shifts = []
         if not self._prepare_alignment(signals, progress_callback, total_mult=2):

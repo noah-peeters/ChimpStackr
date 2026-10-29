@@ -37,6 +37,7 @@ pyfftw_datas, pyfftw_binaries, pyfftw_hiddenimports = collect_all('pyfftw')
 rawpy_datas, rawpy_binaries, rawpy_hiddenimports = collect_all('rawpy')
 imageio_datas, imageio_binaries, imageio_hiddenimports = collect_all('imageio')
 scipy_datas, scipy_binaries, scipy_hiddenimports = collect_all('scipy')
+pyopencl_datas, pyopencl_binaries, pyopencl_hiddenimports = collect_all('pyopencl')
 
 # ── Data files ──
 datas = [
@@ -48,6 +49,7 @@ datas += pyfftw_datas
 datas += rawpy_datas
 datas += imageio_datas
 datas += scipy_datas
+datas += pyopencl_datas
 
 # ── Binary files ──
 binaries = []
@@ -56,12 +58,14 @@ binaries += pyfftw_binaries
 binaries += rawpy_binaries
 binaries += imageio_binaries
 binaries += scipy_binaries
+binaries += pyopencl_binaries
 
 # ── Hidden imports ──
 hiddenimports = [
     'src', 'src.settings', 'src.config', 'src.cli', 'src.run',
     'src.algorithms', 'src.algorithms.API', 'src.algorithms.dft_imreg',
     'src.algorithms.stacking_algorithms', 'src.algorithms.stacking_algorithms.cpu',
+    'src.algorithms.stacking_algorithms.ocl',
     'src.MainWindow', 'src.MainWindow.icons', 'src.MainWindow.style',
     'src.ImageLoadingHandler',
     'cv2', 'numpy', 'scipy', 'scipy.ndimage', 'scipy.ndimage.interpolation',
@@ -70,6 +74,7 @@ hiddenimports = [
 hiddenimports += numba_hiddenimports
 hiddenimports += pyfftw_hiddenimports
 hiddenimports += rawpy_hiddenimports
+hiddenimports += pyopencl_hiddenimports
 hiddenimports += imageio_hiddenimports
 hiddenimports += scipy_hiddenimports
 

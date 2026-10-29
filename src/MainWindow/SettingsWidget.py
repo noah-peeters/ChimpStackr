@@ -5,13 +5,10 @@ Modern macOS-style grouped settings with sections.
 import PySide6.QtWidgets as qtw
 import PySide6.QtCore as qtc
 
-try:
-    import numba.cuda as cuda
-    HAS_CUDA = cuda.is_available()
-except ImportError:
-    HAS_CUDA = False
-
 import src.settings as settings
+import src.algorithms.stacking_algorithms.ocl as OCL
+
+HAS_GPU = OCL.available()
 
 
 class SettingRow(qtw.QWidget):
@@ -405,9 +402,9 @@ class SettingsPanel(qtw.QWidget):
         gpu_section = SettingSection("GPU ACCELERATION")
 
         self.gpu_checkbox = qtw.QCheckBox()
-        self.gpu_checkbox.setEnabled(HAS_CUDA)
+        self.gpu_checkbox.setEnabled(HAS_GPU)
         self.gpu_checkbox.setChecked(
-            bool(int(settings.globalVars["QSettings"].value("computing/use_gpu") or 0)) and HAS_CUDA
+            bool(int(settings.globalVars["QSettings"].value("computing/use_gpu") or 0)) and HAS_GPU
         )
         self.gpu_checkbox.toggled.connect(lambda v: self.change_setting("computing/use_gpu", int(v)))
         gpu_control = qtw.QWidget()
@@ -417,16 +414,17 @@ class SettingsPanel(qtw.QWidget):
         gpu_layout.addStretch()
         gpu_layout.addWidget(self.gpu_checkbox)
         gpu_section.add_row(
-            "Use CUDA" if HAS_CUDA else "CUDA (not available)",
-            gpu_control
+            "Use GPU" if HAS_GPU else "GPU (not available)",
+            gpu_control,
+            "Pyramid and Hybrid stacking run on the GPU (OpenCL,\n"
+            "any vendor). Other methods use the CPU.\n"
+            "Falls back to the CPU automatically if anything fails."
         )
 
-        if HAS_CUDA:
+        if HAS_GPU:
             self.gpu_combo = qtw.QComboBox()
-            for device in cuda.list_devices():
-                cc = device.compute_capability
-                name = str(device.name)[2:-1]
-                self.gpu_combo.addItem(f"{name} ({cc[0]}.{cc[1]})")
+            for name in OCL.device_names():
+                self.gpu_combo.addItem(name)
             saved_id = int(settings.globalVars["QSettings"].value("computing/selected_gpu_id") or 0)
             self.gpu_combo.setCurrentIndex(min(saved_id, self.gpu_combo.count() - 1))
             self.gpu_combo.currentIndexChanged.connect(

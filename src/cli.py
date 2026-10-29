@@ -136,13 +136,14 @@ def parse_args():
         "--gpu",
         action="store_true",
         default=False,
-        help="Use GPU acceleration (requires CUDA)",
+        help="Stack on the GPU (Pyramid and Hybrid; OpenCL, any GPU vendor). "
+             "Falls back to the CPU if no GPU is available",
     )
     parser.add_argument(
         "--gpu-id",
         type=int,
         default=0,
-        help="CUDA GPU device ID (default: 0)",
+        help="GPU device index when there are several (default: 0)",
     )
     parser.add_argument(
         "--quality",
@@ -275,6 +276,12 @@ def main():
         sequential = alignment_mode == "breathing" or args.alignment_ref == "previous"
         print(f"  Alignment: ref={args.alignment_ref}, scale={scale_factor}, "
               f"mode={alignment_mode}" + (", sequential (breathing compensation)" if sequential else ""))
+
+    if args.gpu:
+        import src.algorithms.stacking_algorithms.ocl as OCL
+        names = OCL.device_names()
+        print(f"  GPU: {names[min(max(args.gpu_id, 0), len(names) - 1)]}" if names
+              else "  GPU: no OpenCL GPU found, stacking on the CPU")
 
     # Configure algorithm
     config = AlgorithmConfig(
