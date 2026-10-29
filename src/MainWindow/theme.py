@@ -164,7 +164,45 @@ def build_palette(t):
     return p
 
 
+_ASSET_DIR = None
+
+
+def _assets(t):
+    """Theme-colored SVGs the stylesheet points to (Qt stylesheets need files)."""
+    import os
+    import tempfile
+    global _ASSET_DIR
+    if _ASSET_DIR is None:
+        _ASSET_DIR = tempfile.mkdtemp(prefix="chimpstackr-theme-")
+    down = '<path d="M6 9l6 6 6-6"/>'
+    up = '<path d="M6 15l6-6 6 6"/>'
+    shapes = {
+        "chevron_down": (down, t.text_secondary, 2.2),
+        "chevron_down_disabled": (down, t.text_tertiary, 2.2),
+        "chevron_up": (up, t.accent, 2.2),
+        "chevron_up_small": (up, t.text, 2.4),
+        "chevron_down_small": (down, t.text, 2.4),
+        "chevron_up_small_disabled": (up, t.text_tertiary, 2.4),
+        "chevron_down_small_disabled": (down, t.text_tertiary, 2.4),
+        "check": ('<path d="M6 12.5l4 4 8-9"/>', t.accent_text, 3.0),
+        "dot": ('<circle cx="12" cy="12" r="4.5" fill="' + t.accent_text + '" stroke="none"/>',
+                t.accent_text, 0),
+    }
+    paths = {}
+    tag = "dark" if t.dark else "light"
+    for name, (body, color, width) in shapes.items():
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" '
+               f'stroke="{color}" stroke-width="{width}" stroke-linecap="round" '
+               f'stroke-linejoin="round">{body}</svg>')
+        path = os.path.join(_ASSET_DIR, f"{name}-{tag}.svg")
+        with open(path, "w") as f:
+            f.write(svg)
+        paths[name] = path.replace("\\", "/")
+    return paths
+
+
 def build_stylesheet(t):
+    a = _assets(t)
     return f"""
     QMainWindow, QDialog {{ background: {t.window}; }}
     QToolTip {{
@@ -245,15 +283,77 @@ def build_stylesheet(t):
     /* Inputs */
     QSpinBox, QDoubleSpinBox, QComboBox, QLineEdit {{
         background: {t.control}; color: {t.text}; border: 1px solid {t.border};
-        border-radius: {RADIUS_SM}px; padding: 3px 8px; min-height: 20px;
+        border-radius: {RADIUS_SM}px; padding: 4px 10px; min-height: 20px;
         selection-background-color: {t.accent}; selection-color: {t.accent_text};
     }}
-    QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QLineEdit:focus {{ border-color: {t.focus}; }}
-    QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {{ color: {t.text_tertiary}; }}
+    QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover, QLineEdit:hover {{
+        background: {t.control_hover};
+    }}
+    QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QLineEdit:focus,
+    QComboBox:on {{ border: 1px solid {t.focus}; }}
+    QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled, QLineEdit:disabled {{
+        color: {t.text_tertiary}; background: {t.control};
+    }}
+
+    /* Combo box: chevron, list popup */
+    QComboBox {{ padding-right: 30px; combobox-popup: 0; }}
+    QComboBox::drop-down {{
+        subcontrol-origin: padding; subcontrol-position: center right;
+        width: 28px; border: none; background: transparent;
+    }}
+    QComboBox::down-arrow {{ image: url("{a['chevron_down']}"); width: 12px; height: 12px; }}
+    QComboBox::down-arrow:disabled {{ image: url("{a['chevron_down_disabled']}"); }}
+    QComboBox::down-arrow:on {{ image: url("{a['chevron_up']}"); }}
     QComboBox QAbstractItemView {{
         background: {t.surface}; color: {t.text}; border: 1px solid {t.border};
-        selection-background-color: {t.accent}; selection-color: {t.accent_text}; outline: none;
+        border-radius: {RADIUS}px; padding: 4px; outline: none;
     }}
+    QComboBox QAbstractItemView::item {{
+        min-height: 26px; padding: 2px 8px; border-radius: {RADIUS_SM - 2}px;
+    }}
+    QComboBox QAbstractItemView::item:hover,
+    QComboBox QAbstractItemView::item:selected {{
+        background: {t.accent}; color: {t.accent_text};
+    }}
+
+    /* Spin boxes: stacked chevron buttons */
+    QSpinBox, QDoubleSpinBox {{ padding-right: 26px; }}
+    QSpinBox::up-button, QDoubleSpinBox::up-button {{
+        subcontrol-origin: border; subcontrol-position: top right; width: 22px;
+        border: none; border-left: 1px solid {t.separator}; border-top-right-radius: {RADIUS_SM}px;
+        background: transparent; margin: 1px 1px 0 0;
+    }}
+    QSpinBox::down-button, QDoubleSpinBox::down-button {{
+        subcontrol-origin: border; subcontrol-position: bottom right; width: 22px;
+        border: none; border-left: 1px solid {t.separator}; border-bottom-right-radius: {RADIUS_SM}px;
+        background: transparent; margin: 0 1px 1px 0;
+    }}
+    QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+    QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{ background: {t.control_pressed}; }}
+    QSpinBox::up-button:pressed, QDoubleSpinBox::up-button:pressed,
+    QSpinBox::down-button:pressed, QDoubleSpinBox::down-button:pressed {{ background: {t.accent}; }}
+    QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url("{a['chevron_up_small']}"); width: 11px; height: 11px; }}
+    QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url("{a['chevron_down_small']}"); width: 11px; height: 11px; }}
+    QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled,
+    QSpinBox::up-arrow:off, QDoubleSpinBox::up-arrow:off {{ image: url("{a['chevron_up_small_disabled']}"); }}
+    QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled,
+    QSpinBox::down-arrow:off, QDoubleSpinBox::down-arrow:off {{ image: url("{a['chevron_down_small_disabled']}"); }}
+
+    /* Check boxes and radio buttons */
+    QCheckBox, QRadioButton {{ spacing: 8px; color: {t.text}; }}
+    QCheckBox::indicator, QRadioButton::indicator {{
+        width: 16px; height: 16px; border: 1.5px solid {t.text_tertiary}; background: {t.control};
+    }}
+    QCheckBox::indicator {{ border-radius: 4px; }}
+    QRadioButton::indicator {{ border-radius: 9px; }}
+    QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border-color: {t.accent}; }}
+    QCheckBox::indicator:checked {{
+        background: {t.accent}; border-color: {t.accent}; image: url("{a['check']}");
+    }}
+    QRadioButton::indicator:checked {{
+        background: {t.accent}; border-color: {t.accent}; image: url("{a['dot']}");
+    }}
+    QCheckBox::indicator:disabled, QRadioButton::indicator:disabled {{ border-color: {t.border}; }}
 
     /* Lists */
     QListView, QListWidget {{
@@ -332,7 +432,6 @@ def build_stylesheet(t):
     QMenu::item:disabled {{ color: {t.text_tertiary}; }}
     QMenu::separator {{ height: 1px; background: {t.separator}; margin: 4px 6px; }}
 
-    QCheckBox {{ spacing: 6px; }}
     QSlider::groove:horizontal {{ height: 4px; background: {t.control_pressed}; border-radius: 2px; }}
     QSlider::sub-page:horizontal {{ background: {t.accent}; border-radius: 2px; }}
     QSlider::handle:horizontal {{

@@ -35,12 +35,12 @@ def _qimage_from_array(image, bgr=True):
     image = np.ascontiguousarray(image)
     h, w = image.shape[:2]
     if image.ndim == 2:
-        qimg = qtg.QImage(image.data, w, h, w, qtg.QImage.Format_Grayscale8)
+        qimg = qtg.QImage(image.data, w, h, w, qtg.QImage.Format.Format_Grayscale8)
     else:
-        fmt = qtg.QImage.Format_BGR888 if bgr else qtg.QImage.Format_RGB888
+        fmt = qtg.QImage.Format.Format_BGR888 if bgr else qtg.QImage.Format.Format_RGB888
         qimg = qtg.QImage(image.data, w, h, w * 3, fmt)
     # convertToFormat copies, so the QImage no longer references `image`
-    return qimg.convertToFormat(qtg.QImage.Format_ARGB32_Premultiplied)
+    return qimg.convertToFormat(qtg.QImage.Format.Format_ARGB32_Premultiplied)
 
 
 class _ClippedPixmapItem(qtw.QGraphicsPixmapItem):
