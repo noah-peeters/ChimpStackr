@@ -43,6 +43,11 @@ def qs():
     return settings.globalVars["QSettings"]
 
 
+def updater_display(version):
+    import src.updater as updater
+    return updater.display_version(version)
+
+
 def get_int(key, default):
     v = qs().value(key)
     try:
@@ -628,11 +633,12 @@ class GpuStatus(qtc.QObject):
 class SettingsDialog(qtw.QDialog):
     """App preferences: appearance and processing."""
 
-    def __init__(self, gpu_status, parent=None):
+    def __init__(self, gpu_status, updates=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(False)
         self.gpu_status = gpu_status
+        self.updates = updates
         self.setMinimumWidth(460)
 
         layout = qtw.QVBoxLayout(self)
@@ -676,6 +682,35 @@ class SettingsDialog(qtw.QDialog):
         processing.add(self.gpu_note)
         layout.addWidget(processing)
 
+        import src.MainWindow.UpdateDialog as UpdateDialog
+        import src.updater as updater
+        upd = Section("Updates")
+        uc = FormCard()
+        self.auto_update_switch = Switch(UpdateDialog.auto_check_enabled())
+        self.auto_update_switch.setAccessibleName("Automatically check for updates")
+        self.auto_update_switch.toggled.connect(lambda v: qs().setValue("updates/auto_check", int(v)))
+        uc.add_row("auto", "Automatically check for updates", switch_row(self.auto_update_switch),
+                   "Once a day, ChimpStackr asks GitHub whether a newer release exists")
+        self.prerelease_switch = Switch(UpdateDialog.include_prereleases())
+        self.prerelease_switch.setAccessibleName("Include pre-releases")
+        self.prerelease_switch.toggled.connect(lambda v: qs().setValue("updates/prerelease", int(v)))
+        uc.add_row("pre", "Include pre-releases", switch_row(self.prerelease_switch),
+                   "Also offer beta versions")
+        upd.add(uc)
+        row = qtw.QHBoxLayout()
+        self.update_note = qtw.QLabel()
+        self.update_note.setObjectName("Hint")
+        self.update_note.setWordWrap(True)
+        check = qtw.QPushButton("Check Now")
+        check.setEnabled(updates is not None)
+        check.clicked.connect(lambda: (updates.check(manual=True), self._refresh_update_note()))
+        row.addWidget(self.update_note, 1)
+        row.addWidget(check)
+        upd.layout_.addLayout(row)
+        layout.addWidget(upd)
+        self._version = updater.current_version()
+        self._refresh_update_note()
+
         layout.addStretch()
         buttons = qtw.QDialogButtonBox(qtw.QDialogButtonBox.Close)
         buttons.rejected.connect(self.close)
@@ -683,6 +718,16 @@ class SettingsDialog(qtw.QDialog):
 
         gpu_status.changed.connect(self._refresh_gpu)
         self._refresh_gpu()
+
+    def _refresh_update_note(self):
+        import time
+        last = get_float("updates/last_check", 0)
+        when = time.strftime("%d %b %Y, %H:%M", time.localtime(last)) if last else "never"
+        self.update_note.setText(f"You have version {updater_display(self._version)}. Last checked: {when}.")
+
+    def showEvent(self, event):
+        self._refresh_update_note()
+        super().showEvent(event)
 
     def _on_theme(self, _i):
         mode = self.theme_combo.currentData()

@@ -20,6 +20,7 @@ import src.MainWindow.Threading as QThreading
 import src.MainWindow.TimeRemainingHandler as TimeRemainingHandler
 import src.MainWindow.ImageSavingDialog as Export
 import src.MainWindow.SettingsWidget as SettingsWidget
+import src.MainWindow.UpdateDialog as UpdateDialog
 import src.MainWindow.theme as theme
 from src.MainWindow.icons import icon
 from src.MainWindow.MainLayout.ImageViewers import ImageViewer
@@ -222,7 +223,8 @@ class AboutDialog(qtw.QDialog):
         name.setFont(f)
         import platform
         import PySide6
-        version = qtw.QLabel(f"Version {src.__version__}")
+        import src.updater as updater
+        version = qtw.QLabel(f"Version {updater.display_version()}")
         version.setAlignment(qtc.Qt.AlignCenter)
         version.setObjectName("Secondary")
         tagline = qtw.QLabel("Focus stacking for macro photography")
@@ -276,6 +278,7 @@ class Window(qtw.QMainWindow):
         self._stack_started = 0.0
         self._before_key = None
         self._settings_dialog = None
+        self.pending_update_helper = None     # set by the update window: run on quit
 
         self.setWindowTitle("ChimpStackr")
         self.setMinimumSize(880, 560)
@@ -284,6 +287,7 @@ class Window(qtw.QMainWindow):
         self.setAcceptDrops(True)
 
         self.gpu_status = SettingsWidget.GpuStatus()
+        self.updates = UpdateDialog.UpdateChecker(self)
 
         # Panels
         self.sidebar = Sidebar()
@@ -402,6 +406,8 @@ class Window(qtw.QMainWindow):
         self.act_fullscreen = self._action("Enter Full Screen", self.toggle_fullscreen, K.FullScreen)
 
         self.act_about = self._action("About ChimpStackr", self.show_about, role=qtg.QAction.AboutRole)
+        self.act_updates = self._action("Check for Updates…", lambda: self.updates.check(manual=True),
+                                        role=qtg.QAction.ApplicationSpecificRole)
         self.act_help = self._action("ChimpStackr Help", lambda: qtg.QDesktopServices.openUrl(
             qtc.QUrl(REPO_URL + "#readme")), K.HelpContents)
         self.act_issue = self._action("Report an Issue…", lambda: qtg.QDesktopServices.openUrl(
@@ -468,6 +474,7 @@ class Window(qtw.QMainWindow):
         h.addAction(self.act_help)
         h.addAction(self.act_issue)
         h.addSeparator()
+        h.addAction(self.act_updates)    # macOS moves it to the app menu
         h.addAction(self.act_about)
 
     def _build_toolbar(self):
@@ -1038,7 +1045,7 @@ class Window(qtw.QMainWindow):
 
     def show_settings(self):
         if self._settings_dialog is None:
-            self._settings_dialog = SettingsWidget.SettingsDialog(self.gpu_status, self)
+            self._settings_dialog = SettingsWidget.SettingsDialog(self.gpu_status, self.updates, self)
         self._settings_dialog.show()
         self._settings_dialog.raise_()
         self._settings_dialog.activateWindow()
@@ -1158,3 +1165,6 @@ class Window(qtw.QMainWindow):
         self.LaplacianAlgorithm.cancel()
         self._save_layout()
         event.accept()
+        if self.pending_update_helper:
+            import src.updater as updater
+            updater.launch(self.pending_update_helper)

@@ -24,6 +24,7 @@ Open-source focus stacking application for Windows, macOS, and Linux.
 - **Drag & drop:** Drop image files or folders onto the window (or the Dock icon on macOS)
 - **Trackpad, mouse and touch:** Pinch to zoom, two-finger pan, wheel zoom at the cursor, double-click or double-tap for Fit / 100 %
 - **Light and dark:** Follows the system appearance, or pick one in Settings
+- **Automatic updates:** Optional daily check for new releases; downloads are verified against GitHub's SHA-256 and installed in place, then the app relaunches (macOS app, Windows folder, Linux AppImage)
 
 ## Using the app
 
