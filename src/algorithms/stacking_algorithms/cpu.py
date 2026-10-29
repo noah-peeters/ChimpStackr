@@ -1,11 +1,14 @@
 """
 Focus stacking algorithms on CPU accelerated with Numba's njit.
 
-Supports three stacking methods:
-  - Laplacian Pyramid (PMax-style): Best for fine detail (hairs, bristles)
+Supports these stacking methods:
+  - Laplacian Pyramid: Best for fine detail (hairs, bristles)
+  - Hybrid: Pyramid detail with focus-weighted low frequencies (no halos)
   - Weighted Average: Smooth blending based on local contrast weights
   - Depth Map: Selects entire regions from the sharpest source frame
 """
+import math
+
 import numpy as np
 import numba as nb
 import cv2
@@ -182,7 +185,7 @@ def reconstruct_pyramid(laplacian_pyr):
 def local_tone_map(image, strength=0.5):
     """
     Local tone-mapping to compensate for the contrast boost inherent
-    in Laplacian pyramid max-contrast selection (PMax-style).
+    in Laplacian pyramid max-contrast selection.
 
     Max-contrast selection pushes darks darker and brights brighter.
     This uses CLAHE (Contrast Limited Adaptive Histogram Equalization)
@@ -211,6 +214,141 @@ def local_tone_map(image, strength=0.5):
 
     result = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
     return result.astype(np.float32)
+
+
+# ──────────────────────────────────────────────
+# Hybrid pyramid stacking
+# ──────────────────────────────────────────────
+#
+# Max-contrast selection on every pyramid level makes halos: at coarse
+# levels an out-of-focus frame often has *more* local contrast next to an
+# edge, because the blurred subject spills into the background. Hybrid
+# keeps max-contrast selection only on the finest levels (hairs, texture);
+# coarse levels and the base are a blend of all frames weighted by each
+# frame's fine-detail sharpness, so the frame where an edge is actually in
+# focus also supplies the low frequencies around it. On the fine levels,
+# areas where no frame has detail above the noise level are blended too,
+# instead of picking whichever frame is noisiest.
+
+HYBRID_WEIGHT_POWER = 4.0      # sharpness^p: higher = closer to picking one frame
+HYBRID_NOISE_FACTOR = 4.0      # detail must exceed this x noise variance to be max-selected
+HYBRID_SHARPNESS_KSIZE = 5     # window for the fine-detail sharpness measure
+HYBRID_SPREAD_SIGMA = 2.0      # extra blur of coarse-level weights (in that level's pixels)
+
+
+def hybrid_fine_level_count(shape, num_levels):
+    """Number of finest pyramid levels that keep max-contrast selection.
+
+    Halo width grows with resolution, so this grows with it too (3 levels
+    at ~3000 px on the long side, 4 at ~6000 px).
+    """
+    longest = max(shape[:2])
+    n = 3 + int(round(math.log2(max(longest, 1) / 3000.0)))
+    return int(min(max(n, 2), num_levels))
+
+
+def fine_sharpness(image, ksize=HYBRID_SHARPNESS_KSIZE):
+    """Per-pixel fine-detail sharpness (sum-modified Laplacian, box-filtered)."""
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    gray = gray.astype(np.float32, copy=False)
+    lap_x = cv2.filter2D(gray, cv2.CV_32F, np.array([[1, -2, 1]], dtype=np.float32))
+    lap_y = cv2.filter2D(gray, cv2.CV_32F, np.array([[1], [-2], [1]], dtype=np.float32))
+    return cv2.boxFilter(np.abs(lap_x) + np.abs(lap_y), -1, (ksize, ksize))
+
+
+def _level_variance(level, kernel_size):
+    """Local variance of a pyramid level (grayscale)."""
+    gray = cv2.cvtColor(level, cv2.COLOR_BGR2GRAY) if level.ndim == 3 else level
+    k = (kernel_size, kernel_size)
+    mean = cv2.blur(gray, k)
+    return cv2.blur(gray * gray, k) - mean * mean
+
+
+def _per_channel(weights, like):
+    return weights[:, :, np.newaxis] if like.ndim == 3 else weights
+
+
+class HybridFuser:
+    """Streaming hybrid fusion: add frames one at a time, then call result().
+
+    prepare() (pyramid + sharpness) is independent per frame and can run in a
+    worker thread; add() must be called from one thread.
+    """
+
+    def __init__(self, num_levels, kernel_size=6):
+        self.num_levels = num_levels
+        self.kernel_size = max(2, int(kernel_size))
+        self._n_fine = None
+        self._num = []        # per level: sum of weight * coefficient
+        self._den = []        # per level: sum of weights
+        self._best = {}       # fine levels: max-contrast coefficients
+        self._best_var = {}   # fine levels: their local variance
+        self._noise_var = {}  # fine levels: noise variance estimate
+        self.frames = 0
+
+    def prepare(self, image):
+        """Image pyramid and matching sharpness pyramid for one frame (thread-safe).
+
+        The sharpness pyramid is a Gaussian pyramid of the fine-detail
+        sharpness map, so a coarse level's weight aggregates in-focus evidence
+        over the area that level covers: a sharp edge then also claims the
+        surrounding area where out-of-focus frames would spill their blur.
+        """
+        sharp = [fine_sharpness(image)]
+        for _ in range(self.num_levels):
+            sharp.append(cv2.pyrDown(sharp[-1]))
+        return generate_laplacian_pyramid(image, self.num_levels), sharp[::-1]
+
+    def add(self, pyramid, sharp_pyramid):
+        n = len(pyramid)
+        if self._n_fine is None:
+            self._n_fine = hybrid_fine_level_count(pyramid[-1].shape, n - 1)
+        first_fine = n - self._n_fine
+
+        for i, level in enumerate(pyramid):
+            weight = sharp_pyramid[i]
+            if i < first_fine:
+                weight = cv2.GaussianBlur(weight, (0, 0), HYBRID_SPREAD_SIGMA)
+            weight = np.power(weight + 1e-3, HYBRID_WEIGHT_POWER, dtype=np.float32)
+            weighted = level * _per_channel(weight, level)
+            if self.frames == 0:
+                self._num.append(weighted)
+                self._den.append(weight)
+            else:
+                self._num[i] += weighted
+                self._den[i] += weight
+
+            if i >= first_fine:
+                var = _level_variance(level, self.kernel_size)
+                if self.frames == 0:
+                    self._best[i] = level.copy()
+                    self._best_var[i] = var
+                    # Robust (MAD) noise estimate from the first frame's coefficients
+                    gray = cv2.cvtColor(level, cv2.COLOR_BGR2GRAY) if level.ndim == 3 else level
+                    sigma = float(np.median(np.abs(gray))) / 0.6745
+                    self._noise_var[i] = max(sigma * sigma, 1e-6)
+                else:
+                    mask = var > self._best_var[i]
+                    self._best[i][mask] = level[mask]
+                    np.maximum(self._best_var[i], var, out=self._best_var[i])
+        self.frames += 1
+
+    def result(self):
+        """Fused image (float32), or None if no frames were added."""
+        if self.frames == 0:
+            return None
+        n = len(self._num)
+        first_fine = n - self._n_fine
+        levels = []
+        for i in range(n):
+            blend = self._num[i] / _per_channel(self._den[i], self._num[i])
+            if i >= first_fine:
+                alpha = self._best_var[i] / (HYBRID_NOISE_FACTOR * self._noise_var[i]) - 1.0
+                np.clip(alpha, 0.0, 1.0, out=alpha)
+                alpha = _per_channel(cv2.GaussianBlur(alpha, (0, 0), 2.0), blend)
+                blend = alpha * self._best[i] + (1.0 - alpha) * blend
+            levels.append(blend.astype(np.float32, copy=False))
+        return reconstruct_pyramid(levels)
 
 
 # ──────────────────────────────────────────────
@@ -395,7 +533,7 @@ def compute_multires_sharpness(image, scales=(5, 11, 21), smoothing=0):
     Args:
         smoothing: edge-aware smoothing radius for the focus map.
             Uses bilateral filter to smooth flat areas while preserving
-            depth discontinuities at edges (like Zerene's DMap).
+            depth discontinuities at edges.
             Higher = smoother transitions, fewer artifacts.
             Lower = sharper but more halos at boundaries.
     """

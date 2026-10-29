@@ -861,7 +861,7 @@ class Algorithm:
         }
         return combined, meta
 
-    # ─── Sequential (chained) alignment: Helicon-style focus breathing compensation ───
+    # ─── Sequential (chained) alignment: focus breathing compensation ───
     #
     # Focus breathing is a *cumulative* scale drift: frame N vs. frame 0 can
     # differ by 10-20% while frame N vs. frame N-1 differs by well under 1%.

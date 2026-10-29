@@ -83,9 +83,10 @@ def parse_args():
     )
     parser.add_argument(
         "--method",
-        choices=["laplacian", "weighted_average", "depth_map"],
+        choices=["laplacian", "hybrid", "weighted_average", "depth_map"],
         default="laplacian",
-        help="Stacking method (default: laplacian)",
+        help="Stacking method (default: laplacian). hybrid: pyramid detail "
+             "without halos around edges, cleaner backgrounds",
     )
     parser.add_argument(
         "--alignment-mode",
@@ -95,7 +96,7 @@ def parse_args():
              "similarity (shift+rotation+scale, default with --align), "
              "affine (full 6 DOF for extreme cases), "
              "breathing (sequential chained alignment for focus breathing "
-             "compensation, like Helicon Focus)",
+             "compensation)",
     )
     parser.add_argument(
         "--max-scale-step",
@@ -110,6 +111,20 @@ def parse_args():
         action="store_true",
         help="Breathing/sequential mode: refine each frame pair with float32 "
              "full-resolution ECC (roughly 5x slower). Off by default",
+    )
+    parser.add_argument(
+        "--slab-size",
+        type=int,
+        default=0,
+        help="Stack in chunks of N frames, then stack the chunks (for very deep "
+             "stacks; 0 = off, default)",
+    )
+    parser.add_argument(
+        "--slab-overlap",
+        type=int,
+        default=2,
+        help="Frames shared between neighbouring chunks when --slab-size is set "
+             "(default: 2)",
     )
     parser.add_argument(
         "--rotation-scale",
@@ -220,6 +235,14 @@ def main():
         print(f"Error: --max-scale-step must be between 0 and 1, got {args.max_scale_step}",
               file=sys.stderr)
         sys.exit(1)
+    if args.slab_size == 1 or args.slab_size < 0:
+        print(f"Error: --slab-size must be 0 (off) or at least 2, got {args.slab_size}",
+              file=sys.stderr)
+        sys.exit(1)
+    if args.slab_size and not 0 <= args.slab_overlap < args.slab_size:
+        print(f"Error: --slab-overlap must be between 0 and --slab-size - 1, got {args.slab_overlap}",
+              file=sys.stderr)
+        sys.exit(1)
 
     print("ChimpStackr CLI - Focus Stacking")
     print(f"  Input: {len(input_paths)} images")
@@ -266,6 +289,8 @@ def main():
         alignment_mode=alignment_mode,
         breathing_max_scale_step=args.max_scale_step,
         breathing_high_precision=args.max_precision,
+        slab_size=args.slab_size,
+        slab_overlap=args.slab_overlap,
     )
 
     algo = LaplacianPyramid(config=config)

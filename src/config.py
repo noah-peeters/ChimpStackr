@@ -23,7 +23,7 @@ SUPPORTED_RAW_FORMATS = [
 ]
 
 
-STACKING_METHODS = ["laplacian", "weighted_average", "depth_map", "exposure_fusion"]
+STACKING_METHODS = ["laplacian", "hybrid", "weighted_average", "depth_map", "exposure_fusion"]
 
 
 def auto_detect_params(image_shape, num_images):
@@ -80,7 +80,7 @@ def auto_detect_params(image_shape, num_images):
 @dataclass
 class AlgorithmConfig:
     """Configuration for the stacking algorithm, independent of Qt."""
-    stacking_method: str = "laplacian"  # "laplacian", "weighted_average", "depth_map"
+    stacking_method: str = "laplacian"  # "laplacian", "hybrid", "weighted_average", "depth_map", "exposure_fusion"
     fusion_kernel_size: int = 6
     pyramid_num_levels: int = 8
     alignment_scale_factor: int = 10
@@ -94,6 +94,8 @@ class AlgorithmConfig:
     contrast_threshold: float = 0.0  # Laplacian: min contrast to switch (0 = off)
     feather_radius: int = 2  # Laplacian: blur radius for soft focusmap edges (0 = hard)
     depthmap_smoothing: int = 5  # Depth map: smoothing radius for focus map (higher = smoother)
+    slab_size: int = 0  # Slabbing: stack in chunks of this many frames, then stack the chunks (0 = off)
+    slab_overlap: int = 2  # Slabbing: frames shared between neighbouring chunks
 
 
 @dataclass

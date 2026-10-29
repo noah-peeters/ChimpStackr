@@ -1,20 +1,20 @@
 ---
 layout: default
 title: Stacking Algorithms
-description: How each of ChimpStackr's four fusion methods works
+description: How each of ChimpStackr's five fusion methods works
 ---
 
 # Stacking Algorithms
 
 [&larr; Back to home](index.html)
 
-ChimpStackr implements four image fusion methods. This document explains how each works and when to use it.
+ChimpStackr implements five image fusion methods. This document explains how each works and when to use it.
 
 ## Laplacian Pyramid (default)
 
 **Best for:** Fine detail -- hairs, bristles, edges, complex overlapping structures.
 
-Based on Burt & Adelson (1983), similar to Zerene Stacker's PMax.
+Based on Burt & Adelson (1983).
 
 ### How it works
 
@@ -40,11 +40,34 @@ Based on Burt & Adelson (1983), similar to Zerene Stacker's PMax.
 - May accumulate noise (favors high-contrast noise over smooth background)
 - Can slightly shift colors due to max-contrast selection
 
+## Hybrid
+
+**Best for:** Fine detail with clean backgrounds -- subjects with hairs or edges against smooth bokeh, where the Pyramid method leaves glows or dark rims around edges.
+
+### How it works
+
+Max-contrast selection at every pyramid level is what causes halos: at coarse levels, an out-of-focus frame often has *more* local contrast next to an edge, because the blurred subject spills into the background. Hybrid keeps max-contrast selection only where it helps:
+
+1. **Fine levels** (texture, hairs): the coefficient with the highest local contrast wins, as in the Pyramid method.
+2. **Coarse levels and the base**: a blend of all frames, weighted by each frame's fine-detail sharpness (sum-modified Laplacian). The sharpness map is aggregated over the area each level covers, so the frame where an edge is actually in focus also supplies the low frequencies around it -- out-of-focus spill can't leak in.
+3. **Flat areas on the fine levels**: where no frame has detail clearly above the noise level (estimated per level from the first frame), frames are blended instead of picking whichever is noisiest.
+
+The number of fine levels grows with resolution (3 at ~3000 px on the long side, 4 at ~6000 px), since halos are wider in pixels on larger images. Single pass, no tone mapping needed.
+
+### Parameters
+
+- **Kernel size** and **Pyramid levels** as for the Pyramid method.
+
+### Strengths and weaknesses
+
+- Far fewer halos around edges than the Pyramid method, with the same fine detail
+- Much less noise in smooth backgrounds (frames are averaged there)
+- No contrast boost, so no tone mapping step
+- Somewhat slower than the Pyramid method (~1.3x)
+
 ## Weighted Average
 
 **Best for:** Smooth subjects, short stacks, good color fidelity.
-
-Similar to Helicon Focus Method A.
 
 ### How it works
 
@@ -69,8 +92,6 @@ Earlier versions fused pairs incrementally, which compounded blur because the fo
 
 **Best for:** Opaque surfaces with continuous depth, best original color preservation.
 
-Similar to Zerene Stacker's DMap and Helicon Focus Method B.
-
 ### How it works
 
 1. For each image, compute a multi-scale sharpness map using the Sum Modified Laplacian (SML) -- the standard focus measure operator used by commercial stackers.
@@ -83,7 +104,7 @@ Similar to Zerene Stacker's DMap and Helicon Focus Method B.
 
 ### Parameters
 
-- **DMap smoothing** (default: 5): Controls the bilateral filter strength. Higher = smoother depth transitions, fewer artifacts. Lower = sharper but more halos at depth boundaries. This is the key quality control -- similar to Zerene's smoothing slider.
+- **DMap smoothing** (default: 5): Controls the bilateral filter strength. Higher = smoother depth transitions, fewer artifacts. Lower = sharper but more halos at depth boundaries. This is the key quality control.
 
 ### Strengths and weaknesses
 
@@ -110,27 +131,37 @@ Uses OpenCV's Mertens exposure fusion algorithm.
 - Scenes where lighting changed during the stack
 - NOT recommended for pure focus stacking (use Pyramid or Depth Map instead)
 
+## Slabbing
+
+For very deep stacks (hundreds of frames), any method except HDR can stack in overlapping chunks ("slabs"), then stack the slab results with the same method.
+
+- Every frame is aligned once to the global reference, so the slab results line up without a second alignment.
+- Neighbouring slabs share frames (default 2) so there are no seams between them.
+- Slab results are kept in temporary files, so memory use stays flat however deep the stack is.
+
+Set **Slab size** in the GUI, or `--slab-size N` (and optionally `--slab-overlap`) on the CLI. Off by default.
+
 ## Algorithm Comparison
 
-| Aspect | Pyramid | Weighted Avg | Depth Map | HDR |
-|---|---|---|---|---|
-| Detail preservation | Excellent | Good | Good | Moderate |
-| Color fidelity | Good (slight shift) | Very good | Excellent | Good |
-| Overlapping structures | Handles well | Blends | Cannot | Blends |
-| Artifacts | Noise in flat areas | Few | Halos at edges | Few |
-| Speed | Fast | Fast | Fast | Moderate |
-| Frame ordering required | No | No | No | No |
-| Best stack size | Any | 2-20 | Any | 2-10 |
+| Aspect | Pyramid | Hybrid | Weighted Avg | Depth Map | HDR |
+|---|---|---|---|---|---|
+| Detail preservation | Excellent | Excellent | Good | Good | Moderate |
+| Color fidelity | Good (slight shift) | Very good | Very good | Excellent | Good |
+| Overlapping structures | Handles well | Handles well | Blends | Cannot | Blends |
+| Artifacts | Halos, noise in flat areas | Few | Few | Patchy flat areas | Few |
+| Speed | Fast | Fast | Fast | Fast | Moderate |
+| Frame ordering required | No | No | No | No | No |
+| Best stack size | Any | Any | 2-20 | Any | 2-10 |
 
 ## Focus Breathing Compensation (sequential alignment)
 
 **Best for:** Lenses with strong focus breathing, i.e. macro lenses and long lenses/macro zooms where the focal length (and therefore magnification) changes as you rack focus, so frames drift in scale across the stack.
 
-Traditional single-reference alignment (all frames vs. the first or middle frame) struggles when cumulative scale drift is large: frame 100 vs. frame 1 may differ by 10–20% while frame 100 vs. frame 99 differs by less than 1%. This is the same situation Helicon Focus's autoadjustments handle with sequential alignment.
+Traditional single-reference alignment (all frames vs. the first or middle frame) struggles when cumulative scale drift is large: frame 100 vs. frame 1 may differ by 10–20% while frame 100 vs. frame 99 differs by less than 1%.
 
 ### How it works
 
-Based on the same idea as Helicon Focus: align each frame to its *neighbour* and compose the chain.
+Align each frame to its *neighbour* and compose the chain.
 
 1. For each consecutive pair of frames, estimate a small transform (shift, rotation, uniform scale) via ORB feature matching + ECC refinement. Per-pair deltas are tiny, so matching is much more robust than bridging the whole stack at once.
 
@@ -204,7 +235,6 @@ chosen from the CPU core count and the RAM available when the stack starts.
 
 ### References
 
-- Sequential alignment with per-step limits: conceptually equivalent to Helicon Focus's autoadjustment limits.
 - Transform chaining follows the classical image-stitching approach (e.g. Brown & Lowe 2007, "Automatic Panoramic Image Stitching").
 
 ## References

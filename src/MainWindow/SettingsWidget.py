@@ -139,6 +139,7 @@ class SettingsPanel(qtw.QWidget):
         self._method_buttons = {}
         methods = [
             ("laplacian", "Pyramid", "Best for fine detail\n(hairs, bristles, edges)"),
+            ("hybrid", "Hybrid", "Pyramid detail without halos\naround edges, cleaner backgrounds"),
             ("weighted_average", "Weighted", "Smooth contrast-based blend\n(good color fidelity)"),
             ("depth_map", "Depth Map", "Per-pixel sharpest source\n(best original color)"),
             ("exposure_fusion", "HDR", "Exposure/HDR fusion\n(varying lighting, not focus)"),
@@ -261,6 +262,17 @@ class SettingsPanel(qtw.QWidget):
             "Higher = fewer artifacts, slightly softer.\n"
             "Lower = sharper but may have halos.\n"
             "Only used by Depth Map method.")
+
+        self.slab_spin = qtw.QSpinBox()
+        self.slab_spin.setRange(0, 500)
+        self.slab_spin.setSpecialValueText("Off")
+        self.slab_spin.setValue(int(settings.globalVars["QSettings"].value("algorithm/slab_size") or 0))
+        self.slab_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/slab_size", v))
+        algo_section.add_row("Slab size", self.slab_spin,
+            "Stack deep stacks in chunks of this many frames,\n"
+            "then stack the chunks (neighbouring chunks share 2 frames).\n"
+            "Off = stack everything in one pass.\n"
+            "Used by Pyramid, Hybrid, Weighted and Depth Map.")
 
         # ── Alignment (visible) ──
         align_section = SettingSection("ALIGNMENT")
@@ -515,6 +527,7 @@ class SettingsPanel(qtw.QWidget):
             contrast_threshold=float(qs.value("algorithm/contrast_threshold") or 0.0),
             feather_radius=int(qs.value("algorithm/feather_radius") or 2),
             depthmap_smoothing=int(qs.value("algorithm/depthmap_smoothing") or 5),
+            slab_size=int(qs.value("algorithm/slab_size") or 0),
             breathing_max_scale_step=float(qs.value("algorithm/breathing_max_scale_step") or 5.0) / 100.0,
             breathing_high_precision=bool(int(
                 0 if qs.value("algorithm/breathing_high_precision") is None
