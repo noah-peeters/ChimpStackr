@@ -9,7 +9,10 @@ OpenCV's BORDER_REFLECT_101 borders), so results match the CPU path to
 float rounding, apart from warp interpolation (exact here, fixed-point in
 OpenCV).
 """
+import math
 import os
+import threading
+from functools import lru_cache
 
 import cv2
 import numpy as np
@@ -459,6 +462,37 @@ __kernel void to_255(__global const float *src, __global float *dst, int n) {
     int i = get_global_id(0);
     if (i < n) dst[i] = clamp(src[i] * 255.f, 0.f, 255.f);
 }
+
+// ── Alignment estimation ──
+// cv2.resize(src, INTER_AREA) shrink by a non-integer factor, bit-exact for
+// 8-bit images: OpenCV's per-axis weight tables, in its summation order
+__kernel void resize_area(__global const float *src, __global float *dst, int sw, int dw, int dh,
+                          __global const int *xofs, __global const int *xsrc,
+                          __global const float *xw, __global const int *yofs,
+                          __global const int *ysrc, __global const float *yw) {
+    #pragma OPENCL FP_CONTRACT OFF
+    int x = get_global_id(0), y = get_global_id(1);
+    if (x >= dw || y >= dh) return;
+    float acc = 0.f;
+    for (int j = yofs[y]; j < yofs[y + 1]; j++) {
+        __global const float *row = src + ysrc[j] * sw;
+        float buf = 0.f;
+        for (int k = xofs[x]; k < xofs[x + 1]; k++) buf = buf + row[xsrc[k]] * xw[k];
+        acc = j == yofs[y] ? yw[j] * buf : acc + yw[j] * buf;
+    }
+    dst[y * dw + x] = clamp(rint(acc), 0.f, 255.f);
+}
+
+__kernel void u8_to_f32(__global const uchar *a, __global float *b, int n) {
+    int i = get_global_id(0);
+    if (i < n) b[i] = a[i];
+}
+
+// float -> 8-bit values (round half to even, saturate), in place
+__kernel void round_u8(__global float *a, int n) {
+    int i = get_global_id(0);
+    if (i < n) a[i] = clamp(rint(a[i]), 0.f, 255.f);
+}
 """
 
 
@@ -521,14 +555,22 @@ class GPU:
         # Reuse device buffers: drivers commit memory on a buffer's first use,
         # which for fresh frame-sized buffers costs ~1 ms per kernel launch
         self.pool = clt.MemoryPool(clt.ImmediateAllocator(self.q))
-        prg = cl.Program(self.ctx, _SRC).build()
+        prg = self.prg = cl.Program(self.ctx, _SRC).build()
         self.k = {name: getattr(prg, name) for name in (
             "warp_u8", "warp_f32", "pyr_down", "pyr_up_combine", "to_gray", "conv1d", "sml",
             "variance", "hybrid_add", "gate", "hybrid_level", "focusmap", "blend", "max_partial",
             "max_final", "area_up", "focusmap_thresh", "lap_energy", "wavg_add", "wavg_result",
             "mean3", "stats_partial", "stats_final", "bilateral_lut", "bilateral", "depth_select",
-            "mertens_prep", "mertens_gray", "mertens_weight", "divide", "mul_acc", "to_255")}
+            "mertens_prep", "mertens_gray", "mertens_weight", "divide", "mul_acc", "to_255",
+            "resize_area", "round_u8", "u8_to_f32")}
         self._coef = {}
+        self._estimation = None
+
+    def estimation(self):
+        """This device's EstimationGPU (created on first use)."""
+        if self._estimation is None:
+            self._estimation = EstimationGPU(self)
+        return self._estimation
 
     # ── buffers ──
     def empty(self, shape):
@@ -985,3 +1027,95 @@ class ExposureGPU:
         if len(self.partials) == 1:
             return self.last
         return self.merge([lambda p=p: self.g.warp(p) for p in self.partials])
+
+
+@lru_cache(maxsize=32)
+def _area_table(ssize, dsize, scale):
+    """OpenCV's INTER_AREA weights along one axis (computeResizeAreaTab), as
+    (offsets per output index, source indices, weights)."""
+    ofs, src, wts = [0], [], []
+    for d in range(dsize):
+        f1 = d * scale
+        f2 = f1 + scale
+        cell = min(scale, ssize - f1)
+        s1, s2 = math.ceil(f1), min(math.floor(f2), ssize - 1)
+        s1 = min(s1, s2)
+        if s1 - f1 > 1e-3:
+            src.append(s1 - 1)
+            wts.append((s1 - f1) / cell)
+        for k in range(s1, s2):
+            src.append(k)
+            wts.append(1.0 / cell)
+        if f2 - s2 > 1e-3:
+            src.append(s2)
+            wts.append(min(min(f2 - s2, 1.0), cell) / cell)
+        ofs.append(len(src))
+    return (np.asarray(ofs, np.int32), np.asarray(src, np.int32),
+            np.asarray(wts, np.float32))
+
+
+class EstimationGPU:
+    """GPU help for alignment estimation: pre-warps a frame and builds the
+    ECC cascade levels (cv2.resize INTER_AREA, bit-exact) on the GPU, so the
+    CPU only runs ORB and the ECC iterations on the small levels.
+
+    Own queue and kernel objects (kernel arguments aren't thread-safe), so it
+    runs alongside GPU stacking; estimation workers take turns on it.
+    """
+
+    def __init__(self, gpu):
+        import pyopencl.array as cla
+        import pyopencl.tools as clt
+        self._cla = cla
+        self.q = cl.CommandQueue(gpu.ctx)
+        self.pool = clt.MemoryPool(clt.ImmediateAllocator(self.q))
+        self.k = {n: cl.Kernel(gpu.prg, n) for n in ("warp_u8", "round_u8", "resize_area", "u8_to_f32")}
+        self.lock = threading.Lock()
+        self._tables = {}
+
+    def _upload(self, a):
+        return self._cla.to_device(self.q, np.ascontiguousarray(a), allocator=self.pool)
+
+    def _table(self, ssize, dsize, scale):
+        key = (ssize, dsize, scale)
+        if key not in self._tables:
+            self._tables[key] = [self._upload(t) for t in _area_table(ssize, dsize, scale)]
+        return self._tables[key]
+
+    def _shrink(self, img, s):
+        """cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)."""
+        h, w = img.shape
+        dw, dh = int(round(w * s)), int(round(h * s))
+        scale = 1.0 / s
+        if abs(scale - round(scale)) < 1e-12:
+            # integer factors take OpenCV's separate fast path
+            return cv2.resize(img.get().astype(np.uint8), None, fx=s, fy=s,
+                              interpolation=cv2.INTER_AREA)
+        out = self._cla.empty(self.q, (dh, dw), np.float32, allocator=self.pool)
+        xt, yt = self._table(w, dw, scale), self._table(h, dh, scale)
+        self.k["resize_area"](self.q, (dw, dh), None, img.data, out.data, np.int32(w),
+                              np.int32(dw), np.int32(dh), *[t.data for t in xt + yt])
+        return out.get().astype(np.uint8)
+
+    def ecc_levels(self, ref_u8, align_u8, M, scales):
+        """[(ref, cv2.warpAffine(align, M) [bilinear, replicate]) per scale],
+        each shrunk like cv2.resize(INTER_AREA) unless the scale is 1."""
+        h, w = ref_u8.shape
+        with self.lock:
+            src = self._upload(align_u8)
+            warped = self._cla.empty(self.q, (h, w), np.float32, allocator=self.pool)
+            m = np.asarray(M, np.float64).ravel()
+            self.k["warp_u8"](self.q, (w, h), None, src.data, warped.data, np.int32(w),
+                              np.int32(h), np.int32(w), np.int32(h), np.int32(1),
+                              *[np.float32(v) for v in m], np.int32(0), np.int32(1))
+            self.k["round_u8"](self.q, (h * w,), None, warped.data, np.int32(h * w))
+            ref8 = self._upload(ref_u8)
+            ref = self._cla.empty(self.q, (h, w), np.float32, allocator=self.pool)
+            self.k["u8_to_f32"](self.q, (h * w,), None, ref8.data, ref.data, np.int32(h * w))
+            levels = []
+            for s in scales:
+                if s < 1.0:
+                    levels.append((self._shrink(ref, s), self._shrink(warped, s)))
+                else:
+                    levels.append((ref_u8, warped.get().astype(np.uint8)))
+            return levels

@@ -122,6 +122,16 @@ class TestPipelineMatchesCPU:
         assert (diff.max(axis=2) > 2).mean() < 0.01
         assert gpu.get_crop_bounds() == cpu.get_crop_bounds()
         assert progress[-1][0] == progress[-1][1]
+        assert all(p[0] <= q[0] for p, q in zip(progress, progress[1:]))
+
+    def test_breathing_middle_reference(self):
+        # stacking starts once the chain below the reference frame is known
+        cpu, _ = stack(LOW_RES, "hybrid", False, True, "breathing", alignment_reference="middle")
+        gpu, progress = stack(LOW_RES, "hybrid", True, True, "breathing",
+                              alignment_reference="middle")
+        assert np.abs(cpu.output_image - gpu.output_image).mean() < 0.3
+        assert gpu.sequential_log is not None and len(gpu.sequential_log) == len(LOW_RES)
+        assert progress[-1][0] == progress[-1][1]
 
     def test_16bit_frames(self, tmp_path):
         paths = []
