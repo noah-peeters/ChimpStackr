@@ -83,10 +83,11 @@ def parse_args():
     )
     parser.add_argument(
         "--method",
-        choices=["laplacian", "hybrid", "weighted_average", "depth_map"],
+        choices=["laplacian", "hybrid", "weighted_average", "depth_map", "exposure_fusion"],
         default="laplacian",
         help="Stacking method (default: laplacian). hybrid: pyramid detail "
-             "without halos around edges, cleaner backgrounds",
+             "without halos around edges, cleaner backgrounds; exposure_fusion: "
+             "HDR blend of bracketed exposures",
     )
     parser.add_argument(
         "--alignment-mode",
