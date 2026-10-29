@@ -63,7 +63,7 @@ chimpstackr-cli -i images/*.jpg -o result.tif \
 chimpstackr-cli -i images/*.jpg -o result.tif --align --method hybrid --slab-size 40
 ```
 
-**Available methods:** `laplacian` (default), `hybrid`, `weighted_average`, `depth_map`
+**Available methods:** `laplacian` (default), `hybrid`, `weighted_average`, `depth_map`, `exposure_fusion`
 
 ## Stacking Algorithms
 

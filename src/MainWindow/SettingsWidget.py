@@ -2,6 +2,8 @@
 Settings panel — docked on the right side of the main window.
 Modern macOS-style grouped settings with sections.
 """
+import threading
+
 import PySide6.QtWidgets as qtw
 import PySide6.QtCore as qtc
 
@@ -73,10 +75,11 @@ class SettingSection(qtw.QWidget):
 class SettingsPanel(qtw.QWidget):
     """Right-side settings panel (replaces the old floating window)."""
     setting_updated = qtc.Signal(tuple)
+    gpu_unusable = qtc.Signal(str)   # from the startup GPU check thread
 
     default_settings = {
         "user_interface": {"theme": 2},
-        "computing": {"use_gpu": 0, "selected_gpu_id": 0},
+        "computing": {"use_gpu": 1, "selected_gpu_id": 0},
         "algorithm": {
             "stacking_method": "laplacian",
             "kernel_size": 6,
@@ -97,6 +100,13 @@ class SettingsPanel(qtw.QWidget):
         super().__init__()
         self.setFixedWidth(300)
         self.setStyleSheet("background: #1e1e1e;")
+
+        # GPU stacking is on by default since v0.4. Earlier versions stored
+        # their default (off), so switch it on once for existing settings.
+        qs = settings.globalVars["QSettings"]
+        if not qs.contains("computing/gpu_default_on"):
+            qs.setValue("computing/use_gpu", 1)
+            qs.setValue("computing/gpu_default_on", 1)
 
         # Initialize default QSettings values
         for key, dict_val in self.default_settings.items():
@@ -431,6 +441,8 @@ class SettingsPanel(qtw.QWidget):
                 lambda v: self.change_setting("computing/selected_gpu_id", v)
             )
             gpu_section.add_row("GPU device", self.gpu_combo)
+            self.gpu_unusable.connect(self._on_gpu_unusable)
+            threading.Thread(target=self._check_gpu, args=(saved_id,), daemon=True).start()
 
         advanced_layout.addWidget(gpu_section)
 
@@ -455,6 +467,23 @@ class SettingsPanel(qtw.QWidget):
         wrapper.addWidget(scroll)
 
         outer.addLayout(wrapper)
+
+    def _check_gpu(self, index):
+        """Build the GPU kernels in the background: the first stack doesn't
+        wait for the compile, and a GPU whose driver can't build them is
+        reported here instead of on every stack."""
+        try:
+            OCL.get(index)
+        except Exception as exc:
+            self.gpu_unusable.emit(str(exc))
+
+    def _on_gpu_unusable(self, error):
+        self.gpu_checkbox.blockSignals(True)   # keep the user's setting
+        self.gpu_checkbox.setChecked(False)
+        self.gpu_checkbox.blockSignals(False)
+        self.gpu_checkbox.setEnabled(False)
+        self.gpu_checkbox.setToolTip(f"The GPU driver can't run ChimpStackr's GPU code:\n{error}\n"
+                                     "Stacking runs on the CPU.")
 
     def _on_alignment_mode_changed(self, index):
         """Handle alignment mode dropdown change."""

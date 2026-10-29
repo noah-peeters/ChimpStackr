@@ -83,10 +83,11 @@ def parse_args():
     )
     parser.add_argument(
         "--method",
-        choices=["laplacian", "hybrid", "weighted_average", "depth_map"],
+        choices=["laplacian", "hybrid", "weighted_average", "depth_map", "exposure_fusion"],
         default="laplacian",
         help="Stacking method (default: laplacian). hybrid: pyramid detail "
-             "without halos around edges, cleaner backgrounds",
+             "without halos around edges, cleaner backgrounds; exposure_fusion: "
+             "HDR blend of bracketed exposures",
     )
     parser.add_argument(
         "--alignment-mode",
@@ -132,12 +133,20 @@ def parse_args():
         default=False,
         help="Legacy: equivalent to --alignment-mode similarity",
     )
-    parser.add_argument(
+    device = parser.add_mutually_exclusive_group()
+    device.add_argument(
         "--gpu",
+        dest="gpu",
         action="store_true",
-        default=False,
-        help="Stack and align on the GPU (every method; OpenCL, any GPU vendor). "
-             "Falls back to the CPU if no GPU is available",
+        default=True,
+        help="Stack and align on the GPU (default; every method; OpenCL, any GPU "
+             "vendor). Falls back to the CPU if no GPU is available",
+    )
+    device.add_argument(
+        "--cpu",
+        dest="gpu",
+        action="store_false",
+        help="Stack on the CPU only",
     )
     parser.add_argument(
         "--gpu-id",
