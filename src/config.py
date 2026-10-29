@@ -85,6 +85,7 @@ class AlgorithmConfig:
     pyramid_num_levels: int = 8
     alignment_scale_factor: int = 10
     use_gpu: bool = False
+    gpu_mode: str = ""  # "auto", "gpu", "cpu" (src.compute); "" = from use_gpu (True → "gpu")
     selected_gpu_id: int = 0
     alignment_reference: str = "first"  # "first", "middle", "previous"
     align_rotation_scale: bool = False  # Enable rotation + scale alignment (legacy, use alignment_mode)

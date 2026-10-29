@@ -327,6 +327,7 @@ class Window(qtw.QMainWindow):
 
         self.gpu_status = SettingsWidget.GpuStatus()
         self.updates = UpdateDialog.UpdateChecker(self)
+        self.measurer = SettingsWidget.BackgroundMeasurer(self.gpu_status, self)
 
         # Panels
         self.sidebar = Sidebar()
@@ -652,6 +653,11 @@ class Window(qtw.QMainWindow):
 
     def _update_device_label(self):
         self.device_label.setText(self.gpu_status.summary())
+        self.device_label.setToolTip("Where the next stack runs (Settings → Processing)")
+
+    def _show_device(self, summary, reason):
+        self.device_label.setText(summary.split(" (")[0])
+        self.device_label.setToolTip(f"{summary}\nSettings → Processing")
 
     def _update_title(self):
         paths = self.frames()
@@ -834,8 +840,9 @@ class Window(qtw.QMainWindow):
         self.viewer.show_loading(False)
         self.viewer.set_image(r.image)
         h, w = r.image.shape[:2]
+        on = f" on the {r.device}" if getattr(r, "device", "") else ""
         self.info_label.setText(f"{r.title} result  ·  {w} × {h}  ·  {r.frames} frames  ·  "
-                                f"stacked in {_format_duration(r.seconds)}")
+                                f"stacked in {_format_duration(r.seconds)}{on}")
         self._load_before(r)
         self._update_actions()
 
@@ -914,6 +921,12 @@ class Window(qtw.QMainWindow):
         def progress(result_list):
             try:
                 key, done, total, seconds = result_list
+                if key == "status":            # e.g. measuring GPU vs CPU speed
+                    self.activity.detail.setText(done)
+                    return
+                if key == "device":
+                    self._show_device(done, total)
+                    return
                 if key != "finished_image" or total <= 0:
                     return
                 left = self.TimeRemainingHandler.calculate_time_remaining(
@@ -926,7 +939,18 @@ class Window(qtw.QMainWindow):
             except (AttributeError, RuntimeError, ZeroDivisionError, ValueError):
                 pass
 
-        worker = QThreading.Worker(getattr(self.LaplacianAlgorithm, method_name))
+        algo = self.LaplacianAlgorithm
+        run = getattr(algo, method_name)
+
+        def job(signals):
+            import src.compute as compute
+            # background speed measuring stops for the stack (src.compute)
+            with compute.yield_to_stack():
+                decision = algo.resolve_device()
+                signals.finished_inter_task.emit(["device", decision.summary(), decision.reason, 0])
+                return run(signals)
+
+        worker = QThreading.Worker(job)
         worker.signals.finished_inter_task.connect(progress)
         worker.signals.error.connect(self._on_stack_error)
         worker.signals.finished.connect(self.finished_stack)
@@ -985,11 +1009,14 @@ class Window(qtw.QMainWindow):
         cfg = algo.config
         r = Result(algo.output_image, cfg.stacking_method, self._stack_aligned,
                    len(self.frames()), seconds, crop)
+        d = algo.device_decision
+        r.device = ("GPU" if d.use_gpu else "CPU") if d is not None else ""
         self.results.insert(0, r)
         self.sidebar.add_result(r.title, r.subtitle, r.image)
         self.show_result(0)
         self.show_message(f"Stacked {r.frames} frames in {_format_duration(seconds)}")
         qtw.QApplication.alert(self)      # bounce the Dock icon / flash the taskbar if in the background
+        self.measurer.schedule(self.measurer.RETRY_MS)
         self._update_actions()
 
     # ══ export ══
@@ -1088,7 +1115,8 @@ class Window(qtw.QMainWindow):
 
     def show_settings(self):
         if self._settings_dialog is None:
-            self._settings_dialog = SettingsWidget.SettingsDialog(self.gpu_status, self.updates, self)
+            self._settings_dialog = SettingsWidget.SettingsDialog(self.gpu_status, self.updates, self,
+                                                                  measurer=self.measurer)
         self._settings_dialog.show()
         self._settings_dialog.raise_()
         self._settings_dialog.activateWindow()
@@ -1206,6 +1234,7 @@ class Window(qtw.QMainWindow):
                 event.ignore()
                 return
         self.LaplacianAlgorithm.cancel()
+        self.measurer.stop()
         self._save_layout()
         event.accept()
         if self.pending_update_helper:

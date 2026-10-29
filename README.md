@@ -13,7 +13,7 @@ Open-source focus stacking application for Windows, macOS, and Linux.
 - **5 stacking algorithms:** Laplacian Pyramid, Hybrid (pyramid detail without halos), Weighted Average, Depth Map, Exposure Fusion (HDR)
 - **Slabbing:** Stack very deep stacks in overlapping chunks
 - **Automatic alignment:** Translation, Euclidean (rotation), Similarity (rotation + scale), Affine correction, or Breathing (sequential chained alignment for focus breathing compensation)
-- **GPU acceleration:** every stacking method and the alignment run on any GPU via OpenCL (NVIDIA, AMD, Intel, Apple): a 50-frame 24 MP stack in under 11 s
+- **GPU acceleration:** every stacking method and the alignment run on any GPU via OpenCL (NVIDIA, AMD, Intel, Apple): a 50-frame 24 MP stack in under 11 s. By default ChimpStackr picks the GPU or the CPU per stack, whichever it measured faster on your computer (see below)
 - **16-bit pipeline:** Full bit-depth preservation from RAW to output
 - **Auto-crop:** Removes black edges from alignment shifts
 - **Auto-tuning:** Parameters auto-detected from image resolution
@@ -85,6 +85,18 @@ chimpstackr-cli -i images/*.jpg -o result.tif --align --method hybrid --slab-siz
 ```
 
 **Available methods:** `laplacian` (default), `hybrid`, `weighted_average`, `depth_map`, `exposure_fusion`
+
+### GPU or CPU
+
+The app (Settings → Processing) and the CLI share one choice:
+
+| | App | CLI |
+|---|---|---|
+| Automatic (default) | *Automatic* | no flag |
+| Always the GPU (falls back to the CPU if it fails) | *Always GPU* | `--gpu` |
+| Always the CPU | *Always CPU* | `--cpu` |
+
+Automatic uses the CPU when no GPU works or the stack doesn't fit in the GPU's memory; otherwise it uses whichever device a short test on your computer predicts to be faster for that frame size and count. The test aligns and stacks a few synthetic frames at two sizes on both devices, takes about 15 s, runs once per method (the first time you stack with it), and is repeated after a new GPU, driver or ChimpStackr version. Stacks of small frames (under 1 MP) don't start the test; they use the CPU until a measurement exists. On an M4 MacBook Air, for example, the CPU wins Pyramid and Hybrid on 6 MP frames and the GPU wins everything at 24 MP. The CLI prints its choice, e.g. `Device: Auto: GPU · Apple M4 (measured 2.4× faster)`. The measurements are kept in `~/Library/Caches/ChimpStackr` (macOS), `%LOCALAPPDATA%\ChimpStackr\Cache` (Windows) or `~/.cache/chimpstackr` (Linux); Settings → Processing → Measure Again forgets them.
 
 ## Stacking Algorithms
 

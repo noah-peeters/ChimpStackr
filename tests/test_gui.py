@@ -213,6 +213,27 @@ class TestSettings:
         S.store_alignment_choice("breathing")
         assert window.inspector.get_algorithm_config().alignment_mode == "breathing"
 
+    def test_device_setting(self, app, window):
+        import src.MainWindow.SettingsWidget as S
+        qs = settings.globalVars["QSettings"]
+        # the window fixture stored use_gpu=0 before the first start: CPU
+        assert S.gpu_mode() == "cpu"
+        assert window.inspector.get_algorithm_config().gpu_mode == "cpu"
+        # someone upgrading with "Use GPU" on gets Automatic
+        qs.remove("computing/gpu_mode")
+        qs.setValue("computing/use_gpu", 1)
+        S.Inspector()
+        assert S.gpu_mode() == "auto"
+        # the Settings window switches it
+        window.show_settings()
+        dlg = window._settings_dialog
+        dlg.mode_combo.setCurrentIndex(dlg.mode_combo.findData("gpu"))
+        cfg = window.inspector.get_algorithm_config()
+        assert cfg.gpu_mode == "gpu" and cfg.use_gpu
+        dlg.mode_combo.setCurrentIndex(dlg.mode_combo.findData("cpu"))
+        assert window.inspector.get_algorithm_config().gpu_mode == "cpu"
+        dlg.close()
+
     def test_theme_switch(self, app, window):
         import src.MainWindow.theme as theme
         theme.manager().set_mode("light")

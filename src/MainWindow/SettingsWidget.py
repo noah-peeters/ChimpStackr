@@ -69,6 +69,12 @@ def get_str(key, default):
     return str(v) if v not in (None, "") else default
 
 
+def gpu_mode():
+    """"auto", "gpu" or "cpu" (see src.compute)."""
+    mode = get_str("computing/gpu_mode", "auto")
+    return mode if mode in ("auto", "gpu", "cpu") else "auto"
+
+
 def alignment_choice():
     """Current alignment choice key (see ALIGNMENTS), from the stored keys."""
     if not get_int("algorithm/align_enabled", 1):
@@ -350,6 +356,10 @@ class Inspector(qtw.QWidget):
         if not s.contains("computing/gpu_default_on"):
             s.setValue("computing/use_gpu", 1)
             s.setValue("computing/gpu_default_on", 1)
+        # Automatic device choice since the redesign: "Use GPU" on becomes
+        # Automatic, off stays CPU
+        if not s.contains("computing/gpu_mode"):
+            s.setValue("computing/gpu_mode", "auto" if get_int("computing/use_gpu", 1) else "cpu")
         for group, values in self.default_settings.items():
             for name, value in values.items():
                 if not s.contains(f"{group}/{name}"):
@@ -576,7 +586,8 @@ class Inspector(qtw.QWidget):
             fusion_kernel_size=get_int("algorithm/kernel_size", 6),
             pyramid_num_levels=get_int("algorithm/pyramid_levels", 8),
             alignment_scale_factor=get_int("algorithm/scale_factor", 10),
-            use_gpu=bool(get_int("computing/use_gpu", 1)) and HAS_GPU,
+            use_gpu=gpu_mode() != "cpu",
+            gpu_mode=gpu_mode(),
             selected_gpu_id=get_int("computing/selected_gpu_id", 0),
             alignment_reference=get_str("algorithm/alignment_ref", "first"),
             align_rotation_scale=bool(get_int("algorithm/align_rst", 1)),
@@ -622,23 +633,107 @@ class GpuStatus(qtc.QObject):
     def usable(self):
         return HAS_GPU and self.error is None
 
-    def summary(self):
-        if not get_int("computing/use_gpu", 1) or not self.usable():
-            return "CPU"
+    def device_name(self):
         names = OCL.device_names()
-        i = min(get_int("computing/selected_gpu_id", 0), len(names) - 1)
-        return f"GPU · {names[i]}" if names else "CPU"
+        return names[min(get_int("computing/selected_gpu_id", 0), len(names) - 1)] if names else ""
+
+    def summary(self):
+        """Status bar text before a stack has decided anything."""
+        mode = gpu_mode()
+        if mode == "cpu" or not self.usable():
+            return "CPU" if mode == "cpu" else "CPU (no usable GPU)"
+        return f"GPU · {self.device_name()}" if mode == "gpu" else f"Auto · GPU {self.device_name()} or CPU"
+
+
+class BackgroundMeasurer(qtc.QObject):
+    """Measures GPU vs CPU speed per method while the app is idle, for the
+    Automatic device choice (src.compute). Stacks interrupt it; it picks up
+    again a little later."""
+    progress = qtc.Signal(str)      # status text, "" when idle
+    finished = qtc.Signal()
+
+    START_DELAY_MS = 20_000
+    RETRY_MS = 30_000
+
+    class _Task(qtc.QRunnable):
+        def __init__(self, owner, methods):
+            super().__init__()
+            self.owner, self.methods = owner, methods
+
+        def run(self):
+            import src.compute as compute
+            names = dict((k, t) for k, t, _d in METHODS)
+            current = {"m": ""}
+
+            def report(text):
+                self.owner.progress.emit(f"Measuring {names.get(current['m'], current['m'])}: {text}")
+            try:
+                for m in self.methods:
+                    current["m"] = m
+                    if not compute.measure_in_background([m], get_int("computing/selected_gpu_id", 0), report):
+                        break
+            except Exception as exc:     # never let measuring disturb the app
+                import logging
+                logging.getLogger(__name__).warning(f"Speed measurement failed: {exc}")
+            self.owner._running = False
+            self.owner.progress.emit("")
+            self.owner.finished.emit()
+
+    def __init__(self, gpu_status, parent=None):
+        super().__init__(parent)
+        self.gpu_status = gpu_status
+        self.pool = qtc.QThreadPool(self)
+        self.pool.setMaxThreadCount(1)
+        self._running = False
+        self.timer = qtc.QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.run_now)
+        self.finished.connect(lambda: self.schedule(self.RETRY_MS))
+
+    def schedule(self, delay_ms=None):
+        self.timer.start(self.START_DELAY_MS if delay_ms is None else delay_ms)
+
+    def wanted(self):
+        return gpu_mode() == "auto" and self.gpu_status.usable() and self.gpu_status.ready
+
+    def run_now(self):
+        import src.compute as compute
+        if self._running:
+            return
+        if gpu_mode() == "auto" and self.gpu_status.usable() and not self.gpu_status.ready:
+            self.schedule(5000)            # the GPU check is still building the kernels
+            return
+        if not self.wanted():
+            return
+        window = settings.globalVars.get("MainWindow")
+        if window is not None and getattr(window, "is_stacking", False):
+            self.schedule(self.RETRY_MS)
+            return
+        current = get_str("algorithm/stacking_method", "laplacian")
+        missing = compute.missing_methods(get_int("computing/selected_gpu_id", 0))
+        if not missing:
+            return
+        missing.sort(key=lambda m: m != current)        # the method in use first
+        self._running = True
+        self.pool.start(self._Task(self, missing))
+
+    def stop(self):
+        import src.compute as compute
+        self.timer.stop()
+        compute.STOP.set()
 
 
 class SettingsDialog(qtw.QDialog):
     """App preferences: appearance and processing."""
 
-    def __init__(self, gpu_status, updates=None, parent=None):
+    def __init__(self, gpu_status, updates=None, parent=None, measurer=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setModal(False)
         self.gpu_status = gpu_status
         self.updates = updates
+        self.measurer = measurer
+        self._measuring = ""
         self.setMinimumWidth(460)
 
         layout = qtw.QVBoxLayout(self)
@@ -658,13 +753,13 @@ class SettingsDialog(qtw.QDialog):
 
         processing = Section("Processing")
         pc = FormCard()
-        self.gpu_switch = Switch(bool(get_int("computing/use_gpu", 1)) and HAS_GPU)
-        self.gpu_switch.setAccessibleName("Use GPU")
-        self.gpu_switch.toggled.connect(lambda v: (qs().setValue("computing/use_gpu", int(v)),
-                                                   self.gpu_status.changed.emit()))
-        pc.add_row("gpu", "Use GPU", switch_row(self.gpu_switch),
-                   "Stacking and alignment run on the GPU (OpenCL, any vendor), with an automatic "
-                   "CPU fallback")
+        self.mode_combo = qtw.QComboBox()
+        for key, title in (("auto", "Automatic (recommended)"), ("gpu", "Always GPU"), ("cpu", "Always CPU")):
+            self.mode_combo.addItem(title, key)
+        self.mode_combo.setCurrentIndex(max(0, self.mode_combo.findData(gpu_mode())))
+        self.mode_combo.currentIndexChanged.connect(self._on_mode)
+        pc.add_row("mode", "Stack on", self.mode_combo,
+                   "Automatic uses whichever is faster for your frames on this computer")
         self.gpu_combo = qtw.QComboBox()
         for name in OCL.device_names():
             self.gpu_combo.addItem(name)
@@ -673,13 +768,23 @@ class SettingsDialog(qtw.QDialog):
         self.gpu_combo.setCurrentIndex(min(get_int("computing/selected_gpu_id", 0),
                                            max(0, self.gpu_combo.count() - 1)))
         self.gpu_combo.currentIndexChanged.connect(self._on_device)
-        pc.add_row("device", "Device", self.gpu_combo)
+        pc.add_row("device", "GPU", self.gpu_combo)
         processing.add(pc)
         self.gpu_note = qtw.QLabel()
         self.gpu_note.setObjectName("Hint")
         self.gpu_note.setWordWrap(True)
         self.gpu_note.setTextInteractionFlags(qtc.Qt.TextSelectableByMouse)
         processing.add(self.gpu_note)
+        self.speed_note = qtw.QLabel()
+        self.speed_note.setObjectName("Hint")
+        self.speed_note.setWordWrap(True)
+        self.remeasure = qtw.QPushButton("Measure Again")
+        self.remeasure.setToolTip("Forget the measured GPU and CPU speeds; the next stack measures again")
+        self.remeasure.clicked.connect(self._on_remeasure)
+        srow = qtw.QHBoxLayout()
+        srow.addWidget(self.speed_note, 1)
+        srow.addWidget(self.remeasure, 0, qtc.Qt.AlignTop)
+        processing.layout_.addLayout(srow)
         layout.addWidget(processing)
 
         import src.MainWindow.UpdateDialog as UpdateDialog
@@ -717,6 +822,9 @@ class SettingsDialog(qtw.QDialog):
         layout.addWidget(buttons)
 
         gpu_status.changed.connect(self._refresh_gpu)
+        if measurer is not None:
+            measurer.progress.connect(self._on_measuring)
+            measurer.finished.connect(self._refresh_speeds)
         self._refresh_gpu()
 
     def _refresh_update_note(self):
@@ -727,6 +835,7 @@ class SettingsDialog(qtw.QDialog):
 
     def showEvent(self, event):
         self._refresh_update_note()
+        self._refresh_speeds()
         super().showEvent(event)
 
     def _on_theme(self, _i):
@@ -736,15 +845,58 @@ class SettingsDialog(qtw.QDialog):
         if tm is not None:
             tm.set_mode(mode)
 
+    def _on_mode(self, _i):
+        mode = self.mode_combo.currentData()
+        qs().setValue("computing/gpu_mode", mode)
+        qs().setValue("computing/use_gpu", int(mode != "cpu"))
+        self.gpu_status.changed.emit()
+        self._refresh_gpu()
+        if self.measurer is not None and mode == "auto":
+            self.measurer.schedule(5000)
+
     def _on_device(self, index):
         if HAS_GPU:
             qs().setValue("computing/selected_gpu_id", index)
             self.gpu_status.recheck()
 
+    def _on_measuring(self, text):
+        self._measuring = text
+        self._refresh_speeds()
+
+    def _on_remeasure(self):
+        import src.compute as compute
+        compute.clear_measurements()
+        self._refresh_speeds()
+        if self.measurer is not None:
+            self.measurer.schedule(3000)
+
+    def _refresh_speeds(self):
+        import src.compute as compute
+        rows = []
+        name = self.gpu_status.device_name()
+        for key, entry in sorted(compute.measurements().items()):
+            dev, method = key.split("|")[0], key.split("|")[-1]
+            if dev != name:
+                continue
+            times = compute.predict(entry, 24.0, 50)
+            title = dict((k, t) for k, t, _d in METHODS).get(method, method)
+            if times is None:
+                rows.append(f"{title}: GPU failed in the test")
+            else:
+                g, c = times
+                rows.append(f"{title}: GPU {c / g:.1f}× faster" if g <= c else f"{title}: CPU {g / c:.1f}× faster")
+        text = ("Measured on this computer (50 × 24 MP):\n" + "\n".join(rows)) if rows else \
+            "ChimpStackr measures GPU and CPU speed once per method in the background (about " \
+            "15 s each, paused while you stack). Until then it uses the GPU."
+        if self._measuring:
+            text += f"\n{self._measuring}"
+        self.speed_note.setText(text)
+        self.remeasure.setEnabled(bool(rows) and not self._measuring)
+
     def _refresh_gpu(self):
-        usable = self.gpu_status.usable()
-        self.gpu_switch.setEnabled(usable)
-        self.gpu_combo.setEnabled(HAS_GPU and len(OCL.device_names()) > 1)
+        mode = self.mode_combo.currentData()
+        self.gpu_combo.setEnabled(HAS_GPU and len(OCL.device_names()) > 1 and mode != "cpu")
+        self.mode_combo.setEnabled(True)
         if not HAS_GPU:
             self.gpu_note.setText("No OpenCL GPU was found; stacking runs on the CPU.")
         elif self.gpu_status.error:
@@ -752,8 +904,14 @@ class SettingsDialog(qtw.QDialog):
                                   f"runs on the CPU.\n{self.gpu_status.error}")
         elif not self.gpu_status.ready:
             self.gpu_note.setText("Preparing the GPU…")
-        else:
+        elif mode == "auto":
+            self.gpu_note.setText("Small frames, stacks too big for the GPU's memory, and methods the CPU "
+                                  "measured faster at run on the CPU; everything else on the GPU.")
+        elif mode == "gpu":
             self.gpu_note.setText("Falls back to the CPU automatically if anything fails on the GPU.")
+        else:
+            self.gpu_note.setText("The GPU isn't used.")
+        self._refresh_speeds()
 
 
 # Old names

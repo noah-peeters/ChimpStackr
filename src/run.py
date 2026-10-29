@@ -173,6 +173,7 @@ def main():
     # Files passed on the command line or opened with the app ("Open With")
     qApp.window = window
     window.updates.start_automatic()
+    window.measurer.schedule()      # GPU vs CPU speed, in the background when idle
     args = [a for a in sys.argv[1:] if os.path.exists(a)] + qApp.pending
     if args:
         window.add_paths(args)
