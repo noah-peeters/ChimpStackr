@@ -13,7 +13,7 @@ Open-source focus stacking application for Windows, macOS, and Linux.
 - **5 stacking algorithms:** Laplacian Pyramid, Hybrid (pyramid detail without halos), Weighted Average, Depth Map, Exposure Fusion (HDR)
 - **Slabbing:** Stack very deep stacks in overlapping chunks
 - **Automatic alignment:** Translation, Euclidean (rotation), Similarity (rotation + scale), Affine correction, or Breathing (sequential chained alignment for focus breathing compensation)
-- **GPU stacking:** Pyramid and Hybrid run on any GPU via OpenCL (NVIDIA, AMD, Intel, Apple), 2-4x faster overall than the CPU
+- **GPU acceleration:** every stacking method and the alignment run on any GPU via OpenCL (NVIDIA, AMD, Intel, Apple): a 50-frame 24 MP stack in under 11 s
 - **16-bit pipeline:** Full bit-depth preservation from RAW to output
 - **Auto-crop:** Removes black edges from alignment shifts
 - **Auto-tuning:** Parameters auto-detected from image resolution

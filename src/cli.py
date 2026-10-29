@@ -110,7 +110,7 @@ def parse_args():
         "--max-precision",
         action="store_true",
         help="Breathing/sequential mode: refine each frame pair with float32 "
-             "full-resolution ECC (roughly 5x slower). Off by default",
+             "full-resolution ECC on the CPU (several times slower). Off by default",
     )
     parser.add_argument(
         "--slab-size",
@@ -136,7 +136,7 @@ def parse_args():
         "--gpu",
         action="store_true",
         default=False,
-        help="Stack on the GPU (Pyramid and Hybrid; OpenCL, any GPU vendor). "
+        help="Stack and align on the GPU (every method; OpenCL, any GPU vendor). "
              "Falls back to the CPU if no GPU is available",
     )
     parser.add_argument(

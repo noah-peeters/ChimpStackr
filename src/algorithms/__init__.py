@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 import time
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
@@ -64,6 +65,11 @@ class Algorithm:
         self._pause_event.set()  # Start unpaused (set = running)
         self.alignment_shifts = []  # Track all (x, y) shifts for auto-crop
         self._tls = threading.local()  # per-thread caches (parallel pair estimation)
+        # ORB features per source frame (weak refs: frames aren't kept alive)
+        self._features = []
+        self._features_lock = threading.Lock()
+        # Optional ocl.EstimationGPU: pre-warp + ECC cascade levels on the GPU
+        self.gpu_estimation = None
         # Default resampling for alignment warps (match original behavior);
         # the breathing pipeline overrides with Lanczos + replicate borders.
         self.warp_interpolation = cv2.INTER_LINEAR
@@ -200,7 +206,7 @@ class Algorithm:
         convention, shear/scale anisotropy dropped) and re-anchors the
         translation so the mapping of `anchor` is preserved.
 
-        Used by the high-precision path, where ECC propagates in 6 DOF
+        Used by the scale refinement, where ECC propagates in 6 DOF
         (MOTION_AFFINE) but the breathing chain must stay 4 DOF.
         """
         M = np.asarray(M, dtype=np.float64)
@@ -332,7 +338,8 @@ class Algorithm:
         """
         cache = getattr(self._tls, "gray_cache", None)
         if cache is None:
-            cache = [None, None]   # [source image (strong ref), its grayscale]
+            # [source image (strong ref), its grayscale, 8-bit grayscale]
+            cache = [None, None, None]
             self._tls.gray_cache = cache
         if cache[0] is ref_im:
             return cache[1]
@@ -340,9 +347,16 @@ class Algorithm:
             gray = cv2.cvtColor(ref_im, cv2.COLOR_BGR2GRAY)
         else:
             gray = ref_im
-        cache[0] = ref_im
-        cache[1] = gray
+        cache[:] = [ref_im, gray, None]
         return gray
+
+    def _ref_gray_u8(self, ref_im):
+        """8-bit grayscale of the reference, cached like _get_ref_gray."""
+        gray = self._get_ref_gray(ref_im)
+        cache = self._tls.gray_cache
+        if cache[2] is None:
+            cache[2] = self._to_gray_u8(gray)
+        return cache[2]
 
     def _estimate_translation(self, ref_im, im_to_align, scale_factor, coarse_fine=False):
         """Translation-only DFT phase correlation estimate."""
@@ -368,90 +382,31 @@ class Algorithm:
         }
         return M, meta
 
-    def _estimate_rst(self, ref_im, im_to_align, scale_factor, precision="default"):
+    def _estimate_rst(self, ref_im, im_to_align, scale_factor, precision="default",
+                      align_u8=None):
         """
         Rotation + translation (3 DOF) estimate via multi-scale ECC.
         Uses MOTION_EUCLIDEAN (translation + rotation) which is
         the right model for focus stacking — no shear, no anisotropic scale.
         Uniform scale (focus breathing) is estimated by _estimate_similarity.
+        align_u8: im_to_align's 8-bit gray, if the caller already has it.
         """
-        # Convert to grayscale (reuse cached ref grayscale when available)
-        ref_gray = self._get_ref_gray(ref_im)
-        if im_to_align.ndim == 3:
-            align_gray = cv2.cvtColor(im_to_align, cv2.COLOR_BGR2GRAY)
-        else:
-            align_gray = im_to_align
-
         hq = precision == "max"
         if hq:
             # High precision: native-bit-depth float32 grayscale
-            ref_g = self._to_gray_f32(ref_gray)
-            align_g = self._to_gray_f32(align_gray)
-            ref_src, align_src = ref_g, align_g
-            cascade = (512, 1024, 2048, 4096)
-            eps = 1e-7
+            warp_matrix = self._ecc_refine(
+                self._to_gray_f32(self._get_ref_gray(ref_im)), self._to_gray_f32(im_to_align),
+                cv2.MOTION_EUCLIDEAN, cascade_dims=(512, 1024, 2048, 4096), eps=1e-7,
+                iters=(200, 100), none_on_error=True,
+            )
         else:
-            # Ensure uint8
-            if ref_gray.dtype != np.uint8:
-                ref_u8 = np.clip(ref_gray, 0, 255).astype(np.uint8)
-                align_u8 = np.clip(align_gray, 0, 255).astype(np.uint8)
-            else:
-                ref_u8 = ref_gray
-                align_u8 = align_gray
-            ref_src, align_src = ref_u8, align_u8
-            cascade = (512, 1024, 2048)
-            eps = 1e-6
-
-        h_full, w_full = ref_src.shape[:2]
-
-        # Multi-scale ECC: coarse → fine
-        # Level 0: 1/4 res (coarse alignment)
-        # Level 1: 1/2 res (refine)
-        # Level 2..: full or capped (final refinement; HQ extends to 4096)
-        scales = []
-        for max_dim in cascade:
-            s = min(max_dim / max(h_full, w_full), 1.0)
-            if not scales or s > scales[-1]:
-                scales.append(s)
-
-        warp_matrix = np.eye(2, 3, dtype=np.float32)
-
-        try:
-            for i, s in enumerate(scales):
-                if s < 1.0:
-                    ref_s = cv2.resize(ref_src, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
-                    align_s = cv2.resize(align_src, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
-                else:
-                    ref_s = ref_src
-                    align_s = align_src
-
-                # Scale warp matrix translation from previous level
-                if i > 0:
-                    prev_s = scales[i - 1]
-                    warp_matrix[0, 2] *= (s / prev_s)
-                    warp_matrix[1, 2] *= (s / prev_s)
-
-                # More iterations at coarse, fewer at fine
-                max_iter = 200 if i == 0 else 100
-                gauss = 11 if i == 0 else 5
-                criteria = (
-                    cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
-                    max_iter, eps,
-                )
-
-                # EUCLIDEAN: translation + rotation (3 DOF) — correct for focus stacking
-                _, warp_matrix = cv2.findTransformECC(
-                    ref_s, align_s, warp_matrix, cv2.MOTION_EUCLIDEAN, criteria,
-                    inputMask=None, gaussFiltSize=gauss,
-                )
-
-            # Scale translation back to full resolution
-            final_s = scales[-1]
-            if final_s < 1.0:
-                warp_matrix[0, 2] /= final_s
-                warp_matrix[1, 2] /= final_s
-
-        except cv2.error:
+            if align_u8 is None:
+                align_u8 = self._to_gray_u8(im_to_align)
+            warp_matrix = self._prewarp_and_refine(
+                self._ref_gray_u8(ref_im), align_u8, None,
+                cv2.MOTION_EUCLIDEAN, iters=(200, 100), none_on_error=True,
+            )
+        if warp_matrix is None:
             # ECC failed — fall back to translation-only DFT
             return self._estimate_translation(ref_im, im_to_align, scale_factor)
 
@@ -520,21 +475,41 @@ class Algorithm:
             return False
         return abs(M[0, 2]) <= 0.25 * w and abs(M[1, 2]) <= 0.25 * h
 
-    def _feature_match(self, ref_u8, align_u8, mode="similarity"):
+    def _orb_features(self, u8, source=None):
+        """ORB keypoints and descriptors of u8, the 8-bit gray of `source`.
+
+        Cached per source frame: a frame takes part in two pairs of a
+        sequential chain, and the reference in every pair of a single-reference
+        stack, so detection runs once per frame instead of once per pair.
+        """
+        if source is not None:
+            with self._features_lock:
+                for ref, feats in self._features:
+                    if ref() is source:
+                        return feats
+        feats = cv2.ORB_create(nfeatures=2000).detectAndCompute(u8, None)
+        if source is not None:
+            with self._features_lock:
+                self._features = [e for e in self._features if e[0]() is not None][-31:]
+                self._features.append((weakref.ref(source), feats))
+        return feats
+
+    def _feature_match(self, ref_u8, align_u8, mode="similarity", ref_source=None,
+                       align_source=None):
         """
         ORB feature matching → estimateAffinePartial2D (4 DOF) or estimateAffine2D (6 DOF).
         Returns 2x3 warp matrix, or None if there are insufficient matches or
         the result is implausible (callers then fall back to ECC).
+        ref_source/align_source: the frames the grays came from (feature cache keys).
         """
+        kp1, des1 = self._orb_features(ref_u8, ref_source)
+        kp2, des2 = self._orb_features(align_u8, align_source)
         # OpenCV's RANSAC draws samples from the per-thread global RNG. In
         # parallel pair estimation the RNG history depends on which pairs
         # landed on which worker, making the coarse estimate (and hence the
         # whole breathing chain) nondeterministic run-to-run. Pinning the
         # seed here makes every pair's estimate depend only on its images.
         cv2.setRNGSeed(42)
-        orb = cv2.ORB_create(nfeatures=2000)
-        kp1, des1 = orb.detectAndCompute(ref_u8, None)
-        kp2, des2 = orb.detectAndCompute(align_u8, None)
 
         if des1 is None or des2 is None or len(des1) < 10 or len(des2) < 10:
             return None
@@ -628,13 +603,59 @@ class Algorithm:
             return -2.0
         return float((a @ b) / d)
 
+    @staticmethod
+    def _cascade_scales(shape, cascade_dims=(512, 1024, 2048)):
+        """Downscale factor per ECC cascade level (coarse → fine)."""
+        h_full, w_full = shape[:2]
+        scales = []
+        for max_dim in cascade_dims:
+            s = min(max_dim / max(h_full, w_full), 1.0)
+            if not scales or s > scales[-1]:
+                scales.append(s)
+        return scales
+
+    def _prewarp_and_refine(self, ref_u8, align_u8, coarse_warp, motion_type,
+                            iters=(240, 160), none_on_error=False):
+        """ECC refinement (_ecc_refine) of align_u8, pre-warped by coarse_warp
+        (8-bit, bilinear) unless that is None. On the GPU when available:
+        pre-warp, cascade levels and ECC iterations."""
+        gpu = self.gpu_estimation
+        if gpu is not None:
+            try:
+                scales = self._cascade_scales(ref_u8.shape)
+                with gpu.session():
+                    levels = gpu.ecc_levels(ref_u8, align_u8, coarse_warp, scales)
+                    return self._ecc_refine(
+                        None, None, motion_type,
+                        levels=[(s, r, a) for s, (r, a) in zip(scales, levels)],
+                        ecc=gpu.find_transform_ecc, iters=iters, none_on_error=none_on_error)
+            except Exception as exc:   # OpenCL errors: carry on without the GPU
+                logger.warning(f"GPU alignment help failed ({exc}); using the CPU")
+                self.gpu_estimation = None
+        prealigned = align_u8
+        if coarse_warp is not None:
+            h, w = align_u8.shape[:2]
+            prealigned = cv2.warpAffine(
+                align_u8, coarse_warp, (w, h),
+                flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
+                borderMode=cv2.BORDER_REPLICATE,
+            )
+        return self._ecc_refine(ref_u8, prealigned, motion_type, iters=iters,
+                                none_on_error=none_on_error)
+
     def _ecc_refine(self, ref, prealigned, motion_type=cv2.MOTION_EUCLIDEAN,
-                    cascade_dims=None, eps=1e-6, none_on_error=False):
+                    cascade_dims=None, eps=1e-6, none_on_error=False, levels=None, ecc=None,
+                    iters=(240, 160)):
         """
         Multi-scale ECC refinement on a pre-aligned image.
 
         Args:
             ref, prealigned: same-shape grayscale images (uint8 or float32).
+            levels: instead of ref/prealigned, (scale, ref, prealigned) per
+                cascade level, already downscaled (see _prewarp_and_refine).
+            ecc: findTransformECC replacement for the levels (same arguments
+                as `ecc(template, image, warp, motion, criteria, gauss)`).
+            iters: max ECC iterations on the coarsest / the other levels.
             cascade_dims: max image size per cascade level. Default
                 (512, 1024, 2048); the high-precision path passes a level
                 extending to 4096 so ECC optimizes on (nearly) full res.
@@ -646,20 +667,18 @@ class Algorithm:
             None when `none_on_error=True` and ECC raised (lets callers
             fall back to a different estimator).
         """
-        h_full, w_full = ref.shape[:2]
-        if cascade_dims is None:
-            cascade_dims = (512, 1024, 2048)
-        scales = []
-        for max_dim in cascade_dims:
-            s = min(max_dim / max(h_full, w_full), 1.0)
-            if not scales or s > scales[-1]:
-                scales.append(s)
+        if levels is not None:
+            scales = [s for s, _, _ in levels]
+        else:
+            scales = self._cascade_scales(ref.shape, cascade_dims or (512, 1024, 2048))
 
         warp = np.eye(2, 3, dtype=np.float32)
 
         try:
             for i, s in enumerate(scales):
-                if s < 1.0:
+                if levels is not None:
+                    _, ref_s, align_s = levels[i]
+                elif s < 1.0:
                     ref_s = cv2.resize(ref, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
                     align_s = cv2.resize(prealigned, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
                 else:
@@ -671,14 +690,17 @@ class Algorithm:
                     warp[0, 2] *= (s / prev_s)
                     warp[1, 2] *= (s / prev_s)
 
-                max_iter = 240 if i == 0 else 160
+                max_iter = iters[0] if i == 0 else iters[1]
                 gauss = 11 if i == 0 else 5
                 criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, max_iter, eps)
 
-                _, warp = cv2.findTransformECC(
-                    ref_s, align_s, warp, motion_type, criteria,
-                    inputMask=None, gaussFiltSize=gauss,
-                )
+                if ecc is not None:
+                    _, warp = ecc(ref_s, align_s, warp, motion_type, criteria, gauss)
+                else:
+                    _, warp = cv2.findTransformECC(
+                        ref_s, align_s, warp, motion_type, criteria,
+                        inputMask=None, gaussFiltSize=gauss,
+                    )
 
             final_s = scales[-1]
             if final_s < 1.0:
@@ -696,35 +718,36 @@ class Algorithm:
                              precision="default"):
         """
         4 DOF similarity estimate: tx, ty, rotation, uniform scale.
-        Hybrid: ORB features for coarse alignment, ECC for sub-pixel refinement.
-        Falls back to euclidean ECC when feature matching fails.
+        Hybrid: ORB features for coarse alignment, ECC for sub-pixel refinement
+        of scale, rotation and translation. Falls back to euclidean ECC when
+        feature matching fails.
 
         precision="max" runs the ECC refinement on float32 grayscale (native
         bit depth, no 8-bit quantization) with Lanczos pre-warping and a
         cascade extending to 4096px — the maximum-accuracy breathing path.
         ORB matching still uses u8 (ORB requires 8-bit descriptors).
         """
-        ref_u8 = self._to_gray_u8(self._get_ref_gray(ref_im))
+        ref_u8 = self._ref_gray_u8(ref_im)
         align_u8 = self._to_gray_u8(im_to_align)
         hq = precision == "max"
 
         # Stage 1: Feature-based coarse alignment
-        coarse_warp = self._feature_match(ref_u8, align_u8, mode="similarity")
+        coarse_warp = self._feature_match(ref_u8, align_u8, mode="similarity",
+                                          ref_source=ref_im, align_source=im_to_align)
         if coarse_warp is None:
             # Fallback to euclidean ECC
             return self._estimate_rst(ref_im, im_to_align, scale_factor,
-                                      precision=precision)
+                                      precision=precision, align_u8=align_u8)
 
         # Stage 2: Pre-warp and refine with ECC
         h, w = align_u8.shape[:2]
-        interp_flags = (cv2.INTER_LANCZOS4 if hq else cv2.INTER_LINEAR)
         if hq:
             # Refine on native-bit-depth grayscale, NOT the u8 copy
             ref_g = self._to_gray_f32(self._get_ref_gray(ref_im))
             align_g = self._to_gray_f32(im_to_align)
             prealigned = cv2.warpAffine(
                 align_g, coarse_warp, (w, h),
-                flags=interp_flags + cv2.WARP_INVERSE_MAP,
+                flags=cv2.INTER_LANCZOS4 + cv2.WARP_INVERSE_MAP,
                 borderMode=cv2.BORDER_REPLICATE,
             )
 
@@ -747,7 +770,7 @@ class Algorithm:
             # projection may have traded away, without touching the scale.
             pre_scaled = cv2.warpAffine(
                 align_g, scaled, (w, h),
-                flags=interp_flags + cv2.WARP_INVERSE_MAP,
+                flags=cv2.INTER_LANCZOS4 + cv2.WARP_INVERSE_MAP,
                 borderMode=cv2.BORDER_REPLICATE,
             )
             residual_rot = self._ecc_refine(
@@ -776,14 +799,19 @@ class Algorithm:
                 "scale-refined" if use_scale_refined else "euclidean",
             )
         else:
-            prealigned = cv2.warpAffine(
-                align_u8, coarse_warp, (w, h),
-                flags=interp_flags + cv2.WARP_INVERSE_MAP,
-                borderMode=cv2.BORDER_REPLICATE,
-            )
-            residual = self._ecc_refine(ref_u8, prealigned, cv2.MOTION_EUCLIDEAN)
-            # Stage 3: Compose coarse + residual
-            combined = self.compose_affine(coarse_warp, residual)
+            # Refine the scale too: ORB's scale is noisy (~3e-4 per pair),
+            # and in a breathing chain that noise accumulates into pixels of
+            # drift. 6-DOF ECC projected onto a similarity, then EUCLIDEAN
+            # ECC at that scale for full rotation/translation precision.
+            residual = self._prewarp_and_refine(ref_u8, align_u8, coarse_warp,
+                                                cv2.MOTION_AFFINE)
+            scaled = self.project_to_similarity(
+                self.compose_affine(coarse_warp, residual), anchor=(w * 0.5, h * 0.5))
+            if abs(self.transform_scale(scaled) / self.transform_scale(coarse_warp) - 1) > 0.01:
+                # implausible jump (texture-poor frames): keep ORB's scale
+                scaled = coarse_warp
+            residual = self._prewarp_and_refine(ref_u8, align_u8, scaled, cv2.MOTION_EUCLIDEAN)
+            combined = self.compose_affine(scaled, residual)
 
         meta = {
             "method": "orb_ecc_similarity_hp" if hq else "orb_ecc_similarity",
@@ -800,12 +828,13 @@ class Algorithm:
         Hybrid: ORB features for coarse alignment, ECC MOTION_AFFINE for refinement.
         Falls back to similarity when feature matching fails.
         """
-        ref_u8 = self._to_gray_u8(self._get_ref_gray(ref_im))
+        ref_u8 = self._ref_gray_u8(ref_im)
         align_u8 = self._to_gray_u8(im_to_align)
         hq = precision == "max"
 
         # Stage 1: Feature-based coarse alignment (full 6 DOF)
-        coarse_warp = self._feature_match(ref_u8, align_u8, mode="affine")
+        coarse_warp = self._feature_match(ref_u8, align_u8, mode="affine",
+                                          ref_source=ref_im, align_source=im_to_align)
         if coarse_warp is None:
             # Fallback to similarity
             return self._estimate_similarity(ref_im, im_to_align, scale_factor,
@@ -813,13 +842,12 @@ class Algorithm:
 
         # Stage 2: Pre-warp and refine with MOTION_AFFINE ECC
         h, w = align_u8.shape[:2]
-        interp_flags = (cv2.INTER_LANCZOS4 if hq else cv2.INTER_LINEAR)
         if hq:
             ref_g = self._to_gray_f32(self._get_ref_gray(ref_im))
             align_g = self._to_gray_f32(im_to_align)
             prealigned = cv2.warpAffine(
                 align_g, coarse_warp, (w, h),
-                flags=interp_flags + cv2.WARP_INVERSE_MAP,
+                flags=cv2.INTER_LANCZOS4 + cv2.WARP_INVERSE_MAP,
                 borderMode=cv2.BORDER_REPLICATE,
             )
             residual = self._ecc_refine(
@@ -827,12 +855,8 @@ class Algorithm:
                 cascade_dims=(512, 1024, 2048, 4096), eps=1e-7,
             )
         else:
-            prealigned = cv2.warpAffine(
-                align_u8, coarse_warp, (w, h),
-                flags=interp_flags + cv2.WARP_INVERSE_MAP,
-                borderMode=cv2.BORDER_REPLICATE,
-            )
-            residual = self._ecc_refine(ref_u8, prealigned, cv2.MOTION_AFFINE)
+            residual = self._prewarp_and_refine(ref_u8, align_u8, coarse_warp,
+                                                cv2.MOTION_AFFINE)
 
         # Stage 3: Compose
         combined = self.compose_affine(coarse_warp, residual)
@@ -854,9 +878,9 @@ class Algorithm:
     # pair and compose the chain onto the reference frame.
 
     # Peak working memory per pair-estimation worker, in bytes per image
-    # pixel: default works on 8-bit gray frames, max on float color frames
-    # (24MP: ~1.68 GB/worker max)
-    _PAIR_BYTES_PER_PIXEL = {"max": 70, "default": 12}
+    # pixel: default works on 8-bit gray frames (less when the GPU does the
+    # ECC part), max on float color frames (24MP: ~1.68 GB/worker max)
+    _PAIR_BYTES_PER_PIXEL = {"max": 70, "default": 12, "gpu": 6}
 
     def _sequential_worker_count(self, ref_template, precision, n_pairs):
         """Parallel pair-estimation workers: one per physical core (OpenCV
@@ -866,7 +890,8 @@ class Algorithm:
         avail = _available_memory_bytes()
         if avail is not None:
             h, w = ref_template.shape[:2]
-            per_worker = h * w * self._PAIR_BYTES_PER_PIXEL.get(precision, 70)
+            key = "gpu" if precision == "default" and self.gpu_estimation else precision
+            per_worker = h * w * self._PAIR_BYTES_PER_PIXEL.get(key, 70)
             workers = min(workers, max(1, int(avail * 0.7 // per_worker)))
         return max(1, workers)
 
@@ -875,7 +900,7 @@ class Algorithm:
                                        scale_factor=10,
                                        max_scale_step=0.05,
                                        precision="max",
-                                       emit=None):
+                                       emit=None, on_ready=None):
         """
         Estimate per-frame transforms for sequential (chained) alignment.
 
@@ -895,6 +920,11 @@ class Algorithm:
                 path. "default" uses the fast u8/2048px estimators for quick
                 stacks on easy subjects.
             emit: optional callable (current, total, seconds) for progress.
+            on_ready: optional callable (i, matrix), called as soon as frame
+                i's final transform is known, so stacking can start before the
+                whole chain is estimated. Frames up to the reference arrive
+                together once the pairs below it are done, later frames one
+                by one in order.
 
         Returns:
             (transforms, log):
@@ -905,8 +935,16 @@ class Algorithm:
             method, fallback count). (None, None) if cancelled.
         """
         n = len(paths)
+
+        def _identity_chain():
+            transforms = [np.eye(2, 3, dtype=np.float32) for _ in range(n)]
+            if on_ready is not None:
+                for i, M in enumerate(transforms):
+                    on_ready(i, M)
+            return transforms, []
+
         if n < 2:
-            return [np.eye(2, 3, dtype=np.float32) for _ in range(n)], []
+            return _identity_chain()
 
         # The default-precision estimators work on 8-bit grayscale, so frames
         # are decoded straight to gray: much faster, and ~12x less memory per
@@ -917,7 +955,7 @@ class Algorithm:
         # transforms live in one coordinate system and the chain composes
         ref_template = load(paths[0])
         if ref_template is None:
-            return [np.eye(2, 3, dtype=np.float32) for _ in range(n)], []
+            return _identity_chain()
 
         r = max(0, min(ref_index, n - 1))
         pair_mode = (alignment_mode
@@ -927,6 +965,31 @@ class Algorithm:
         # Scale plausibility bounds per pair
         lo, hi = 1.0 - max_scale_step, 1.0 + max_scale_step
 
+        # Each frame takes part in two pairs: it is loaded once and shared
+        # (with its ORB features, see _orb_features) until both are done.
+        # Entries: [lock, image, pairs still to use it]
+        frames = {0: [threading.Lock(), ref_template, 1]}
+        frames_lock = threading.Lock()
+
+        def _frame(i):
+            with frames_lock:
+                entry = frames.setdefault(i, [threading.Lock(), None, 2 if i < n - 1 else 1])
+            with entry[0]:
+                if entry[1] is None:
+                    img = load(paths[i])
+                    if img is None:
+                        raise ValueError("Image failed to load")
+                    entry[1] = self._match_dimensions(ref_template, img)
+                return entry[1]
+
+        def _release(i):
+            with frames_lock:
+                entry = frames.get(i)
+                if entry is not None:
+                    entry[2] -= 1
+                    if entry[2] <= 0:
+                        del frames[i]
+
         def _estimate_pair_step(i):
             """Estimate the frame i → i+1 forward map (template = frame i)."""
             t0 = time.time()
@@ -935,12 +998,8 @@ class Algorithm:
             if self.is_cancelled:
                 return i, M, meta, 0.0
             try:
-                ref = load(paths[i])
-                src = load(paths[i + 1])
-                if ref is None or src is None:
-                    raise ValueError("Image failed to load")
-                ref = self._match_dimensions(ref_template, ref)
-                src = self._match_dimensions(ref_template, src)
+                ref = _frame(i)
+                src = _frame(i + 1)
                 # Maximum precision for the breathing chain: float32 ECC
                 # + Lanczos pre-warp + 4096px cascade per pair (or the fast
                 # default estimators when the user opts for a quick stack)
@@ -967,15 +1026,77 @@ class Algorithm:
                 del ref, src
             except Exception as exc:  # defensive: keep the stack running
                 M, meta = None, {**meta, "method": "error", "error": str(exc), "pair": i}
+            finally:
+                _release(i)
+                _release(i + 1)
 
             return i, M, meta, time.time() - t0
 
-        # ── Phase 1: estimate all pair deltas in parallel ──
-        # Each pair delta is independent, so this stays parallel even though
-        # the chain composition below is sequential.
-        n_workers = self._sequential_worker_count(ref_template, precision, n - 1)
-        deltas = [None] * (n - 1)   # pair i-1 ↔ i: forward map frame i-1 coords → frame i coords
+        # Pair deltas are independent, so they are estimated in parallel; the
+        # chain is composed as they arrive in order: pair i-1 ↔ i is the
+        # forward map frame i-1 coords → frame i coords.
+        deltas = [None] * (n - 1)
         metas = [None] * (n - 1)
+        transforms = [np.eye(2, 3, dtype=np.float32) for _ in range(n)]
+        log = [None] * n
+        log[r] = {"frame": r, "step_scale": 1.0, "scale": 1.0, "angle": 0.0,
+                  "method": "reference", "fallbacks": 0}
+        identity = np.eye(2, 3, dtype=np.float32)
+        up_delta = [None]   # last successful delta above the reference
+
+        def _chain_up(i):
+            """transforms[i] = Δ(i-1→i) · transforms[i-1], for i > r."""
+            meta = metas[i - 1] or {}
+            M_delta, fallbacks = deltas[i - 1], (1 if meta.get("fallback") else 0)
+            if M_delta is None:
+                # Hold: assume a constant breathing rate (reuse the last
+                # successful delta); identity if none so far.
+                M_delta = up_delta[0] if up_delta[0] is not None else identity
+                fallbacks += 1
+                meta = {**meta, "held": True}
+            else:
+                up_delta[0] = M_delta
+            transforms[i] = self.compose_affine(transforms[i - 1], M_delta)
+            log[i] = {
+                "frame": i,
+                "step_scale": self.transform_scale(M_delta),
+                "scale": self.transform_scale(transforms[i]),
+                "angle": self.transform_rotation(transforms[i]),
+                "method": meta.get("method", "?"),
+                "fallbacks": fallbacks,
+            }
+
+        def _chain_down():
+            """Reference → start of stack: M_ref→(i-1) = Δ(i-1→i)⁻¹ · M_ref→i."""
+            prev_delta = None
+            for i in range(r, 0, -1):
+                meta = metas[i - 1] or {}
+                fallbacks = 1 if meta.get("fallback") else 0
+                M_delta = deltas[i - 1]
+                if M_delta is None:
+                    # Hold: reuse the last successful delta (constant breathing
+                    # rate); identity if none so far.
+                    M_delta = prev_delta if prev_delta is not None else identity
+                    fallbacks += 1
+                    meta = {**meta, "held": True}
+                else:
+                    prev_delta = M_delta
+                D = self.invert_affine(M_delta)  # maps frame i coords → frame i-1 coords
+                transforms[i - 1] = self.compose_affine(transforms[i], D)
+                log[i - 1] = {
+                    "frame": i - 1,
+                    "step_scale": self.transform_scale(M_delta),
+                    "scale": self.transform_scale(transforms[i - 1]),
+                    "angle": self.transform_rotation(transforms[i - 1]),
+                    "method": meta.get("method", "?"),
+                    "fallbacks": fallbacks,
+                }
+
+        def _ready(i):
+            if on_ready is not None:
+                on_ready(i, transforms[i])
+
+        n_workers = self._sequential_worker_count(ref_template, precision, n - 1)
         total = n - 1
         # Run OpenCV single-threaded inside the workers: nested thread pools
         # both oversubscribe the CPU and introduce run-to-run numeric jitter
@@ -987,7 +1108,8 @@ class Algorithm:
         executor = ThreadPoolExecutor(max_workers=n_workers)
         try:
             futs = [executor.submit(_estimate_pair_step, i) for i in range(n - 1)]
-            done = 0
+            if r == 0:
+                _ready(0)
             t_last = time.time()
             for i in range(n - 1):
                 self.wait_if_paused()
@@ -997,73 +1119,21 @@ class Algorithm:
                 idx, M, meta, _dt = futs[i].result()
                 deltas[idx] = M
                 metas[idx] = meta
-                done += 1
                 if emit is not None:
-                    emit(done, total, time.time() - t_last)
+                    emit(i + 1, total, time.time() - t_last)
                     t_last = time.time()
+                if i == r - 1:
+                    _chain_down()
+                    for k in range(r + 1):
+                        _ready(k)
+                elif i >= r:
+                    _chain_up(i + 1)
+                    _ready(i + 1)
         finally:
             # Wait for pairs already running (pending ones are dropped) so a
             # cancelled stack doesn't leave workers holding full-size images
             executor.shutdown(wait=True, cancel_futures=True)
             cv2.setNumThreads(prev_cv_threads)
-
-        # ── Phase 2: compose the chain onto the reference frame (cheap) ──
-        transforms = [np.eye(2, 3, dtype=np.float32) for _ in range(n)]
-        log = [None] * n
-        log[r] = {"frame": r, "step_scale": 1.0, "scale": 1.0, "angle": 0.0,
-                  "method": "reference", "fallbacks": 0}
-
-        identity = np.eye(2, 3, dtype=np.float32)
-
-        # Chain upward: reference → end of stack
-        # transforms[i] = Δ(i-1→i) · transforms[i-1]
-        prev_delta = None
-        for i in range(r + 1, n):
-            meta = metas[i - 1] or {}
-            M_delta, fallbacks = deltas[i - 1], (1 if meta.get("fallback") else 0)
-            if M_delta is None:
-                # Hold: assume a constant breathing rate (reuse the last
-                # successful delta); identity if none so far.
-                M_delta = prev_delta if prev_delta is not None else identity
-                fallbacks += 1
-                meta = {**meta, "held": True}
-            else:
-                prev_delta = M_delta
-            transforms[i] = self.compose_affine(transforms[i - 1], M_delta)
-            log[i] = {
-                "frame": i,
-                "step_scale": self.transform_scale(M_delta),
-                "scale": self.transform_scale(transforms[i]),
-                "angle": self.transform_rotation(transforms[i]),
-                "method": meta.get("method", "?"),
-                "fallbacks": fallbacks,
-            }
-
-        # Chain downward: reference → start of stack.
-        # M_ref→(i-1) = Δ(i-1→i)⁻¹ · M_ref→i, with Δ(i-1→i) = deltas[i-1].
-        prev_delta = None
-        for i in range(r, 0, -1):
-            meta = metas[i - 1] or {}
-            fallbacks = 1 if meta.get("fallback") else 0
-            M_delta = deltas[i - 1]
-            if M_delta is None:
-                # Hold: reuse the last successful delta (constant breathing
-                # rate); identity if none so far.
-                M_delta = prev_delta if prev_delta is not None else identity
-                fallbacks += 1
-                meta = {**meta, "held": True}
-            else:
-                prev_delta = M_delta
-            D = self.invert_affine(M_delta)  # maps frame i coords → frame i-1 coords
-            transforms[i - 1] = self.compose_affine(transforms[i], D)
-            log[i - 1] = {
-                "frame": i - 1,
-                "step_scale": self.transform_scale(M_delta),
-                "scale": self.transform_scale(transforms[i - 1]),
-                "angle": self.transform_rotation(transforms[i - 1]),
-                "method": meta.get("method", "?"),
-                "fallbacks": fallbacks,
-            }
 
         return transforms, log
 

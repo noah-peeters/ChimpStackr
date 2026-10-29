@@ -214,9 +214,9 @@ class TestSequentialTransforms:
 
 
 class TestMaxPrecision:
-    """The breathing chain runs with precision='max': float32 ECC scale
-    refinement + Lanczos resampling + 4096px cascade. Verify it measurably
-    beats the default path on image content that exercises those upgrades."""
+    """Both precisions refine the scale with ECC (precision='max' on float32
+    with Lanczos resampling and a 4096px cascade). Verify both recover the
+    true transform on content that exercises the refinement."""
 
     @staticmethod
     def _natural_image(h=512, w=640, seed=3):
@@ -244,7 +244,7 @@ class TestMaxPrecision:
         d = np.abs(ab[80:-80, 80:-80] - bb[80:-80, 80:-80])
         return float(np.mean(d))
 
-    def test_hq_beats_default_on_natural_content(self):
+    def test_scale_refined_on_natural_content(self):
         base = self._natural_image()
         T = cv2.getRotationMatrix2D((320, 256), 0.4, 1.021)
         T[0, 2] += 2.37
@@ -257,14 +257,13 @@ class TestMaxPrecision:
                                               precision="max")
         r_def = self._residual(base, frame, M_def, alg)
         r_hq = self._residual(base, frame, M_hq, alg)
-        # The max-precision path must align strictly better, with a real
-        # margin (measured ~0.08 vs ~0.48)
-        assert r_hq < r_def * 0.6, f"HQ residual {r_hq:.3f} not clearly better than {r_def:.3f}"
-        assert r_hq < 0.5
+        # ~0.08 for both; freezing the scale at ORB's estimate gave ~0.48
+        assert r_def < 0.2, f"default residual {r_def:.3f}"
+        assert r_hq < 0.2, f"HQ residual {r_hq:.3f}"
 
-    def test_hq_scale_refinement(self):
-        """HQ refines SCALE via float32 ECC; the default path cannot (freeze
-        at ORB estimate). On natural content this recovers the true scale."""
+    def test_scale_refinement(self):
+        """ECC refines the SCALE (not just ORB's estimate): on natural
+        content both precisions recover the true scale."""
         base = self._natural_image(seed=5)
         true_scale = 1.019
         T = cv2.getRotationMatrix2D((320, 256), 1.1, true_scale)
@@ -277,9 +276,8 @@ class TestMaxPrecision:
                                               precision="max")
         e_def = abs(alg.transform_scale(M_def) - true_scale)
         e_hq = abs(alg.transform_scale(M_hq) - true_scale)
-        assert e_hq < 0.002, f"HQ scale error {e_hq:.5f} too large"
-        assert e_hq < e_def * 0.5, (
-            f"HQ scale error {e_hq:.5f} should halve default {e_def:.5f}")
+        assert e_hq < 0.0005, f"HQ scale error {e_hq:.5f} too large"
+        assert e_def < 0.0005, f"default scale error {e_def:.5f} too large"
 
     def test_hq_beats_default_on_breathing_chain(self, tmp_path):
         """End-to-end: HQ chain leaves less residual stack-wide scale drift."""

@@ -252,23 +252,30 @@ def _clahe_luts(gray_u8, clip_limit=2.0, grid=8):
     src = cv2.copyMakeBorder(gray_u8, 0, pad_y, 0, pad_x, cv2.BORDER_REFLECT_101) \
         if pad_x or pad_y else gray_u8
     th, tw = src.shape[0] // grid, src.shape[1] // grid
-    total = tw * th
-    limit = max(int(clip_limit * total / 256), 1)
-    luts = np.empty((grid, grid, 256), np.float32)
+    hists = np.empty((grid, grid, 256), np.int64)
     for ty in range(grid):
         for tx in range(grid):
             tile = src[ty * th:(ty + 1) * th, tx * tw:(tx + 1) * tw]
-            hist = np.bincount(tile.ravel(), minlength=256).astype(np.int64)
-            clipped = int(np.maximum(hist - limit, 0).sum())
-            hist = np.minimum(hist, limit)
-            hist += clipped // 256
-            residual = clipped - (clipped // 256) * 256
-            if residual:
-                step = max(256 // residual, 1)
-                idx = np.arange(0, 256, step)[:residual]
-                hist[idx] += 1
-            luts[ty, tx] = np.clip(np.round(np.cumsum(hist) * (255.0 / total)), 0, 255)
-    return luts, tw, th
+            hists[ty, tx] = np.bincount(tile.ravel(), minlength=256)
+    return clahe_luts_from_histograms(hists, tw * th, clip_limit), tw, th
+
+
+def clahe_luts_from_histograms(hists, total, clip_limit=2.0):
+    """CLAHE lookup tables from per-tile 256-bin histograms of `total` pixels."""
+    limit = max(int(clip_limit * total / 256), 1)
+    luts = np.empty(hists.shape, np.float32)
+    for tile in np.ndindex(hists.shape[:-1]):
+        hist = hists[tile].astype(np.int64)
+        clipped = int(np.maximum(hist - limit, 0).sum())
+        hist = np.minimum(hist, limit)
+        hist += clipped // 256
+        residual = clipped - (clipped // 256) * 256
+        if residual:
+            step = max(256 // residual, 1)
+            idx = np.arange(0, 256, step)[:residual]
+            hist[idx] += 1
+        luts[tile] = np.clip(np.round(np.cumsum(hist) * (255.0 / total)), 0, 255)
+    return luts
 
 
 def _clahe_apply(lut_info, values):

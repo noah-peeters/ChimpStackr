@@ -9,6 +9,7 @@
 """
 import os
 import tempfile
+import threading
 import time
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -23,6 +24,38 @@ import src.algorithms.stacking_algorithms.ocl as OCL
 from src.config import AlgorithmConfig
 
 logger = logging.getLogger(__name__)
+
+
+class _TransformStream:
+    """Sequential-alignment transforms, published while the chain is still
+    being estimated (see LaplacianPyramid._prepare_alignment)."""
+
+    def __init__(self, n):
+        self.transforms = [None] * n
+        self.log = None
+        self.error = None
+        self.done = False
+        self.ready = 0          # frames with a known transform
+        self.cond = threading.Condition()
+
+    def put(self, i, M):
+        with self.cond:
+            self.transforms[i] = M
+            self.ready += 1
+            self.cond.notify_all()
+
+    def finish(self, transforms, log, error=None):
+        with self.cond:
+            if transforms is not None:
+                self.transforms = transforms
+            self.log, self.error, self.done = log, error, True
+            self.cond.notify_all()
+
+    def get(self, i):
+        """Frame i's transform; None if estimation stopped without it."""
+        with self.cond:
+            self.cond.wait_for(lambda: self.transforms[i] is not None or self.done)
+            return self.transforms[i]
 
 
 class LaplacianPyramid:
@@ -40,6 +73,10 @@ class LaplacianPyramid:
         self._breathing_index = {}   # path → frame index
         self._progress_offset = 0
         self._progress_total = None
+        self._stream = None          # transforms still being estimated (GPU path)
+        self._stream_thread = None
+        self._stacked = 0
+        self._progress_lock = threading.Lock()
         self.Algorithm = algorithms.Algorithm()
 
     @property
@@ -148,15 +185,44 @@ class LaplacianPyramid:
         if later_steps is None:
             later_steps = (total_mult - 1) * n  # apply (n-1 or n)
         self._progress_total = n + later_steps  # estimation (n) + later phases
-        transforms, log = self.Algorithm.estimate_sequential_transforms(
-            self.image_paths,
+        estimate = dict(
             ref_index=self._get_reference_index(),
             alignment_mode=self._resolve_alignment_mode(),
             scale_factor=self.config.alignment_scale_factor,
             max_scale_step=self.config.breathing_max_scale_step,
             precision="max" if self.config.breathing_high_precision else "default",
+        )
+        if self._gpu_wanted():
+            # The GPU stacks each frame as soon as its transform is known, so
+            # estimation (CPU) and stacking (GPU) overlap. Progress counts
+            # frames with a transform plus stacking steps.
+            stream = self._stream = _TransformStream(n)
+            self._stacked = 0
+            self._gpu_estimation_on()
+
+            def on_ready(i, M):
+                stream.put(i, M)
+                self._emit_progress(signals, progress_callback, None, None, 0.0)
+
+            def run():
+                transforms, log, error = None, None, None
+                try:
+                    transforms, log = self.Algorithm.estimate_sequential_transforms(
+                        self.image_paths, on_ready=on_ready, **estimate)
+                except Exception as exc:   # raised again by _finish_alignment
+                    error = exc
+                stream.finish(transforms, log, error)
+
+            self._stream_thread = threading.Thread(target=run, daemon=True)
+            self._stream_thread.start()
+            self._progress_offset = n
+            return True
+
+        transforms, log = self.Algorithm.estimate_sequential_transforms(
+            self.image_paths,
             emit=lambda cur, tot, t: self._emit_progress(
                 signals, progress_callback, cur, tot, t),
+            **estimate,
         )
         if transforms is None:
             logger.info("Sequential alignment cancelled")
@@ -166,6 +232,23 @@ class LaplacianPyramid:
         self._breathing_index = {p: i for i, p in enumerate(self.image_paths)}
         self.sequential_log = log
         self._progress_offset = n  # later phases report on top of estimation
+        return True
+
+    def _finish_alignment(self):
+        """Wait for a streamed estimation and keep its result, as the
+        synchronous path does. Returns False if it was cancelled."""
+        stream = self._stream
+        if stream is None:
+            return True
+        self._stream_thread.join()
+        self._stream = self._stream_thread = None
+        if stream.error is not None:
+            raise stream.error
+        if stream.log is None:
+            return False
+        self._breathing_transforms = stream.transforms
+        self._breathing_index = {p: i for i, p in enumerate(self.image_paths)}
+        self.sequential_log = stream.log
         return True
 
     def _sequential_warp_kwargs(self):
@@ -439,12 +522,16 @@ class LaplacianPyramid:
         if not self._prepare_alignment(signals, progress_callback,
                                        later_steps=self._slab_plan()[1]):
             return
+        if self._gpu_run(True, signals, progress_callback):
+            return
         ref_image = self._load_ref_frame()
         self._run_slabs(ref_image, lambda path: self._load_and_align(ref_image, path),
                         signals, progress_callback)
 
     def _stack_slabbed(self, signals=None, progress_callback=None):
         self.Algorithm.reset_cancel()
+        if self._gpu_run(False, signals, progress_callback):
+            return
         self._run_slabs(self.Algorithm.load_image(self.image_paths[0]),
                         self.Algorithm.load_image, signals, progress_callback)
 
@@ -558,53 +645,102 @@ class LaplacianPyramid:
 
     # ─── GPU (OpenCL) ───
     #
-    # Pyramid and Hybrid can run on any OpenCL GPU: worker threads decode
+    # Every stacking method can run on any OpenCL GPU: worker threads decode
     # frames (and estimate alignment), the GPU warps, decomposes and fuses
     # them, and only the result comes back. Falls back to the CPU path when
     # no GPU is available or anything goes wrong on it.
 
     def _gpu_wanted(self):
+        return self.config.use_gpu and OCL.available()
+
+    def _gpu_fuser(self, gpu):
         c = self.config
-        if not c.use_gpu or not OCL.available():
-            return False
-        if c.stacking_method == "laplacian":
-            return c.contrast_threshold <= 0   # thresholded focus map is CPU-only
-        return c.stacking_method == "hybrid"
+        if c.stacking_method == "hybrid":
+            return OCL.HybridGPU(gpu, self.pyramid_num_levels, self.fusion_kernel_size)
+        if c.stacking_method == "weighted_average":
+            return OCL.WeightedAverageGPU(gpu, self.fusion_kernel_size)
+        if c.stacking_method == "depth_map":
+            return OCL.DepthMapGPU(gpu, self.fusion_kernel_size, c.depthmap_smoothing)
+        if c.stacking_method == "exposure_fusion":
+            return OCL.ExposureGPU(gpu, self.EXPOSURE_BATCH_SIZE)
+        return OCL.PyramidGPU(gpu, self.pyramid_num_levels, self.fusion_kernel_size,
+                              c.feather_radius, c.contrast_threshold)
+
+    def _gpu_estimation_on(self):
+        """Let alignment estimation use the GPU too (see ocl.EstimationGPU)."""
+        try:
+            self.Algorithm.gpu_estimation = OCL.get(self.config.selected_gpu_id).estimation()
+        except Exception as exc:   # no usable device: estimate on the CPU
+            logger.warning(f"GPU alignment help unavailable ({exc})")
 
     def _gpu_run(self, align, signals, progress_callback):
         """Stack on the GPU. Returns False if the CPU path should run instead."""
         if not self._gpu_wanted():
             return False
         try:
+            return self._gpu_run_inner(align, signals, progress_callback)
+        finally:
+            self.Algorithm.gpu_estimation = None
+            if OCL.available():
+                try:
+                    OCL.get(self.config.selected_gpu_id).release()
+                except Exception:   # nothing to release if the device never worked
+                    pass
+
+    def _gpu_run_inner(self, align, signals, progress_callback):
+        progress_total = self._progress_total
+        try:
             gpu = OCL.get(self.config.selected_gpu_id)
             logger.info(f"Stacking on GPU: {gpu.name}")
             fused = self._gpu_core(gpu, align, signals, progress_callback)
+            if fused is not None:
+                if self.config.stacking_method == "laplacian" and fused.ndim == 3:
+                    fused = gpu.tone_map(fused, strength=0.3)
+                fused = fused.get()
         except Exception as exc:   # OpenCL/driver errors, out of GPU memory, ...
             logger.warning(f"GPU stacking failed ({exc}); falling back to the CPU")
             self.Algorithm.alignment_shifts = []
-            return False
+            self._progress_total = progress_total
+            # the CPU path needs the complete chain (unless cancelled meanwhile)
+            return not self._finish_alignment()
+        if not self._finish_alignment():
+            return True
         if fused is not None:
-            if self.config.stacking_method == "laplacian":
+            if self.config.stacking_method == "laplacian" and fused.ndim != 3:
                 fused = CPU.local_tone_map(fused, strength=0.3)
             self.output_image = fused
+            self.depth_map = None
         return True
 
+    GPU_ESTIMATE_BYTES_PER_PIXEL = 16
+
+    @staticmethod
+    def _gray_f32(img):
+        """cv2.cvtColor(img.astype(np.float32), COLOR_BGR2GRAY), computed in
+        row chunks (the same values) to avoid a float copy of the frame."""
+        if img.ndim == 2:
+            return img.astype(np.float32)
+        out = np.empty(img.shape[:2], np.float32)
+        for y in range(0, img.shape[0], 256):
+            out[y:y + 256] = cv2.cvtColor(img[y:y + 256].astype(np.float32), cv2.COLOR_BGR2GRAY)
+        return out
+
     def _gpu_core(self, gpu, align, signals, progress_callback):
+        """Decode, align and fuse every frame; returns the device image."""
         paths = self.image_paths
         load = self.Algorithm.ImageLoadingHandler.read_image_native
-        sequential = align and self._breathing_transforms is not None
+        stream = self._stream if align else None
+        sequential = align and (self._breathing_transforms is not None or stream is not None)
         mode = self._resolve_alignment_mode()
         ref = load(paths[0])
         if ref is None:
             raise RuntimeError(f"failed to load {paths[0]}")
-        # single-reference alignment estimates from float frames, exactly as
-        # the CPU path does (the estimators are sensitive to their input)
-        ref_f32 = ref.astype(np.float32) if align and not sequential else None
-        if self.config.stacking_method == "hybrid":
-            fuser = OCL.HybridGPU(gpu, self.pyramid_num_levels, self.fusion_kernel_size)
-        else:
-            fuser = OCL.PyramidGPU(gpu, self.pyramid_num_levels, self.fusion_kernel_size,
-                                   self.config.feather_radius)
+        # single-reference alignment estimates from the gray of the float
+        # frames, exactly as the CPU path does (the estimators are sensitive
+        # to their input)
+        ref_gray = self._gray_f32(ref) if align and not sequential else None
+        if ref_gray is not None:
+            self._gpu_estimation_on()
 
         def frame(i):
             """Decode (and, for single-reference alignment, estimate) frame i."""
@@ -612,22 +748,46 @@ class LaplacianPyramid:
             if img is None:
                 raise RuntimeError(f"failed to load {paths[i]}")
             if img.dtype != ref.dtype:
-                img = img.astype(np.float32) if ref.dtype == np.float32 else                     np.clip(img, 0, 255).astype(np.uint8)
+                img = img.astype(np.float32) if ref.dtype == np.float32 else \
+                    np.clip(img, 0, 255).astype(np.uint8)
             img = self.Algorithm._match_dimensions(ref, img)
             M = None
-            if sequential:
+            if stream is not None:
+                M = stream.get(i)
+                if M is None and not self.Algorithm.is_cancelled:
+                    raise RuntimeError("sequential alignment failed")
+            elif sequential:
                 M = self._breathing_transforms[i]
             elif align and i > 0:
                 M, _ = self.Algorithm.estimate_pair_transform(
-                    ref_f32, img.astype(np.float32), alignment_mode=mode,
+                    ref_gray, self._gray_f32(img), alignment_mode=mode,
                     scale_factor=self.config.alignment_scale_factor,
                 )
             return img, M
 
-        workers = 4
+        # Slabbing fuses each slab, then the slab results in order; slabs are
+        # streamed into the final fuser, so nothing waits on disk or memory
+        if self._slabbing_active():
+            groups, steps = self._slab_plan()
+            self._progress_total = self._progress_offset + steps
+        else:
+            groups, steps = [list(range(len(paths)))], len(paths)
+        order = [i for group in groups for i in group]
+        final = self._gpu_fuser(gpu) if len(groups) > 1 else None
+        fuser, group_ends = self._gpu_fuser(gpu), set()
+        pos = 0
+        for group in groups:
+            pos += len(group)
+            group_ends.add(pos - 1)
+
+        # decode only: 4 workers; with single-reference estimation in them,
+        # more if memory allows (frame, its float gray, ORB)
+        workers = 4 if ref_gray is None else max(
+            4, self._frame_workers(ref.shape, self.GPU_ESTIMATE_BYTES_PER_PIXEL, cap=8))
+        done = 0
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            pending = {j: pool.submit(frame, j) for j in range(min(workers + 1, len(paths)))}
-            for i in range(len(paths)):
+            pending = {j: pool.submit(frame, order[j]) for j in range(min(workers + 1, len(order)))}
+            for j in range(len(order)):
                 self.Algorithm.wait_if_paused()
                 if self.Algorithm.is_cancelled:
                     logger.info("Stacking cancelled")
@@ -635,18 +795,23 @@ class LaplacianPyramid:
                         f.cancel()
                     return None
                 start_time = time.time()
-                img, M = pending.pop(i).result()
-                j = i + workers + 1
-                if j < len(paths):
-                    pending[j] = pool.submit(frame, j)
+                img, M = pending.pop(j).result()
+                nxt = j + workers + 1
+                if nxt < len(order):
+                    pending[nxt] = pool.submit(frame, order[nxt])
                 # breathing: Lanczos + replicated borders, as on the CPU path
                 fuser.add(gpu.warp(img, M, lanczos=sequential, replicate=sequential))
                 if M is not None:
                     self.Algorithm._track_warp_shifts(M, img.shape)
                 del img
-                self._emit_progress(signals, progress_callback, i + 1, len(paths),
+                done += 1
+                if final is not None and j in group_ends:
+                    final.add(fuser.result())
+                    fuser = self._gpu_fuser(gpu)
+                    done += 1
+                self._emit_progress(signals, progress_callback, done, steps,
                                     time.time() - start_time)
-        return fuser.result()
+        return (final or fuser).result()
 
     # ─── Weighted Average Method ───
     #
@@ -693,6 +858,8 @@ class LaplacianPyramid:
         self.Algorithm.alignment_shifts = []
         if not self._prepare_alignment(signals, progress_callback, total_mult=2):
             return
+        if self._gpu_run(True, signals, progress_callback):
+            return
 
         ref_image = self._load_ref_frame()
 
@@ -708,6 +875,8 @@ class LaplacianPyramid:
 
     def _stack_weighted_average(self, signals=None, progress_callback=None):
         self.Algorithm.reset_cancel()
+        if self._gpu_run(False, signals, progress_callback):
+            return
 
         def image_iter():
             for i, path in enumerate(self.image_paths):
@@ -767,6 +936,8 @@ class LaplacianPyramid:
         self.Algorithm.alignment_shifts = []
         if not self._prepare_alignment(signals, progress_callback, total_mult=2):
             return
+        if self._gpu_run(True, signals, progress_callback):
+            return
 
         ref_image = self._load_ref_frame()
 
@@ -782,6 +953,8 @@ class LaplacianPyramid:
 
     def _stack_depthmap(self, signals=None, progress_callback=None):
         self.Algorithm.reset_cancel()
+        if self._gpu_run(False, signals, progress_callback):
+            return
 
         def image_iter():
             for i, path in enumerate(self.image_paths):
@@ -832,6 +1005,8 @@ class LaplacianPyramid:
         self.Algorithm.alignment_shifts = []
         if not self._prepare_alignment(signals, progress_callback, total_mult=2):
             return
+        if self._gpu_run(True, signals, progress_callback):
+            return
 
         ref_image = self._load_ref_frame()
 
@@ -846,6 +1021,8 @@ class LaplacianPyramid:
 
     def _stack_exposure(self, signals=None, progress_callback=None):
         self.Algorithm.reset_cancel()
+        if self._gpu_run(False, signals, progress_callback):
+            return
 
         def image_iter():
             for i, path in enumerate(self.image_paths):
@@ -860,8 +1037,22 @@ class LaplacianPyramid:
     def _emit_progress(self, signals, progress_callback, current, total, time_taken):
         # Sequential alignment has extra phases (estimation); progress totals
         # and offsets are adjusted so the bar stays monotonic.
+        stream = self._stream
+        if stream is not None:
+            # Estimation and stacking overlap: frames with a transform plus
+            # stacking steps (current None: a transform became available)
+            with self._progress_lock:
+                if current is not None:
+                    self._stacked = current
+                self._send_progress(signals, progress_callback, stream.ready + self._stacked,
+                                    self._progress_total, time_taken)
+            return
         current += self._progress_offset
         total = self._progress_total if self._progress_total is not None else total
+        self._send_progress(signals, progress_callback, current, total, time_taken)
+
+    @staticmethod
+    def _send_progress(signals, progress_callback, current, total, time_taken):
         if signals is not None:
             signals.finished_inter_task.emit(
                 ["finished_image", current, total, time_taken]
