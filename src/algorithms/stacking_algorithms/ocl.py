@@ -12,6 +12,7 @@ OpenCV).
 import math
 import os
 import threading
+import warnings
 from functools import lru_cache
 
 import cv2
@@ -147,15 +148,6 @@ __kernel void sml(__global const float *g, __global float *dst, int w, int h) {
     dst[y * w + x] = fabs(lx) + fabs(ly);
 }
 
-// var = sqmean - mean^2, optionally clamped at 0
-__kernel void variance(__global const float *mean, __global const float *sqmean,
-                       __global float *var, int n, int clamp0) {
-    int i = get_global_id(0);
-    if (i >= n) return;
-    float v = sqmean[i] - mean[i] * mean[i];
-    var[i] = clamp0 ? fmax(v, 0.f) : v;
-}
-
 // ── Hybrid ──
 __kernel void hybrid_add(__global const float *level, __global const float *wsrc,
                          __global const float *var, __global const float *sharp,
@@ -196,12 +188,6 @@ __kernel void hybrid_level(__global const float *num, __global const float *den,
 }
 
 // ── Pyramid (pairwise max-contrast, optional soft focus map) ──
-__kernel void focusmap(__global const float *v1, __global const float *v2,
-                       __global float *fm, int n) {
-    int i = get_global_id(0);
-    if (i < n) fm[i] = v2[i] > v1[i] ? 1.f : 0.f;
-}
-
 // partial maxima: each work item scans a strided slice (host takes the max)
 __kernel void max_partial(__global const float *a, __global float *out, int n) {
     int gid = get_global_id(0), gs = get_global_size(0);
@@ -493,6 +479,254 @@ __kernel void round_u8(__global float *a, int n) {
     int i = get_global_id(0);
     if (i < n) a[i] = clamp(rint(a[i]), 0.f, 255.f);
 }
+
+// ── ECC (cv2.findTransformECC, euclidean / affine) ──
+// gradients [-0.5 0 0.5] along x and y (cv2.filter2D, reflect-101 borders)
+__kernel void ecc_grad(__global const float *a, __global float *gx, __global float *gy,
+                       int w, int h) {
+    int x = get_global_id(0), y = get_global_id(1);
+    if (x >= w || y >= h) return;
+    gx[y * w + x] = -0.5f * a[y * w + r101(x - 1, w)] + 0.5f * a[y * w + r101(x + 1, w)];
+    gy[y * w + x] = -0.5f * a[r101(y - 1, h) * w + x] + 0.5f * a[r101(y + 1, h) * w + x];
+}
+
+// bilinear sample, zero outside (warpAffine INTER_LINEAR, BORDER_CONSTANT)
+inline float ecc_sample(__global const float *a, int w, int h, float x, float y) {
+    int x0 = (int)floor(x), y0 = (int)floor(y);
+    float tx = x - x0, ty = y - y0, v = 0.f;
+    for (int j = 0; j < 2; j++) {
+        int yy = y0 + j;
+        if (yy < 0 || yy >= h) continue;
+        float row = 0.f;
+        if (x0 >= 0 && x0 < w) row += (1.f - tx) * a[yy * w + x0];
+        if (x0 + 1 >= 0 && x0 + 1 < w) row += tx * a[yy * w + x0 + 1];
+        v += (j ? ty : 1.f - ty) * row;
+    }
+    return v;
+}
+
+// the warp mask (nearest-neighbour warp of an all-ones image)
+inline bool ecc_inside(float x, float y, int w, int h) {
+    int nx = (int)floor(x + 0.5f), ny = (int)floor(y + 0.5f);
+    return nx >= 0 && ny >= 0 && nx < w && ny < h;
+}
+
+#define ECC_GROUP 64
+#define ECC_VALUES 36
+
+// pass 1: masked sums of the warped image and the template, per work-group
+__kernel void ecc_means_partial(__global const float *tmpl, __global const float *img,
+                                __global float *parts, int w, int h, __global const float *M) {
+    __local float tmp[3 * ECC_GROUP];
+    int lid = get_local_id(0), n = w * h;
+    float m0 = M[0], m1 = M[1], m2 = M[2], m3 = M[3], m4 = M[4], m5 = M[5];
+    float sw = 0.f, st = 0.f, cnt = 0.f;
+    for (int p = get_global_id(0); p < n; p += get_global_size(0)) {
+        float x = p % w, y = p / w;
+        float sx = m0 * x + m1 * y + m2, sy = m3 * x + m4 * y + m5;
+        if (!ecc_inside(sx, sy, w, h)) continue;
+        sw += ecc_sample(img, w, h, sx, sy);
+        st += tmpl[p];
+        cnt += 1.f;
+    }
+    tmp[lid] = sw; tmp[ECC_GROUP + lid] = st; tmp[2 * ECC_GROUP + lid] = cnt;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (int s = ECC_GROUP / 2; s > 0; s >>= 1) {
+        if (lid < s)
+            for (int k = 0; k < 3; k++) tmp[k * ECC_GROUP + lid] += tmp[k * ECC_GROUP + lid + s];
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (lid < 3) parts[get_group_id(0) * 3 + lid] = tmp[lid * ECC_GROUP];
+}
+
+// means[0] = warped image mean, means[1] = template mean (single work-group)
+__kernel void ecc_means_final(__global const float *parts, __global float *means, int groups) {
+    __local float tmp[3 * ECC_GROUP];
+    int lid = get_local_id(0);
+    float a = 0.f, b = 0.f, c = 0.f;
+    for (int g = lid; g < groups; g += ECC_GROUP) {
+        a += parts[g * 3]; b += parts[g * 3 + 1]; c += parts[g * 3 + 2];
+    }
+    tmp[lid] = a; tmp[ECC_GROUP + lid] = b; tmp[2 * ECC_GROUP + lid] = c;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (int s = ECC_GROUP / 2; s > 0; s >>= 1) {
+        if (lid < s)
+            for (int k = 0; k < 3; k++) tmp[k * ECC_GROUP + lid] += tmp[k * ECC_GROUP + lid + s];
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (lid == 0) {
+        float cnt = fmax(tmp[2 * ECC_GROUP], 1.f);
+        means[0] = tmp[0] / cnt;
+        means[1] = tmp[ECC_GROUP] / cnt;
+    }
+}
+
+// pass 2, per work-group: [correlation, |image|^2, |template|^2,
+// J'J (upper triangle), J'image, J'template] with zero-mean image/template
+__kernel void ecc_sums_partial(__global const float *tmpl, __global const float *img,
+                               __global const float *gxs, __global const float *gys,
+                               __global const float *means, __global float *parts,
+                               int w, int h, __global const float *M, int affine) {
+    __local float tmp[ECC_VALUES * ECC_GROUP];
+    int lid = get_local_id(0), n = w * h, np = affine ? 6 : 3;
+    float m0 = M[0], m1 = M[1], m2 = M[2], m3 = M[3], m4 = M[4], m5 = M[5];
+    int nv = 3 + np * (np + 1) / 2 + 2 * np;
+    float acc[ECC_VALUES];
+    for (int k = 0; k < ECC_VALUES; k++) acc[k] = 0.f;
+    float mw = means[0], mt = means[1];
+    for (int p = get_global_id(0); p < n; p += get_global_size(0)) {
+        float x = p % w, y = p / w;
+        float sx = m0 * x + m1 * y + m2, sy = m3 * x + m4 * y + m5;
+        bool in = ecc_inside(sx, sy, w, h);
+        float iw = ecc_sample(img, w, h, sx, sy);
+        float gx = ecc_sample(gxs, w, h, sx, sy), gy = ecc_sample(gys, w, h, sx, sy);
+        float tz = in ? tmpl[p] - mt : 0.f;
+        if (in) iw -= mw;
+        float J[6];
+        if (affine) {
+            J[0] = gx * x; J[1] = gy * x; J[2] = gx * y; J[3] = gy * y; J[4] = gx; J[5] = gy;
+        } else {
+            // m0 = cos(theta), m3 = sin(theta)
+            float hx = -(x * m3) - (y * m0), hy = (x * m0) - (y * m3);
+            J[0] = gx * hx + gy * hy; J[1] = gx; J[2] = gy;
+        }
+        acc[0] += tz * iw;
+        if (in) acc[1] += iw * iw;
+        acc[2] += tz * tz;
+        int k = 3;
+        for (int i = 0; i < np; i++)
+            for (int j = i; j < np; j++) acc[k++] += J[i] * J[j];
+        for (int i = 0; i < np; i++) { acc[k + i] += J[i] * iw; acc[k + np + i] += J[i] * tz; }
+    }
+    for (int k = 0; k < nv; k++) tmp[k * ECC_GROUP + lid] = acc[k];
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (int s = ECC_GROUP / 2; s > 0; s >>= 1) {
+        if (lid < s)
+            for (int k = 0; k < nv; k++) tmp[k * ECC_GROUP + lid] += tmp[k * ECC_GROUP + lid + s];
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    for (int k = lid; k < nv; k += ECC_GROUP) parts[get_group_id(0) * nv + k] = tmp[k * ECC_GROUP];
+}
+
+// ── Tone map (cpu.local_tone_map: CLAHE on L of LAB, blended) ──
+// sRGB float LAB as cv2.cvtColor (which evaluates these curves via splines)
+inline float srgb_to_linear(float v) {
+    return v <= 0.04045f ? v / 12.92f : pow((v + 0.055f) / 1.055f, 2.4f);
+}
+inline float linear_to_srgb(float v) {
+    return v <= 0.0031308f ? 12.92f * v : 1.055f * pow(v, 1.f / 2.4f) - 0.055f;
+}
+inline float lab_f(float t) { return t > 0.008856f ? cbrt(t) : 7.787f * t + 16.f / 116.f; }
+inline float lab_finv(float t) { return t > 6.f / 29.f ? t * t * t : (t - 16.f / 116.f) / 7.787f; }
+
+// BGR (0..255, clipped) -> LAB (L 0..100)
+__kernel void tone_lab(__global const float *src, __global float *lab, int n) {
+    int i = get_global_id(0);
+    if (i >= n) return;
+    __global const float *p = src + i * 3;
+    float b = srgb_to_linear(clamp(p[0], 0.f, 255.f) / 255.f);
+    float g = srgb_to_linear(clamp(p[1], 0.f, 255.f) / 255.f);
+    float r = srgb_to_linear(clamp(p[2], 0.f, 255.f) / 255.f);
+    float X = (0.412453f * r + 0.357580f * g + 0.180423f * b) / 0.950456f;
+    float Y = 0.212671f * r + 0.715160f * g + 0.072169f * b;
+    float Z = (0.019334f * r + 0.119193f * g + 0.950227f * b) / 1.088754f;
+    float fx = lab_f(X), fy = lab_f(Y), fz = lab_f(Z);
+    lab[i * 3] = Y > 0.008856f ? 116.f * fy - 16.f : 903.3f * Y;
+    lab[i * 3 + 1] = 500.f * (fx - fy);
+    lab[i * 3 + 2] = 200.f * (fy - fz);
+}
+
+// CLAHE tile histograms of round(L * 2.55) over the image padded (reflect-101)
+// to a multiple of the grid
+__kernel void tone_hist(__global const float *lab, __global int *hist, int w, int h,
+                        int tw, int th, int grid) {
+    int x = get_global_id(0), y = get_global_id(1);
+    if (x >= tw * grid || y >= th * grid) return;
+    float l = clamp(lab[(r101(y, h) * w + r101(x, w)) * 3] * 2.55f, 0.f, 255.f);
+    atomic_inc(&hist[((y / th) * grid + x / tw) * 256 + (int)rint(l)]);
+}
+
+// L -> blend of L and CLAHE(L) (bilinear between tiles, linear between LUT
+// entries, as cpu._clahe_apply), then back to BGR (0..255)
+__kernel void tone_apply(__global const float *lab, __global const float *luts,
+                         __global float *dst, int w, int h, int tw, int th, int grid,
+                         float strength) {
+    #pragma OPENCL FP_CONTRACT OFF
+    int x = get_global_id(0), y = get_global_id(1);
+    if (x >= w || y >= h) return;
+    int i = y * w + x;
+    float l255 = clamp(lab[i * 3] * 2.55f, 0.f, 255.f);
+    float lo_f = floor(l255), fr = l255 - lo_f;
+    int lo = (int)lo_f, hi = min(lo + 1, 255);
+    float cx = (float)x / tw - 0.5f, cy = (float)y / th - 0.5f;
+    int kx = clamp((int)floor(cx) + 1, 0, grid), ky = clamp((int)floor(cy) + 1, 0, grid);
+    int tx1 = max(kx - 1, 0), tx2 = min(kx, grid - 1), ty1 = max(ky - 1, 0), ty2 = min(ky, grid - 1);
+    float wx = cx - (kx - 1), wy = cy - (ky - 1);
+    float v[4];
+    int tiles[4] = {ty1 * grid + tx1, ty1 * grid + tx2, ty2 * grid + tx1, ty2 * grid + tx2};
+    for (int t = 0; t < 4; t++) {
+        float a = luts[tiles[t] * 256 + lo], b = luts[tiles[t] * 256 + hi];
+        v[t] = a + (b - a) * fr;
+    }
+    float top = v[0] * (1.f - wx) + v[1] * wx, bottom = v[2] * (1.f - wx) + v[3] * wx;
+    float lc = top * (1.f - wy) + bottom * wy;
+    float L = (l255 * (1.f - strength) + lc * strength) / 2.55f;
+
+    float fy, Y;
+    if (L <= 7.9996f) { Y = L / 903.3f; fy = 7.787f * Y + 16.f / 116.f; }
+    else { fy = (L + 16.f) / 116.f; Y = fy * fy * fy; }
+    float X = lab_finv(lab[i * 3 + 1] / 500.f + fy) * 0.950456f;
+    float Z = lab_finv(fy - lab[i * 3 + 2] / 200.f) * 1.088754f;
+    float r = 3.240479f * X - 1.53715f * Y - 0.498535f * Z;
+    float g = -0.969256f * X + 1.875991f * Y + 0.041556f * Z;
+    float b = 0.055648f * X - 0.204043f * Y + 1.057311f * Z;
+    dst[i * 3] = clamp(linear_to_srgb(clamp(b, 0.f, 1.f)) * 255.f, 0.f, 255.f);
+    dst[i * 3 + 1] = clamp(linear_to_srgb(clamp(g, 0.f, 1.f)) * 255.f, 0.f, 255.f);
+    dst[i * 3 + 2] = clamp(linear_to_srgb(clamp(r, 0.f, 1.f)) * 255.f, 0.f, 255.f);
+}
+
+// ── Local variance (box k x k of the gray), fused ──
+// rows pass, for one or two images (gray computed on the fly): (1/k)-weighted
+// sums of gray and gray^2 along x -> out planes [s(a), s2(a), s(b), s2(b)]
+__kernel void var_rows(__global const float *a, __global const float *b, __global float *out,
+                       int w, int h, int ch, int k) {
+    int x = get_global_id(0), y = get_global_id(1);
+    if (x >= w || y >= h) return;
+    float c = 1.f / k;
+    int n = w * h;
+    for (int img = 0; img < (b ? 2 : 1); img++) {
+        __global const float *src = img ? b : a;
+        float s = 0.f, s2 = 0.f;
+        for (int t = 0; t < k; t++) {
+            int i = y * w + r101(x + t - k / 2, w);
+            float v = ch == 3 ? gray3(src + i * 3) : src[i];
+            s += c * v;
+            s2 += c * (v * v);
+        }
+        out[2 * img * n + y * w + x] = s;
+        out[(2 * img + 1) * n + y * w + x] = s2;
+    }
+}
+
+// columns pass: var = E[g^2] - E[g]^2. focus = 0: out = var(a);
+// focus = 1: out = 1 where max(var(b), 0) > max(var(a), 0), else 0
+__kernel void var_cols(__global const float *rows, __global float *out, int w, int h, int k,
+                       int focus) {
+    int x = get_global_id(0), y = get_global_id(1);
+    if (x >= w || y >= h) return;
+    float c = 1.f / k, var[2];
+    int n = w * h;
+    for (int img = 0; img < (focus ? 2 : 1); img++) {
+        float m = 0.f, m2 = 0.f;
+        for (int t = 0; t < k; t++) {
+            int i = r101(y + t - k / 2, h) * w + x;
+            m += c * rows[2 * img * n + i];
+            m2 += c * rows[(2 * img + 1) * n + i];
+        }
+        var[img] = m2 - m * m;
+    }
+    out[y * w + x] = focus ? (fmax(var[1], 0.f) > fmax(var[0], 0.f) ? 1.f : 0.f) : var[0];
+}
 """
 
 
@@ -545,6 +779,8 @@ class GPU:
     Device images are pyopencl arrays shaped like numpy images (HxW or HxWxC).
     """
 
+    RING = 3   # frames in flight (upload buffers)
+
     def __init__(self, device):
         import pyopencl.array as cla
         import pyopencl.tools as clt
@@ -555,16 +791,24 @@ class GPU:
         # Reuse device buffers: drivers commit memory on a buffer's first use,
         # which for fresh frame-sized buffers costs ~1 ms per kernel launch
         self.pool = clt.MemoryPool(clt.ImmediateAllocator(self.q))
-        prg = self.prg = cl.Program(self.ctx, _SRC).build()
+        with warnings.catch_warnings():
+            # some drivers log notes even for a clean build (e.g. NVIDIA's
+            # "overriding noinline attribute" for every kernel)
+            warnings.simplefilter("ignore", cl.CompilerWarning)
+            prg = self.prg = cl.Program(self.ctx, _SRC).build()
         self.k = {name: getattr(prg, name) for name in (
             "warp_u8", "warp_f32", "pyr_down", "pyr_up_combine", "to_gray", "conv1d", "sml",
-            "variance", "hybrid_add", "gate", "hybrid_level", "focusmap", "blend", "max_partial",
+            "hybrid_add", "gate", "hybrid_level", "blend", "max_partial",
             "max_final", "area_up", "focusmap_thresh", "lap_energy", "wavg_add", "wavg_result",
             "mean3", "stats_partial", "stats_final", "bilateral_lut", "bilateral", "depth_select",
             "mertens_prep", "mertens_gray", "mertens_weight", "divide", "mul_acc", "to_255",
-            "resize_area", "round_u8", "u8_to_f32")}
+            "resize_area", "round_u8", "u8_to_f32", "tone_lab", "tone_hist", "tone_apply",
+            "var_rows", "var_cols")}
         self._coef = {}
         self._estimation = None
+        self.uq = cl.CommandQueue(self.ctx)   # frame uploads (see warp)
+        self._ring = [{"buf": None, "host": None, "done": None} for _ in range(self.RING)]
+        self._ring_pos = 0
 
     def estimation(self):
         """This device's EstimationGPU (created on first use)."""
@@ -596,8 +840,21 @@ class GPU:
     # ── image ops ──
     def warp(self, host_img, M=None, lanczos=False, replicate=False):
         """Upload a frame (uint8 or float32) and warp it into the reference
-        frame with forward map M (cv2 WARP_INVERSE_MAP convention)."""
-        src = self.upload(host_img)
+        frame with forward map M (cv2 WARP_INVERSE_MAP convention).
+
+        Frames are copied on a separate queue into a ring of upload buffers,
+        so the copy overlaps the previous frame's processing and the caller
+        doesn't wait for the GPU (at most RING frames in flight)."""
+        host_img = np.ascontiguousarray(host_img)
+        slot = self._ring[self._ring_pos]
+        self._ring_pos = (self._ring_pos + 1) % len(self._ring)
+        if slot["done"] is not None:
+            slot["done"].wait()          # the frame that last used this buffer
+        if slot["buf"] is None or slot["buf"].size < host_img.nbytes:
+            slot["buf"] = cl.Buffer(self.ctx, cl.mem_flags.READ_ONLY, host_img.nbytes)
+        slot["host"] = host_img          # alive until the copy has run
+        copied = cl.enqueue_copy(self.uq, slot["buf"], host_img, is_blocking=False)
+        self.uq.flush()
         h, w = host_img.shape[:2]
         if M is None:
             M = np.float32([[1, 0, 0], [0, 1, 0]])
@@ -605,9 +862,10 @@ class GPU:
         out = self.empty(host_img.shape)
         kern = self.k["warp_u8"] if host_img.dtype == np.uint8 else self.k["warp_f32"]
         m = np.asarray(M, np.float64).ravel()
-        kern(self.q, (w, h), None, src.data, out.data, np.int32(w), np.int32(h), np.int32(w),
-             np.int32(h), np.int32(self._ch(host_img)), *[np.float32(v) for v in m],
-             np.int32(1 if lanczos else 0), np.int32(1 if replicate else 0))
+        slot["done"] = kern(self.q, (w, h), None, slot["buf"], out.data, np.int32(w), np.int32(h),
+                            np.int32(w), np.int32(h), np.int32(self._ch(host_img)),
+                            *[np.float32(v) for v in m], np.int32(1 if lanczos else 0),
+                            np.int32(1 if replicate else 0), wait_for=[copied])
         return out
 
     def pyr_down(self, a):
@@ -676,15 +934,22 @@ class GPU:
         kk = cv2.getGaussianKernel(ksize, sigma, cv2.CV_32F).ravel()
         return self.sep(a, kk, kk, ksize // 2, ksize // 2)
 
-    def variance(self, level, k, clamp0):
-        """Local variance of a level's gray (box k x k), as on the CPU."""
-        g = self.gray(level)
-        mean, sq = self.box(g, k), self.box(g, k, square=True)
-        out = self.empty(g.shape)
-        n = self._n(g)
-        self.k["variance"](self.q, (n,), None, mean.data, sq.data, out.data, np.int32(n),
-                           np.int32(1 if clamp0 else 0))
+    def _local_variance(self, a, b, k):
+        h, w = a.shape[:2]
+        rows, out = self.empty((4 if b is not None else 2, h, w)), self.empty((h, w))
+        self.run2d("var_rows", a, a.data, b.data if b is not None else None, rows.data,
+                   np.int32(w), np.int32(h), np.int32(self._ch(a)), np.int32(k))
+        self.run2d("var_cols", a, rows.data, out.data, np.int32(w), np.int32(h), np.int32(k),
+                   np.int32(b is not None))
         return out
+
+    def variance(self, level, k):
+        """Local variance of a level's gray (box k x k), as on the CPU."""
+        return self._local_variance(level, None, k)
+
+    def focusmap(self, a, b, k):
+        """cpu.compute_focusmap_fast: 1 where b has more local variance."""
+        return self._local_variance(a, b, k)
 
     def fine_sharpness(self, img):
         """cpu.fine_sharpness: box-filtered sum-modified Laplacian."""
@@ -714,6 +979,22 @@ class GPU:
         """Launch a 2-D kernel over like's (w, h)."""
         h, w = like.shape[:2]
         self.k[name](self.q, (w, h), None, *args)
+
+    def tone_map(self, img, strength=0.3, grid=8):
+        """cpu.local_tone_map of a BGR image (the CLAHE tables are built on
+        the host from GPU histograms; the LAB conversions use the exact sRGB
+        curves, which cv2 approximates)."""
+        h, w = img.shape[:2]
+        lab, out = self.empty((h, w, 3)), self.empty((h, w, 3))
+        self.run("tone_lab", h * w, img.data, lab.data, np.int32(h * w))
+        th, tw = -(-h // grid), -(-w // grid)    # tiles of the padded image
+        hist = self._cla.zeros(self.q, grid * grid * 256, np.int32, allocator=self.pool)
+        self.k["tone_hist"](self.q, (tw * grid, th * grid), None, lab.data, hist.data,
+                            np.int32(w), np.int32(h), np.int32(tw), np.int32(th), np.int32(grid))
+        luts = CPU.clahe_luts_from_histograms(hist.get().reshape(grid, grid, 256), tw * th)
+        self.run2d("tone_apply", img, lab.data, self.upload(luts).data, out.data, np.int32(w),
+                   np.int32(h), np.int32(tw), np.int32(th), np.int32(grid), np.float32(strength))
+        return out
 
     def area_up(self, a, shape):
         """cv2.resize(a, INTER_AREA) enlargement of a 0/1 map to shape (h, w)."""
@@ -754,7 +1035,7 @@ class HybridGPU:
         first = self.frames == 0
         for i, level in enumerate(pyr):
             wsrc = g.gauss(sharp[i], CPU.HYBRID_SPREAD_SIGMA) if i < first_fine else sharp[i]
-            var = g.variance(level, self.kernel_size, clamp0=False)
+            var = g.variance(level, self.kernel_size)
             if first:
                 shape2 = level.shape[:2]
                 self._state.append([g.empty(level.shape), g.empty(shape2), g.empty(level.shape),
@@ -818,15 +1099,12 @@ class PyramidGPU:
 
     def _focusmap(self, a, b):
         g = self.g
-        fm = g.empty(a.shape[:2])
-        if self.threshold > 0:
-            h, w = a.shape[:2]
-            g.run2d("focusmap_thresh", a, g.gray(a).data, g.gray(b).data, fm.data, np.int32(w),
-                    np.int32(h), np.int32(self.kernel_size), np.float32(self.threshold))
-        else:
-            k = self.kernel_size | 1
-            v1, v2 = g.variance(a, k, clamp0=True), g.variance(b, k, clamp0=True)
-            g.run("focusmap", a, v1.data, v2.data, fm.data, np.int32(g._n(a)))
+        if self.threshold <= 0:
+            return g.focusmap(a, b, self.kernel_size | 1)
+        h, w = a.shape[:2]
+        fm = g.empty((h, w))
+        g.run2d("focusmap_thresh", a, g.gray(a).data, g.gray(b).data, fm.data, np.int32(w),
+                np.int32(h), np.int32(self.kernel_size), np.float32(self.threshold))
         return fm
 
     def add(self, img):
@@ -1055,32 +1333,75 @@ def _area_table(ssize, dsize, scale):
 
 
 class EstimationGPU:
-    """GPU help for alignment estimation: pre-warps a frame and builds the
-    ECC cascade levels (cv2.resize INTER_AREA, bit-exact) on the GPU, so the
-    CPU only runs ORB and the ECC iterations on the small levels.
+    """Alignment estimation on the GPU: pre-warps a frame, builds the ECC
+    cascade levels (cv2.resize INTER_AREA, bit-exact) and runs the ECC
+    iterations (cv2.findTransformECC), so the CPU only decodes and runs ORB.
 
-    Own queue and kernel objects (kernel arguments aren't thread-safe), so it
-    runs alongside GPU stacking; estimation workers take turns on it.
+    Estimation workers call it from several threads at once, alongside GPU
+    stacking: each thread gets its own queue and kernel objects (kernel
+    arguments aren't thread-safe), so their work overlaps on the GPU.
     """
+
+    KERNELS = ("warp_u8", "round_u8", "resize_area", "u8_to_f32", "conv1d", "ecc_grad",
+               "ecc_means_partial", "ecc_means_final", "ecc_sums_partial")
+    GROUP = 64          # ECC_GROUP in the kernels
+    PIXELS_PER_ITEM = 16
 
     def __init__(self, gpu):
         import pyopencl.array as cla
         import pyopencl.tools as clt
-        self._cla = cla
-        self.q = cl.CommandQueue(gpu.ctx)
-        self.pool = clt.MemoryPool(clt.ImmediateAllocator(self.q))
-        self.k = {n: cl.Kernel(gpu.prg, n) for n in ("warp_u8", "round_u8", "resize_area", "u8_to_f32")}
-        self.lock = threading.Lock()
+        self._cla, self._clt = cla, clt
+        self.ctx, self.prg = gpu.ctx, gpu.prg
+        self._local = threading.local()
+        self._lock = threading.Lock()
         self._tables = {}
+        self._coef = {}
+
+    # ── per-thread resources ──
+    @property
+    def _t(self):
+        t = self._local
+        if not hasattr(t, "q"):
+            t.q = cl.CommandQueue(self.ctx)
+            t.pool = self._clt.MemoryPool(self._clt.ImmediateAllocator(t.q))
+            t.k = {n: cl.Kernel(self.prg, n) for n in self.KERNELS}
+            t.frames = (None, None, None, None)   # last uploaded (ref, align) and copies
+        return t
+
+    def _empty(self, shape, dtype=np.float32):
+        t = self._t
+        return self._cla.empty(t.q, shape, dtype, allocator=t.pool)
 
     def _upload(self, a):
-        return self._cla.to_device(self.q, np.ascontiguousarray(a), allocator=self.pool)
+        t = self._t
+        return self._cla.to_device(t.q, np.ascontiguousarray(a), allocator=t.pool)
 
-    def _table(self, ssize, dsize, scale):
-        key = (ssize, dsize, scale)
-        if key not in self._tables:
-            self._tables[key] = [self._upload(t) for t in _area_table(ssize, dsize, scale)]
-        return self._tables[key]
+    def _shared(self, cache, key, make):
+        """Read-only device data shared by all threads (tables, kernels)."""
+        with self._lock:
+            if key not in cache:
+                cache[key] = self._cla.to_device(self._t.q, make())
+                self._t.q.finish()
+            return cache[key]
+
+    # ── image ops ──
+    def _to_float(self, u8):
+        h, w = u8.shape
+        out = self._empty((h, w))
+        self._t.k["u8_to_f32"](self._t.q, (h * w,), None, self._upload(u8).data, out.data,
+                               np.int32(h * w))
+        return out
+
+    def _frames(self, ref_u8, align_u8):
+        """Device copies of the pair (reused while the same pair is refined)."""
+        t = self._t
+        ref, align, ref_d, align_d = t.frames
+        if ref is not ref_u8:
+            ref_d = self._to_float(ref_u8)
+        if align is not align_u8:
+            align_d = self._upload(align_u8)
+        t.frames = (ref_u8, align_u8, ref_d, align_d)
+        return ref_d, align_d
 
     def _shrink(self, img, s):
         """cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)."""
@@ -1089,33 +1410,123 @@ class EstimationGPU:
         scale = 1.0 / s
         if abs(scale - round(scale)) < 1e-12:
             # integer factors take OpenCV's separate fast path
-            return cv2.resize(img.get().astype(np.uint8), None, fx=s, fy=s,
-                              interpolation=cv2.INTER_AREA)
-        out = self._cla.empty(self.q, (dh, dw), np.float32, allocator=self.pool)
-        xt, yt = self._table(w, dw, scale), self._table(h, dh, scale)
-        self.k["resize_area"](self.q, (dw, dh), None, img.data, out.data, np.int32(w),
-                              np.int32(dw), np.int32(dh), *[t.data for t in xt + yt])
-        return out.get().astype(np.uint8)
+            small = cv2.resize(img.get().astype(np.uint8), None, fx=s, fy=s,
+                               interpolation=cv2.INTER_AREA)
+            return self._upload(small.astype(np.float32))
+        out = self._empty((dh, dw))
+        tabs = [self._shared(self._tables, (n, d, scale, i),
+                             lambda n=n, d=d, i=i: _area_table(n, d, scale)[i])
+                for n, d in ((w, dw), (h, dh)) for i in range(3)]
+        self._t.k["resize_area"](self._t.q, (dw, dh), None, img.data, out.data, np.int32(w),
+                                 np.int32(dw), np.int32(dh), *[t.data for t in tabs])
+        return out
+
+    def _gauss(self, a, ksize):
+        """cv2.GaussianBlur(a, (ksize, ksize), 0) of a float image."""
+        h, w = a.shape
+        coef = self._shared(self._coef, ksize, lambda: cv2.getGaussianKernel(
+            ksize, 0, cv2.CV_32F).ravel().astype(np.float32))
+        tmp, out = self._empty((h, w)), self._empty((h, w))
+        k = self._t.k["conv1d"]
+        for src, dst, axis in ((a, tmp, 0), (tmp, out, 1)):
+            k(self._t.q, (w, h), None, src.data, dst.data, coef.data, np.int32(w), np.int32(h),
+              np.int32(ksize), np.int32(ksize // 2), np.int32(axis), np.int32(0))
+        return out
 
     def ecc_levels(self, ref_u8, align_u8, M, scales):
-        """[(ref, cv2.warpAffine(align, M) [bilinear, replicate]) per scale],
-        each shrunk like cv2.resize(INTER_AREA) unless the scale is 1."""
+        """Per scale, (ref, align pre-warped by M) as cv2 would give them:
+        warpAffine(bilinear, replicate) to 8 bits (M None: no pre-warp),
+        then resize(INTER_AREA) unless the scale is 1. Device arrays."""
+        t = self._t
         h, w = ref_u8.shape
-        with self.lock:
-            src = self._upload(align_u8)
-            warped = self._cla.empty(self.q, (h, w), np.float32, allocator=self.pool)
+        ref, src = self._frames(ref_u8, align_u8)
+        warped = self._empty((h, w))
+        if M is None:
+            t.k["u8_to_f32"](t.q, (h * w,), None, src.data, warped.data, np.int32(h * w))
+        else:
             m = np.asarray(M, np.float64).ravel()
-            self.k["warp_u8"](self.q, (w, h), None, src.data, warped.data, np.int32(w),
-                              np.int32(h), np.int32(w), np.int32(h), np.int32(1),
-                              *[np.float32(v) for v in m], np.int32(0), np.int32(1))
-            self.k["round_u8"](self.q, (h * w,), None, warped.data, np.int32(h * w))
-            ref8 = self._upload(ref_u8)
-            ref = self._cla.empty(self.q, (h, w), np.float32, allocator=self.pool)
-            self.k["u8_to_f32"](self.q, (h * w,), None, ref8.data, ref.data, np.int32(h * w))
-            levels = []
-            for s in scales:
-                if s < 1.0:
-                    levels.append((self._shrink(ref, s), self._shrink(warped, s)))
-                else:
-                    levels.append((ref_u8, warped.get().astype(np.uint8)))
-            return levels
+            t.k["warp_u8"](t.q, (w, h), None, src.data, warped.data, np.int32(w), np.int32(h),
+                           np.int32(w), np.int32(h), np.int32(1), *[np.float32(v) for v in m],
+                           np.int32(0), np.int32(1))
+            t.k["round_u8"](t.q, (h * w,), None, warped.data, np.int32(h * w))
+        return [(self._shrink(ref, s), self._shrink(warped, s)) if s < 1.0 else (ref, warped)
+                for s in scales]
+
+    def find_transform_ecc(self, template, image, warp, motion, criteria, gauss):
+        """cv2.findTransformECC(template, image, warp, motion, criteria, None,
+        gauss) for device images (MOTION_EUCLIDEAN or MOTION_AFFINE).
+        Returns (rho, warp); raises cv2.error where OpenCV does."""
+        t = self._t
+        h, w = template.shape
+        affine = motion == cv2.MOTION_AFFINE
+        if not affine and motion != cv2.MOTION_EUCLIDEAN:
+            raise ValueError("unsupported motion type")
+        n_iter = criteria[1] if criteria[0] & cv2.TERM_CRITERIA_COUNT else 200
+        eps = criteria[2] if criteria[0] & cv2.TERM_CRITERIA_EPS else -1
+        tmpl, img = self._gauss(template, gauss), self._gauss(image, gauss)
+        gx, gy = self._empty((h, w)), self._empty((h, w))
+        t.k["ecc_grad"](t.q, (w, h), None, img.data, gx.data, gy.data, np.int32(w), np.int32(h))
+
+        n = h * w
+        groups = max(1, -(-n // (self.GROUP * self.PIXELS_PER_ITEM)))
+        np_ = 6 if affine else 3
+        nv = 3 + np_ * (np_ + 1) // 2 + 2 * np_
+        mparts, means = self._empty((groups * 3,)), self._empty((2,))
+        parts, mbuf = self._empty((groups * nv,)), self._empty((6,))
+        host = np.empty(groups * nv, np.float32)
+        gsize, lsize = (groups * self.GROUP,), (self.GROUP,)
+        # arguments are set once; each iteration only uploads the warp
+        k_means, k_final, k_sums = (t.k[n] for n in (
+            "ecc_means_partial", "ecc_means_final", "ecc_sums_partial"))
+        k_means.set_args(tmpl.data, img.data, mparts.data, np.int32(w), np.int32(h), mbuf.data)
+        k_final.set_args(mparts.data, means.data, np.int32(groups))
+        k_sums.set_args(tmpl.data, img.data, gx.data, gy.data, means.data, parts.data,
+                        np.int32(w), np.int32(h), mbuf.data, np.int32(affine))
+        iu = np.triu_indices(np_)
+        warp = np.array(warp, np.float32).reshape(2, 3)
+        rho, last_rho = -1.0, -eps
+        i = 1
+        while i <= n_iter and abs(rho - last_rho) >= eps:
+            # (the blocking read below keeps `m` alive until it's uploaded)
+            m = warp.ravel().copy()
+            cl.enqueue_copy(t.q, mbuf.data, m, is_blocking=False)
+            cl.enqueue_nd_range_kernel(t.q, k_means, gsize, lsize)
+            cl.enqueue_nd_range_kernel(t.q, k_final, lsize, lsize)
+            cl.enqueue_nd_range_kernel(t.q, k_sums, gsize, lsize)
+            cl.enqueue_copy(t.q, host, parts.data)
+            sums = host.reshape(groups, nv).sum(axis=0, dtype=np.float64)
+            corr, img_norm, tmp_norm = sums[0], np.sqrt(sums[1]), np.sqrt(sums[2])
+            k = 3 + len(iu[0])
+            hess = np.zeros((np_, np_), np.float32)
+            hess[iu] = sums[3:k]
+            hess = np.triu(hess) + np.triu(hess, 1).T
+            img_proj = sums[k:k + np_].astype(np.float32)
+            tmp_proj = sums[k + np_:k + 2 * np_].astype(np.float32)
+            hess_inv = np.linalg.inv(hess)
+
+            last_rho, rho = rho, corr / (img_norm * tmp_norm)
+            if np.isnan(rho):
+                raise cv2.error("NaN encountered.")
+            img_proj_hess = hess_inv @ img_proj
+            lambda_n = img_norm * img_norm - float(img_proj @ img_proj_hess)
+            lambda_d = corr - float(tmp_proj @ img_proj_hess)
+            if lambda_d <= 0.0:
+                raise cv2.error("The algorithm stopped before its convergence. The correlation "
+                                "is going to be minimized. Images may be uncorrelated or "
+                                "non-overlapped")
+            lam = lambda_n / lambda_d
+            # J'(lambda * template - image), from the projections (linear)
+            error_proj = (lam * tmp_proj.astype(np.float64) - img_proj).astype(np.float32)
+            delta = hess_inv @ error_proj
+            if affine:
+                warp[0, 0] += delta[0]; warp[1, 0] += delta[1]; warp[0, 1] += delta[2]  # noqa: E702
+                warp[1, 1] += delta[3]; warp[0, 2] += delta[4]; warp[1, 2] += delta[5]  # noqa: E702
+            else:
+                theta = float(delta[0]) + math.asin(float(warp[1, 0]))
+                warp[0, 2] += delta[1]
+                warp[1, 2] += delta[2]
+                warp[0, 0] = warp[1, 1] = math.cos(theta)
+                warp[1, 0] = math.sin(theta)
+                warp[0, 1] = -warp[1, 0]
+            i += 1
+        return rho, warp

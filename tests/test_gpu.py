@@ -157,7 +157,16 @@ class TestPipelineMatchesCPU:
     def test_contrast_threshold(self):
         cpu, _ = stack(LOW_RES[:4], "laplacian", False, False, contrast_threshold=1.0)
         gpu, _ = stack(LOW_RES[:4], "laplacian", True, False, contrast_threshold=1.0)
-        assert np.abs(cpu.output_image - gpu.output_image).mean() < 0.05
+        assert np.abs(cpu.output_image - gpu.output_image).mean() < 0.3
+
+    def test_tone_map(self):
+        img = cv2.imread(LOW_RES[0]).astype(np.float32)
+        gpu = OCL.get()
+        out = gpu.tone_map(gpu.upload(img), strength=0.3).get()
+        # cv2's float LAB conversion goes through a fixed-point table (its own
+        # round trip is off by up to ~1 level); the GPU uses the exact curves
+        assert np.abs(out - CPU.local_tone_map(img, strength=0.3)).mean() < 0.3
+        assert np.abs(gpu.tone_map(gpu.upload(img), strength=0.0).get() - img).max() < 0.02
 
 
 class TestFallback:

@@ -688,6 +688,10 @@ class LaplacianPyramid:
             gpu = OCL.get(self.config.selected_gpu_id)
             logger.info(f"Stacking on GPU: {gpu.name}")
             fused = self._gpu_core(gpu, align, signals, progress_callback)
+            if fused is not None:
+                if self.config.stacking_method == "laplacian" and fused.ndim == 3:
+                    fused = gpu.tone_map(fused, strength=0.3)
+                fused = fused.get()
         except Exception as exc:   # OpenCL/driver errors, out of GPU memory, ...
             logger.warning(f"GPU stacking failed ({exc}); falling back to the CPU")
             self.Algorithm.alignment_shifts = []
@@ -697,13 +701,27 @@ class LaplacianPyramid:
         if not self._finish_alignment():
             return True
         if fused is not None:
-            if self.config.stacking_method == "laplacian":
+            if self.config.stacking_method == "laplacian" and fused.ndim != 3:
                 fused = CPU.local_tone_map(fused, strength=0.3)
             self.output_image = fused
             self.depth_map = None
         return True
 
+    GPU_ESTIMATE_BYTES_PER_PIXEL = 16
+
+    @staticmethod
+    def _gray_f32(img):
+        """cv2.cvtColor(img.astype(np.float32), COLOR_BGR2GRAY), computed in
+        row chunks (the same values) to avoid a float copy of the frame."""
+        if img.ndim == 2:
+            return img.astype(np.float32)
+        out = np.empty(img.shape[:2], np.float32)
+        for y in range(0, img.shape[0], 256):
+            out[y:y + 256] = cv2.cvtColor(img[y:y + 256].astype(np.float32), cv2.COLOR_BGR2GRAY)
+        return out
+
     def _gpu_core(self, gpu, align, signals, progress_callback):
+        """Decode, align and fuse every frame; returns the device image."""
         paths = self.image_paths
         load = self.Algorithm.ImageLoadingHandler.read_image_native
         stream = self._stream if align else None
@@ -712,10 +730,11 @@ class LaplacianPyramid:
         ref = load(paths[0])
         if ref is None:
             raise RuntimeError(f"failed to load {paths[0]}")
-        # single-reference alignment estimates from float frames, exactly as
-        # the CPU path does (the estimators are sensitive to their input)
-        ref_f32 = ref.astype(np.float32) if align and not sequential else None
-        if ref_f32 is not None:
+        # single-reference alignment estimates from the gray of the float
+        # frames, exactly as the CPU path does (the estimators are sensitive
+        # to their input)
+        ref_gray = self._gray_f32(ref) if align and not sequential else None
+        if ref_gray is not None:
             self._gpu_estimation_on()
 
         def frame(i):
@@ -736,7 +755,7 @@ class LaplacianPyramid:
                 M = self._breathing_transforms[i]
             elif align and i > 0:
                 M, _ = self.Algorithm.estimate_pair_transform(
-                    ref_f32, img.astype(np.float32), alignment_mode=mode,
+                    ref_gray, self._gray_f32(img), alignment_mode=mode,
                     scale_factor=self.config.alignment_scale_factor,
                 )
             return img, M
@@ -756,7 +775,10 @@ class LaplacianPyramid:
             pos += len(group)
             group_ends.add(pos - 1)
 
-        workers = 4
+        # decode only: 4 workers; with single-reference estimation in them,
+        # more if memory allows (frame, its float gray, ORB)
+        workers = 4 if ref_gray is None else max(
+            4, self._frame_workers(ref.shape, self.GPU_ESTIMATE_BYTES_PER_PIXEL, cap=8))
         done = 0
         with ThreadPoolExecutor(max_workers=workers) as pool:
             pending = {j: pool.submit(frame, order[j]) for j in range(min(workers + 1, len(order)))}
@@ -784,8 +806,7 @@ class LaplacianPyramid:
                     done += 1
                 self._emit_progress(signals, progress_callback, done, steps,
                                     time.time() - start_time)
-        fused = (final or fuser).result()
-        return None if fused is None else fused.get()
+        return (final or fuser).result()
 
     # ─── Weighted Average Method ───
     #

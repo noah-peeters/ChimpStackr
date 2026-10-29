@@ -206,7 +206,7 @@ class Algorithm:
         convention, shear/scale anisotropy dropped) and re-anchors the
         translation so the mapping of `anchor` is preserved.
 
-        Used by the high-precision path, where ECC propagates in 6 DOF
+        Used by the scale refinement, where ECC propagates in 6 DOF
         (MOTION_AFFINE) but the breathing chain must stay 4 DOF.
         """
         M = np.asarray(M, dtype=np.float64)
@@ -338,7 +338,8 @@ class Algorithm:
         """
         cache = getattr(self._tls, "gray_cache", None)
         if cache is None:
-            cache = [None, None]   # [source image (strong ref), its grayscale]
+            # [source image (strong ref), its grayscale, 8-bit grayscale]
+            cache = [None, None, None]
             self._tls.gray_cache = cache
         if cache[0] is ref_im:
             return cache[1]
@@ -346,9 +347,16 @@ class Algorithm:
             gray = cv2.cvtColor(ref_im, cv2.COLOR_BGR2GRAY)
         else:
             gray = ref_im
-        cache[0] = ref_im
-        cache[1] = gray
+        cache[:] = [ref_im, gray, None]
         return gray
+
+    def _ref_gray_u8(self, ref_im):
+        """8-bit grayscale of the reference, cached like _get_ref_gray."""
+        gray = self._get_ref_gray(ref_im)
+        cache = self._tls.gray_cache
+        if cache[2] is None:
+            cache[2] = self._to_gray_u8(gray)
+        return cache[2]
 
     def _estimate_translation(self, ref_im, im_to_align, scale_factor, coarse_fine=False):
         """Translation-only DFT phase correlation estimate."""
@@ -374,90 +382,31 @@ class Algorithm:
         }
         return M, meta
 
-    def _estimate_rst(self, ref_im, im_to_align, scale_factor, precision="default"):
+    def _estimate_rst(self, ref_im, im_to_align, scale_factor, precision="default",
+                      align_u8=None):
         """
         Rotation + translation (3 DOF) estimate via multi-scale ECC.
         Uses MOTION_EUCLIDEAN (translation + rotation) which is
         the right model for focus stacking — no shear, no anisotropic scale.
         Uniform scale (focus breathing) is estimated by _estimate_similarity.
+        align_u8: im_to_align's 8-bit gray, if the caller already has it.
         """
-        # Convert to grayscale (reuse cached ref grayscale when available)
-        ref_gray = self._get_ref_gray(ref_im)
-        if im_to_align.ndim == 3:
-            align_gray = cv2.cvtColor(im_to_align, cv2.COLOR_BGR2GRAY)
-        else:
-            align_gray = im_to_align
-
         hq = precision == "max"
         if hq:
             # High precision: native-bit-depth float32 grayscale
-            ref_g = self._to_gray_f32(ref_gray)
-            align_g = self._to_gray_f32(align_gray)
-            ref_src, align_src = ref_g, align_g
-            cascade = (512, 1024, 2048, 4096)
-            eps = 1e-7
+            warp_matrix = self._ecc_refine(
+                self._to_gray_f32(self._get_ref_gray(ref_im)), self._to_gray_f32(im_to_align),
+                cv2.MOTION_EUCLIDEAN, cascade_dims=(512, 1024, 2048, 4096), eps=1e-7,
+                iters=(200, 100), none_on_error=True,
+            )
         else:
-            # Ensure uint8
-            if ref_gray.dtype != np.uint8:
-                ref_u8 = np.clip(ref_gray, 0, 255).astype(np.uint8)
-                align_u8 = np.clip(align_gray, 0, 255).astype(np.uint8)
-            else:
-                ref_u8 = ref_gray
-                align_u8 = align_gray
-            ref_src, align_src = ref_u8, align_u8
-            cascade = (512, 1024, 2048)
-            eps = 1e-6
-
-        h_full, w_full = ref_src.shape[:2]
-
-        # Multi-scale ECC: coarse → fine
-        # Level 0: 1/4 res (coarse alignment)
-        # Level 1: 1/2 res (refine)
-        # Level 2..: full or capped (final refinement; HQ extends to 4096)
-        scales = []
-        for max_dim in cascade:
-            s = min(max_dim / max(h_full, w_full), 1.0)
-            if not scales or s > scales[-1]:
-                scales.append(s)
-
-        warp_matrix = np.eye(2, 3, dtype=np.float32)
-
-        try:
-            for i, s in enumerate(scales):
-                if s < 1.0:
-                    ref_s = cv2.resize(ref_src, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
-                    align_s = cv2.resize(align_src, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
-                else:
-                    ref_s = ref_src
-                    align_s = align_src
-
-                # Scale warp matrix translation from previous level
-                if i > 0:
-                    prev_s = scales[i - 1]
-                    warp_matrix[0, 2] *= (s / prev_s)
-                    warp_matrix[1, 2] *= (s / prev_s)
-
-                # More iterations at coarse, fewer at fine
-                max_iter = 200 if i == 0 else 100
-                gauss = 11 if i == 0 else 5
-                criteria = (
-                    cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
-                    max_iter, eps,
-                )
-
-                # EUCLIDEAN: translation + rotation (3 DOF) — correct for focus stacking
-                _, warp_matrix = cv2.findTransformECC(
-                    ref_s, align_s, warp_matrix, cv2.MOTION_EUCLIDEAN, criteria,
-                    inputMask=None, gaussFiltSize=gauss,
-                )
-
-            # Scale translation back to full resolution
-            final_s = scales[-1]
-            if final_s < 1.0:
-                warp_matrix[0, 2] /= final_s
-                warp_matrix[1, 2] /= final_s
-
-        except cv2.error:
+            if align_u8 is None:
+                align_u8 = self._to_gray_u8(im_to_align)
+            warp_matrix = self._prewarp_and_refine(
+                self._ref_gray_u8(ref_im), align_u8, None,
+                cv2.MOTION_EUCLIDEAN, iters=(200, 100), none_on_error=True,
+            )
+        if warp_matrix is None:
             # ECC failed — fall back to translation-only DFT
             return self._estimate_translation(ref_im, im_to_align, scale_factor)
 
@@ -665,30 +614,37 @@ class Algorithm:
                 scales.append(s)
         return scales
 
-    def _prewarp_and_refine(self, ref_u8, align_u8, coarse_warp, motion_type):
-        """ECC refinement of align_u8 pre-warped by coarse_warp (8-bit,
-        bilinear): the pre-warp and the cascade levels are built on the GPU
-        when available."""
+    def _prewarp_and_refine(self, ref_u8, align_u8, coarse_warp, motion_type,
+                            iters=(240, 160), none_on_error=False):
+        """ECC refinement (_ecc_refine) of align_u8, pre-warped by coarse_warp
+        (8-bit, bilinear) unless that is None. On the GPU when available:
+        pre-warp, cascade levels and ECC iterations."""
         gpu = self.gpu_estimation
         if gpu is not None:
             try:
                 scales = self._cascade_scales(ref_u8.shape)
                 levels = gpu.ecc_levels(ref_u8, align_u8, coarse_warp, scales)
                 return self._ecc_refine(None, None, motion_type,
-                                        levels=[(s, r, a) for s, (r, a) in zip(scales, levels)])
+                                        levels=[(s, r, a) for s, (r, a) in zip(scales, levels)],
+                                        ecc=gpu.find_transform_ecc, iters=iters,
+                                        none_on_error=none_on_error)
             except Exception as exc:   # OpenCL errors: carry on without the GPU
                 logger.warning(f"GPU alignment help failed ({exc}); using the CPU")
                 self.gpu_estimation = None
-        h, w = align_u8.shape[:2]
-        prealigned = cv2.warpAffine(
-            align_u8, coarse_warp, (w, h),
-            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
-            borderMode=cv2.BORDER_REPLICATE,
-        )
-        return self._ecc_refine(ref_u8, prealigned, motion_type)
+        prealigned = align_u8
+        if coarse_warp is not None:
+            h, w = align_u8.shape[:2]
+            prealigned = cv2.warpAffine(
+                align_u8, coarse_warp, (w, h),
+                flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
+                borderMode=cv2.BORDER_REPLICATE,
+            )
+        return self._ecc_refine(ref_u8, prealigned, motion_type, iters=iters,
+                                none_on_error=none_on_error)
 
     def _ecc_refine(self, ref, prealigned, motion_type=cv2.MOTION_EUCLIDEAN,
-                    cascade_dims=None, eps=1e-6, none_on_error=False, levels=None):
+                    cascade_dims=None, eps=1e-6, none_on_error=False, levels=None, ecc=None,
+                    iters=(240, 160)):
         """
         Multi-scale ECC refinement on a pre-aligned image.
 
@@ -696,6 +652,9 @@ class Algorithm:
             ref, prealigned: same-shape grayscale images (uint8 or float32).
             levels: instead of ref/prealigned, (scale, ref, prealigned) per
                 cascade level, already downscaled (see _prewarp_and_refine).
+            ecc: findTransformECC replacement for the levels (same arguments
+                as `ecc(template, image, warp, motion, criteria, gauss)`).
+            iters: max ECC iterations on the coarsest / the other levels.
             cascade_dims: max image size per cascade level. Default
                 (512, 1024, 2048); the high-precision path passes a level
                 extending to 4096 so ECC optimizes on (nearly) full res.
@@ -730,14 +689,17 @@ class Algorithm:
                     warp[0, 2] *= (s / prev_s)
                     warp[1, 2] *= (s / prev_s)
 
-                max_iter = 240 if i == 0 else 160
+                max_iter = iters[0] if i == 0 else iters[1]
                 gauss = 11 if i == 0 else 5
                 criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, max_iter, eps)
 
-                _, warp = cv2.findTransformECC(
-                    ref_s, align_s, warp, motion_type, criteria,
-                    inputMask=None, gaussFiltSize=gauss,
-                )
+                if ecc is not None:
+                    _, warp = ecc(ref_s, align_s, warp, motion_type, criteria, gauss)
+                else:
+                    _, warp = cv2.findTransformECC(
+                        ref_s, align_s, warp, motion_type, criteria,
+                        inputMask=None, gaussFiltSize=gauss,
+                    )
 
             final_s = scales[-1]
             if final_s < 1.0:
@@ -755,15 +717,16 @@ class Algorithm:
                              precision="default"):
         """
         4 DOF similarity estimate: tx, ty, rotation, uniform scale.
-        Hybrid: ORB features for coarse alignment, ECC for sub-pixel refinement.
-        Falls back to euclidean ECC when feature matching fails.
+        Hybrid: ORB features for coarse alignment, ECC for sub-pixel refinement
+        of scale, rotation and translation. Falls back to euclidean ECC when
+        feature matching fails.
 
         precision="max" runs the ECC refinement on float32 grayscale (native
         bit depth, no 8-bit quantization) with Lanczos pre-warping and a
         cascade extending to 4096px — the maximum-accuracy breathing path.
         ORB matching still uses u8 (ORB requires 8-bit descriptors).
         """
-        ref_u8 = self._to_gray_u8(self._get_ref_gray(ref_im))
+        ref_u8 = self._ref_gray_u8(ref_im)
         align_u8 = self._to_gray_u8(im_to_align)
         hq = precision == "max"
 
@@ -773,7 +736,7 @@ class Algorithm:
         if coarse_warp is None:
             # Fallback to euclidean ECC
             return self._estimate_rst(ref_im, im_to_align, scale_factor,
-                                      precision=precision)
+                                      precision=precision, align_u8=align_u8)
 
         # Stage 2: Pre-warp and refine with ECC
         h, w = align_u8.shape[:2]
@@ -835,10 +798,19 @@ class Algorithm:
                 "scale-refined" if use_scale_refined else "euclidean",
             )
         else:
+            # Refine the scale too: ORB's scale is noisy (~3e-4 per pair),
+            # and in a breathing chain that noise accumulates into pixels of
+            # drift. 6-DOF ECC projected onto a similarity, then EUCLIDEAN
+            # ECC at that scale for full rotation/translation precision.
             residual = self._prewarp_and_refine(ref_u8, align_u8, coarse_warp,
-                                                cv2.MOTION_EUCLIDEAN)
-            # Stage 3: Compose coarse + residual
-            combined = self.compose_affine(coarse_warp, residual)
+                                                cv2.MOTION_AFFINE)
+            scaled = self.project_to_similarity(
+                self.compose_affine(coarse_warp, residual), anchor=(w * 0.5, h * 0.5))
+            if abs(self.transform_scale(scaled) / self.transform_scale(coarse_warp) - 1) > 0.01:
+                # implausible jump (texture-poor frames): keep ORB's scale
+                scaled = coarse_warp
+            residual = self._prewarp_and_refine(ref_u8, align_u8, scaled, cv2.MOTION_EUCLIDEAN)
+            combined = self.compose_affine(scaled, residual)
 
         meta = {
             "method": "orb_ecc_similarity_hp" if hq else "orb_ecc_similarity",
@@ -855,7 +827,7 @@ class Algorithm:
         Hybrid: ORB features for coarse alignment, ECC MOTION_AFFINE for refinement.
         Falls back to similarity when feature matching fails.
         """
-        ref_u8 = self._to_gray_u8(self._get_ref_gray(ref_im))
+        ref_u8 = self._ref_gray_u8(ref_im)
         align_u8 = self._to_gray_u8(im_to_align)
         hq = precision == "max"
 
@@ -905,9 +877,9 @@ class Algorithm:
     # pair and compose the chain onto the reference frame.
 
     # Peak working memory per pair-estimation worker, in bytes per image
-    # pixel: default works on 8-bit gray frames, max on float color frames
-    # (24MP: ~1.68 GB/worker max)
-    _PAIR_BYTES_PER_PIXEL = {"max": 70, "default": 12}
+    # pixel: default works on 8-bit gray frames (less when the GPU does the
+    # ECC part), max on float color frames (24MP: ~1.68 GB/worker max)
+    _PAIR_BYTES_PER_PIXEL = {"max": 70, "default": 12, "gpu": 6}
 
     def _sequential_worker_count(self, ref_template, precision, n_pairs):
         """Parallel pair-estimation workers: one per physical core (OpenCV
@@ -917,7 +889,8 @@ class Algorithm:
         avail = _available_memory_bytes()
         if avail is not None:
             h, w = ref_template.shape[:2]
-            per_worker = h * w * self._PAIR_BYTES_PER_PIXEL.get(precision, 70)
+            key = "gpu" if precision == "default" and self.gpu_estimation else precision
+            per_worker = h * w * self._PAIR_BYTES_PER_PIXEL.get(key, 70)
             workers = min(workers, max(1, int(avail * 0.7 // per_worker)))
         return max(1, workers)
 
