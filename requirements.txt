@@ -2,7 +2,7 @@
 pyside6-essentials>=6.4.2,<7.0
 
 # Image processing
-opencv-python-headless>=4.7,<5.0
+opencv-python-headless>=4.7,<6.0
 numpy>=1.23,<3.0
 numba>=0.56
 rawpy>=0.18
