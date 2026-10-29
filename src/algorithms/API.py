@@ -305,6 +305,7 @@ class LaplacianPyramid:
         fused_pyr = self.Algorithm.generate_laplacian_pyramid(
             first_image, self.pyramid_num_levels
         )
+        workers = max(2, self._frame_workers(first_image.shape, self.PYRAMID_BYTES_PER_PIXEL))
         del first_image
         new_pyr = None
 
@@ -316,11 +317,11 @@ class LaplacianPyramid:
             return pyr
 
         try:
-            # Use 2 workers: pre-compute load + pyramid for the next images
-            # while the main thread fuses the current pair. cv2 ops release GIL.
-            with ThreadPoolExecutor(max_workers=2) as pool:
+            # Workers pre-compute load + pyramid for the next images while the
+            # main thread fuses the current pair. cv2 ops release the GIL.
+            with ThreadPoolExecutor(max_workers=workers) as pool:
                 pending = {}
-                lookahead = 3
+                lookahead = workers + 1
                 for j in range(1, min(1 + lookahead, len(keys))):
                     pending[j] = pool.submit(_load_and_pyramid, keys[j])
 
@@ -658,6 +659,23 @@ class LaplacianPyramid:
     # levels (see CPU.HybridFuser). Single pass; frames are loaded, aligned
     # and decomposed in worker threads while the main thread accumulates.
 
+    # Peak memory of one in-flight frame: loaded/aligned image plus its
+    # prepared pyramids, weights and variances (~1.33x for all levels)
+    HYBRID_BYTES_PER_PIXEL = 80
+    PYRAMID_BYTES_PER_PIXEL = 40   # aligned image + its pyramid
+
+    @staticmethod
+    def _frame_workers(shape, bytes_per_pixel, cap=6):
+        """Worker threads for per-frame preparation: about half the CPU
+        threads, capped so in-flight frames fit in half the available RAM."""
+        workers = max(1, min(cap, (os.cpu_count() or 4) // 2))
+        avail = algorithms._available_memory_bytes()
+        if avail is not None:
+            per_frame = shape[0] * shape[1] * bytes_per_pixel
+            # in flight: up to workers + 1 frames (lookahead) + the one being added
+            workers = min(workers, max(1, int(avail * 0.5 // per_frame) - 2))
+        return max(1, workers)
+
     def _hybrid_core(self, first_image, load_fn, keys, signals, progress_callback):
         """Hybrid fusion over keys[0..] (first_image is keys[0]).
 
@@ -666,21 +684,33 @@ class LaplacianPyramid:
         if self.config.use_gpu:
             logger.info("Hybrid stacking runs on the CPU")
         fuser = CPU.HybridFuser(self.pyramid_num_levels, self.fusion_kernel_size)
-        fuser.add(*fuser.prepare(first_image))
+        frame_shape = first_image.shape
+        fuser.add(fuser.prepare(first_image))
         del first_image
         self._emit_progress(signals, progress_callback, 1, len(keys), 0.0)
 
-        def _prepare(key):
+        # With RAM for 2+ in-flight frames, workers do all per-frame work in
+        # parallel (prepare() is independent per frame). Otherwise workers
+        # only load/align (cheap on memory) while the main thread prepares,
+        # so loading still overlaps with fusion.
+        workers = self._frame_workers(frame_shape, self.HYBRID_BYTES_PER_PIXEL)
+        prepare_in_workers = workers >= 2
+        if not prepare_in_workers:
+            workers = 2
+
+        def _load(key):
             img = load_fn(key)
+            if not prepare_in_workers:
+                return img
             prepared = fuser.prepare(img)
             del img
             return prepared
 
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
             pending = {}
-            lookahead = 3
+            lookahead = workers + 1
             for j in range(1, min(1 + lookahead, len(keys))):
-                pending[j] = pool.submit(_prepare, keys[j])
+                pending[j] = pool.submit(_load, keys[j])
 
             for i in range(1, len(keys)):
                 self.Algorithm.wait_if_paused()
@@ -691,12 +721,14 @@ class LaplacianPyramid:
                     return None
                 start_time = time.time()
 
-                prepared = pending.pop(i).result() if i in pending else _prepare(keys[i])
+                prepared = pending.pop(i).result() if i in pending else _load(keys[i])
                 for j in range(i + 1, min(i + 1 + lookahead, len(keys))):
                     if j not in pending:
-                        pending[j] = pool.submit(_prepare, keys[j])
+                        pending[j] = pool.submit(_load, keys[j])
 
-                fuser.add(*prepared)
+                if not prepare_in_workers:
+                    prepared = fuser.prepare(prepared)
+                fuser.add(prepared)
                 del prepared
                 self._emit_progress(signals, progress_callback, i + 1, len(keys),
                                     time.time() - start_time)

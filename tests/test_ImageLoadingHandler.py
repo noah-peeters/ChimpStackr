@@ -138,3 +138,22 @@ def test_is_supported_format():
     assert not loader.is_supported("photo.txt")
     assert not loader.is_supported("photo.pdf")
     assert not loader.is_supported(".DS_Store")
+
+
+def test_gray_u8_matches_float_loader_gray():
+    """The fast grayscale path (used for alignment estimation) gives the same
+    luma as converting the full float image."""
+    import cv2
+    path = "tests/low_res_images/DSC_0356.jpg"
+    fast = loader.read_image_as_gray_u8(path)
+    full = cv2.cvtColor(loader.read_image_as_float32(path), cv2.COLOR_BGR2GRAY)
+    assert fast.dtype == np.uint8 and fast.shape == full.shape
+    assert np.abs(fast.astype(np.float32) - full).mean() < 1.0
+
+
+def test_gray_u8_falls_back_for_npy(tmp_path):
+    arr = (np.random.RandomState(0).rand(20, 30, 3) * 255).astype(np.float32)
+    p = str(tmp_path / "frame.npy")
+    np.save(p, arr)
+    gray = loader.read_image_as_gray_u8(p)
+    assert gray.dtype == np.uint8 and gray.shape == (20, 30)

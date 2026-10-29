@@ -951,8 +951,10 @@ class im_reg:
             cv2.warpAffine(..., WARP_INVERSE_MAP) to align im1 onto im0.
         """
         if ref_gray is None:
-            ref_gray = cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY)
-        align_gray = cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY)
+            ref_gray = cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY) if im0.ndim == 3 else im0
+        align_gray = cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY) if im1.ndim == 3 else im1
+        ref_gray = ref_gray.astype(np.float32, copy=False)
+        align_gray = align_gray.astype(np.float32, copy=False)
 
         translation_result = translation(
             resize_image(ref_gray, scale_factor),

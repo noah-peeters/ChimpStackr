@@ -182,6 +182,29 @@ class ImageLoadingHandler:
             logger.warning("Unsupported format: %s", extension)
             return None
 
+    def read_image_as_gray_u8(self, path):
+        """
+        Load image as 8-bit grayscale (for alignment estimation).
+        Much faster and ~12x smaller than read_image_as_float32 for JPEGs
+        (decoded straight to luma). Applies EXIF orientation.
+        """
+        _, extension = os.path.splitext(path)
+        if extension[1:].lower() in self.supported_formats:
+            try:
+                orientation = _read_exif_orientation(path)
+                img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+                if img is not None:
+                    return _apply_exif_orientation(img, orientation)
+            except Exception as e:
+                logger.error("Failed to load image %s: %s", path, e)
+        # RAW, .npy and anything cv2 can't decode directly
+        img = self.read_image_as_float32(path)
+        if img is None:
+            return None
+        if img.ndim == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        return np.clip(img, 0, 255).astype(np.uint8)
+
     def _to_float32_bgr(self, img):
         """Convert any loaded image to float32 BGR in 0-255 range."""
         if img.dtype == np.uint16:
