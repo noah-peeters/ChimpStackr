@@ -198,22 +198,83 @@ def local_tone_map(image, strength=0.5):
     if strength <= 0:
         return image
 
-    img_u8 = np.clip(image, 0, 255).astype(np.uint8)
-
-    # Convert to LAB — only adjust L channel (luminance), preserve color
-    lab = cv2.cvtColor(img_u8, cv2.COLOR_BGR2LAB)
-    l_channel = lab[:, :, 0]
+    # Work in float LAB and evaluate the CLAHE curves at full precision, so
+    # the result isn't quantized to 256 levels (which an 8-bit round trip
+    # would do to every stacked output). Same curves as cv2's CLAHE.
+    img = np.clip(image, 0, 255).astype(np.float32) / 255.0
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)   # L in 0..100
+    l_255 = np.clip(lab[:, :, 0] * 2.55, 0, 255)
 
     # CLAHE with moderate clip limit
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l_corrected = clahe.apply(l_channel)
+    luts = _clahe_luts(np.round(l_255).astype(np.uint8), clip_limit=2.0, grid=8)
+    l_corrected = _clahe_apply(luts, l_255)
 
     # Blend original L with CLAHE L
-    l_blended = cv2.addWeighted(l_channel, 1.0 - strength, l_corrected, strength, 0)
-    lab[:, :, 0] = l_blended
+    lab[:, :, 0] = (l_255 * (1.0 - strength) + l_corrected * strength) / 2.55
 
     result = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
-    return result.astype(np.float32)
+    return np.clip(result * 255.0, 0, 255).astype(np.float32)
+
+
+def _clahe_luts(gray_u8, clip_limit=2.0, grid=8):
+    """Per-tile CLAHE lookup tables, computed like cv2.createCLAHE().
+
+    Returns (luts[grid, grid, 256] float32, tile_w, tile_h).
+    """
+    h, w = gray_u8.shape
+    pad_y, pad_x = (-h) % grid, (-w) % grid
+    src = cv2.copyMakeBorder(gray_u8, 0, pad_y, 0, pad_x, cv2.BORDER_REFLECT_101) \
+        if pad_x or pad_y else gray_u8
+    th, tw = src.shape[0] // grid, src.shape[1] // grid
+    total = tw * th
+    limit = max(int(clip_limit * total / 256), 1)
+    luts = np.empty((grid, grid, 256), np.float32)
+    for ty in range(grid):
+        for tx in range(grid):
+            tile = src[ty * th:(ty + 1) * th, tx * tw:(tx + 1) * tw]
+            hist = np.bincount(tile.ravel(), minlength=256).astype(np.int64)
+            clipped = int(np.maximum(hist - limit, 0).sum())
+            hist = np.minimum(hist, limit)
+            hist += clipped // 256
+            residual = clipped - (clipped // 256) * 256
+            if residual:
+                step = max(256 // residual, 1)
+                idx = np.arange(0, 256, step)[:residual]
+                hist[idx] += 1
+            luts[ty, tx] = np.clip(np.round(np.cumsum(hist) * (255.0 / total)), 0, 255)
+    return luts, tw, th
+
+
+def _clahe_apply(lut_info, values):
+    """Evaluate CLAHE at float values (0..255): bilinear between tiles, linear
+    between LUT entries."""
+    luts, tw, th = lut_info
+    grid = luts.shape[0]
+    h, w = values.shape
+
+    def axis(n, size):
+        f = np.arange(n, dtype=np.float32) / size - 0.5
+        t1 = np.floor(f)
+        a = f - t1
+        t1 = t1.astype(np.int64)
+        t2 = np.minimum(t1 + 1, grid - 1)
+        return np.maximum(t1, 0), t2, a.astype(np.float32)
+
+    x1, x2, xa = axis(w, tw)
+    y1, y2, ya = axis(h, th)
+    lo = np.floor(values).astype(np.int64)
+    np.clip(lo, 0, 255, out=lo)
+    hi = np.minimum(lo + 1, 255)
+    frac = (values - lo).astype(np.float32)
+
+    table = luts.reshape(-1)
+    out = np.zeros((h, w), np.float32)
+    for ty, wy in ((y1, 1.0 - ya), (y2, ya)):
+        for tx, wx in ((x1, 1.0 - xa), (x2, xa)):
+            offset = (ty[:, None] * grid + tx[None, :]) * 256    # start of each pixel's tile LUT
+            v = table[offset + lo] * (1.0 - frac) + table[offset + hi] * frac
+            out += v * (wy[:, None] * wx[None, :])
+    return out
 
 
 # ──────────────────────────────────────────────
@@ -222,18 +283,25 @@ def local_tone_map(image, strength=0.5):
 #
 # Max-contrast selection on every pyramid level makes halos: at coarse
 # levels an out-of-focus frame often has *more* local contrast next to an
-# edge, because the blurred subject spills into the background. Hybrid
-# keeps max-contrast selection only on the finest levels (hairs, texture);
-# coarse levels and the base are a blend of all frames weighted by each
-# frame's fine-detail sharpness, so the frame where an edge is actually in
-# focus also supplies the low frequencies around it. On the fine levels,
-# areas where no frame has detail above the noise level are blended too,
-# instead of picking whichever frame is noisiest.
+# edge, because the blurred subject spills into the background. Halos only
+# form where there is no in-focus detail, so Hybrid gates on that:
+#   - on the subject (some frame has real fine detail there), every level
+#     keeps max-contrast selection, for full crispness;
+#   - elsewhere (background, the area around edges) coarse levels and the
+#     base are a blend of all frames weighted by each frame's fine-detail
+#     sharpness, so the frame where a nearby edge is in focus supplies the
+#     low frequencies and out-of-focus spill can't leak in;
+#   - on the fine levels, areas with no detail above the noise level are
+#     blended instead of picking whichever frame is noisiest.
+# A mild contrast boost is then applied to the fine detail bands on the
+# subject only (at full precision), so smooth backgrounds stay clean.
 
 HYBRID_WEIGHT_POWER = 4.0      # sharpness^p: higher = closer to picking one frame
 HYBRID_NOISE_FACTOR = 4.0      # detail must exceed this x noise variance to be max-selected
 HYBRID_SHARPNESS_KSIZE = 5     # window for the fine-detail sharpness measure
 HYBRID_SPREAD_SIGMA = 2.0      # extra blur of coarse-level weights (in that level's pixels)
+HYBRID_DETAIL_GATE = 2.0       # "subject" = sharpness above this x the background floor
+HYBRID_DETAIL_GAIN = 0.08      # contrast boost of the fine detail bands on the subject
 
 
 def hybrid_fine_level_count(shape, num_levels):
@@ -275,15 +343,18 @@ class HybridFuser:
     worker thread; add() must be called from one thread.
     """
 
-    def __init__(self, num_levels, kernel_size=6):
+    def __init__(self, num_levels, kernel_size=6, detail_gain=HYBRID_DETAIL_GAIN):
         self.num_levels = num_levels
         self.kernel_size = max(2, int(kernel_size))
+        self.detail_gain = detail_gain
         self._n_fine = None
-        self._num = []        # per level: sum of weight * coefficient
-        self._den = []        # per level: sum of weights
-        self._best = {}       # fine levels: max-contrast coefficients
-        self._best_var = {}   # fine levels: their local variance
-        self._noise_var = {}  # fine levels: noise variance estimate
+        self._num = []         # per level: sum of weight * coefficient
+        self._den = []         # per level: sum of weights
+        self._best = []        # per level: max-contrast coefficients
+        self._best_var = []    # per level: their local variance
+        self._max_sharp = []   # per level: max fine-detail sharpness over frames
+        self._noise_var = {}   # fine levels: noise variance estimate
+        self._sharp_floor = None  # background sharpness level (first frame)
         self.frames = 0
 
     def prepare(self, image):
@@ -303,35 +374,44 @@ class HybridFuser:
         n = len(pyramid)
         if self._n_fine is None:
             self._n_fine = hybrid_fine_level_count(pyramid[-1].shape, n - 1)
+            # Background sharpness: a low percentile of the first frame, which in
+            # a focus stack is mostly out of focus
+            self._sharp_floor = float(np.percentile(sharp_pyramid[-1], 10)) + 1e-3
         first_fine = n - self._n_fine
 
         for i, level in enumerate(pyramid):
-            weight = sharp_pyramid[i]
+            sharp = sharp_pyramid[i]
+            weight = sharp
             if i < first_fine:
                 weight = cv2.GaussianBlur(weight, (0, 0), HYBRID_SPREAD_SIGMA)
             weight = np.power(weight + 1e-3, HYBRID_WEIGHT_POWER, dtype=np.float32)
             weighted = level * _per_channel(weight, level)
+            var = _level_variance(level, self.kernel_size)
             if self.frames == 0:
                 self._num.append(weighted)
                 self._den.append(weight)
-            else:
-                self._num[i] += weighted
-                self._den[i] += weight
-
-            if i >= first_fine:
-                var = _level_variance(level, self.kernel_size)
-                if self.frames == 0:
-                    self._best[i] = level.copy()
-                    self._best_var[i] = var
+                self._best.append(level.copy())
+                self._best_var.append(var)
+                self._max_sharp.append(sharp.copy())
+                if i >= first_fine:
                     # Robust (MAD) noise estimate from the first frame's coefficients
                     gray = cv2.cvtColor(level, cv2.COLOR_BGR2GRAY) if level.ndim == 3 else level
                     sigma = float(np.median(np.abs(gray))) / 0.6745
                     self._noise_var[i] = max(sigma * sigma, 1e-6)
-                else:
-                    mask = var > self._best_var[i]
-                    self._best[i][mask] = level[mask]
-                    np.maximum(self._best_var[i], var, out=self._best_var[i])
+            else:
+                self._num[i] += weighted
+                self._den[i] += weight
+                mask = var > self._best_var[i]
+                self._best[i][mask] = level[mask]
+                np.maximum(self._best_var[i], var, out=self._best_var[i])
+                np.maximum(self._max_sharp[i], sharp, out=self._max_sharp[i])
         self.frames += 1
+
+    def _subject_mask(self, i, blur):
+        """Soft 0..1 map of where some frame has real fine detail (level i)."""
+        gate = self._max_sharp[i] / (HYBRID_DETAIL_GATE * self._sharp_floor) - 1.0
+        np.clip(gate, 0.0, 1.0, out=gate)
+        return cv2.GaussianBlur(gate, (0, 0), blur)
 
     def result(self):
         """Fused image (float32), or None if no frames were added."""
@@ -343,11 +423,20 @@ class HybridFuser:
         for i in range(n):
             blend = self._num[i] / _per_channel(self._den[i], self._num[i])
             if i >= first_fine:
+                # fine levels: max contrast wherever there is detail above noise
                 alpha = self._best_var[i] / (HYBRID_NOISE_FACTOR * self._noise_var[i]) - 1.0
                 np.clip(alpha, 0.0, 1.0, out=alpha)
-                alpha = _per_channel(cv2.GaussianBlur(alpha, (0, 0), 2.0), blend)
-                blend = alpha * self._best[i] + (1.0 - alpha) * blend
-            levels.append(blend.astype(np.float32, copy=False))
+                alpha = cv2.GaussianBlur(alpha, (0, 0), 2.0)
+            else:
+                # coarse levels: max contrast only on the subject
+                alpha = self._subject_mask(i, 1.0)
+            alpha = _per_channel(alpha, blend)
+            fused = alpha * self._best[i] + (1.0 - alpha) * blend
+            if i >= first_fine and self.detail_gain > 0:
+                # fine bands only: boosting coarse bands near strong edges
+                # would itself create halos (like heavy unsharp masking)
+                fused *= 1.0 + self.detail_gain * _per_channel(self._subject_mask(i, 2.0), fused)
+            levels.append(fused.astype(np.float32, copy=False))
         return reconstruct_pyramid(levels)
 
 

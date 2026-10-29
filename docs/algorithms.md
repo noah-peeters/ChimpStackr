@@ -46,13 +46,14 @@ Based on Burt & Adelson (1983).
 
 ### How it works
 
-Max-contrast selection at every pyramid level is what causes halos: at coarse levels, an out-of-focus frame often has *more* local contrast next to an edge, because the blurred subject spills into the background. Hybrid keeps max-contrast selection only where it helps:
+Max-contrast selection at every pyramid level is what causes halos: at coarse levels, an out-of-focus frame often has *more* local contrast next to an edge, because the blurred subject spills into the background. Halos only form where there is no in-focus detail, so Hybrid decides per area:
 
-1. **Fine levels** (texture, hairs): the coefficient with the highest local contrast wins, as in the Pyramid method.
-2. **Coarse levels and the base**: a blend of all frames, weighted by each frame's fine-detail sharpness (sum-modified Laplacian). The sharpness map is aggregated over the area each level covers, so the frame where an edge is actually in focus also supplies the low frequencies around it -- out-of-focus spill can't leak in.
+1. **On the subject** (some frame has real fine detail there): every level keeps max-contrast selection, as in the Pyramid method, for full crispness.
+2. **Background and the area around edges**: coarse levels and the base are a blend of all frames, weighted by each frame's fine-detail sharpness (sum-modified Laplacian). The sharpness map is aggregated over the area each level covers, so the frame where a nearby edge is actually in focus supplies the low frequencies there -- out-of-focus spill can't leak in.
 3. **Flat areas on the fine levels**: where no frame has detail clearly above the noise level (estimated per level from the first frame), frames are blended instead of picking whichever is noisiest.
+4. **Contrast**: the fine detail bands get a mild boost (8%) on the subject only, at full precision. This gives the same crispness as the Pyramid method's tone-mapping step without amplifying background noise. Coarse bands are not boosted, since that would itself create halos around strong edges.
 
-The number of fine levels grows with resolution (3 at ~3000 px on the long side, 4 at ~6000 px), since halos are wider in pixels on larger images. Single pass, no tone mapping needed.
+The number of fine levels grows with resolution (3 at ~3000 px on the long side, 4 at ~6000 px), since halos are wider in pixels on larger images. Single pass.
 
 ### Parameters
 
@@ -60,10 +61,10 @@ The number of fine levels grows with resolution (3 at ~3000 px on the long side,
 
 ### Strengths and weaknesses
 
-- Far fewer halos around edges than the Pyramid method, with the same fine detail
+- Far fewer halos around edges than the Pyramid method, with the same fine-detail crispness
 - Much less noise in smooth backgrounds (frames are averaged there)
-- No contrast boost, so no tone mapping step
-- Somewhat slower than the Pyramid method (~1.3x)
+- Slightly less deep large-scale shadows than the Pyramid method's tone mapping
+- Uses more memory than the Pyramid method (~1 GB more on a 24 MP stack)
 
 ## Weighted Average
 

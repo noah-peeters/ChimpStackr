@@ -84,13 +84,13 @@ class TestHybridFuser:
 
     def test_single_frame_roundtrip(self):
         frames, _, _ = two_object_scene()
-        fuser = CPU.HybridFuser(5)
+        fuser = CPU.HybridFuser(5, detail_gain=0)
         fuser.add(*fuser.prepare(frames[0]))
         assert np.abs(fuser.result() - frames[0]).max() < 1e-2
 
     def test_identical_frames_unchanged(self):
         frames, _, _ = two_object_scene(noise=2.0)
-        fuser = CPU.HybridFuser(5)
+        fuser = CPU.HybridFuser(5, detail_gain=0)
         for _ in range(4):
             fuser.add(*fuser.prepare(frames[0]))
         assert np.abs(fuser.result() - frames[0]).max() < 1e-2
@@ -108,12 +108,29 @@ class TestHybridFuser:
 
 
 class TestHybridQuality:
-    def test_recovers_both_focus_planes_without_halos(self, tmp_path):
+    def test_recovers_both_focus_planes_without_halos(self):
         frames, truth, ring = two_object_scene()
-        algo, _ = stack(write_npy(tmp_path, frames))
-        err = np.abs(algo.output_image - truth).mean(axis=2)
+        fuser = CPU.HybridFuser(5, detail_gain=0)   # pure fusion, no contrast boost
+        for f in frames:
+            fuser.add(*fuser.prepare(f))
+        err = np.abs(fuser.result() - truth).mean(axis=2)
         assert err.mean() < 0.5, f"overall error {err.mean():.2f}"
         assert err[ring].mean() < 1.0, f"halo (background ring) error {err[ring].mean():.2f}"
+
+    def test_contrast_boost_only_on_subject(self, tmp_path):
+        """The default boost raises subject contrast but leaves the background
+        (where halos would show) alone."""
+        frames, truth, ring = two_object_scene()
+        algo, _ = stack(write_npy(tmp_path, frames))
+        out = algo.output_image
+        err = np.abs(out - truth).mean(axis=2)
+        # fine-band boost: at most a narrow sharpening edge, not a halo
+        assert err[ring].mean() < 1.5, f"background ring error {err[ring].mean():.2f}"
+        h, w = truth.shape[:2]
+        yy, xx = np.mgrid[0:h, 0:w]
+        disc = (yy - 120) ** 2 + (xx - 90) ** 2 < 35 ** 2
+        ratio = out[disc].std() / truth[disc].std()
+        assert 1.02 < ratio < 1.25, f"subject contrast ratio {ratio:.3f}"
 
     def test_halos_not_worse_than_laplacian_with_noise(self, tmp_path):
         frames, truth, ring = two_object_scene(noise=3.0)
