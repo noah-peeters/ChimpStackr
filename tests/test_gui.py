@@ -103,7 +103,7 @@ class TestWindow:
     def test_frame_preview_and_thumbnails(self, app, window):
         window.add_paths(LOW_RES[:3])
         assert wait(app, lambda: window.viewer.has_image)
-        assert "frame 1 of 3" in window.info_label.text()
+        assert wait(app, lambda: "frame 1 of 3" in window.info_label.info())
         item = window.sidebar.frames.item(0)
         assert wait(app, lambda: not item.icon().pixmap(44, 44).isNull()
                     and item.toolTip().count("\n") == 1)

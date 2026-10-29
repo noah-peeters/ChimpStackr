@@ -131,6 +131,43 @@ class Segmented(qtw.QWidget):
         self.buttons[i].setEnabled(on)
 
 
+class StatusLabel(qtw.QLabel):
+    """Status bar text: the current image info, temporarily replaced by a
+    message (QStatusBar's own messages draw over permanent widgets)."""
+
+    def __init__(self):
+        super().__init__("")
+        self._info = ""
+        self._timer = qtc.QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(lambda: super(StatusLabel, self).setText(self._info))
+
+    def setText(self, text):
+        self._info = text
+        if not self._timer.isActive():
+            super().setText(text)
+
+    def show_message(self, text, ms):
+        super().setText(text)
+        self._timer.start(ms)
+
+    def info(self):
+        return self._info
+
+
+class ElidedLabel(qtw.QLabel):
+    """Label that shortens its text with … instead of clipping it."""
+
+    def paintEvent(self, event):
+        p = qtg.QPainter(self)
+        p.setPen(self.palette().color(qtg.QPalette.WindowText))
+        text = self.fontMetrics().elidedText(self.text(), qtc.Qt.ElideRight, self.width())
+        p.drawText(self.rect(), int(self.alignment() | qtc.Qt.AlignVCenter), text)
+
+    def sizeHint(self):
+        return qtc.QSize(self.fontMetrics().horizontalAdvance(self.text()), super().sizeHint().height())
+
+
 class ActivityBar(qtw.QWidget):
     """Stacking progress: title, bar, time left, pause/resume and stop."""
     pause_clicked = qtc.Signal()
@@ -143,10 +180,12 @@ class ActivityBar(qtw.QWidget):
         layout = qtw.QHBoxLayout(self)
         layout.setContentsMargins(14, 8, 10, 8)
         layout.setSpacing(12)
-        self.title = qtw.QLabel("Stacking…")
+        self.title = ElidedLabel("Stacking…")
         f = self.title.font()
         f.setWeight(qtg.QFont.DemiBold)
         self.title.setFont(f)
+        self.title.setSizePolicy(qtw.QSizePolicy.Ignored, qtw.QSizePolicy.Preferred)
+        self.title.setMinimumWidth(120)
         self.bar = qtw.QProgressBar()
         self.bar.setRange(0, 1000)
         self.bar.setTextVisible(False)
@@ -161,8 +200,8 @@ class ActivityBar(qtw.QWidget):
         self.stop_btn.setObjectName("DangerButton")
         self.stop_btn.setIcon(icon("stop", "danger"))
         self.stop_btn.clicked.connect(self.stop_clicked)
-        layout.addWidget(self.title)
-        layout.addWidget(self.bar, 1)
+        layout.addWidget(self.title, 2)
+        layout.addWidget(self.bar, 3)
         layout.addWidget(self.detail)
         layout.addWidget(self.pause_btn)
         layout.addWidget(self.stop_btn)
@@ -318,7 +357,7 @@ class Window(qtw.QMainWindow):
         # Status bar
         sb = self.statusBar()
         sb.setSizeGripEnabled(False)
-        self.info_label = qtw.QLabel("")
+        self.info_label = StatusLabel()
         self.image_info_label = self.info_label   # old name
         sb.addWidget(self.info_label, 1)
         self.device_label = qtw.QLabel("")
@@ -375,8 +414,10 @@ class Window(qtw.QMainWindow):
         self.act_remove = self._action("Remove Selected Frames", self.remove_selected_frames,
                                        tip="Remove the selected frames from the stack")
         self.act_select_all = self._action("Select All Frames", self.select_all_frames, K.SelectAll)
+        # PreferencesRole would rename it "Preferences..."; macOS calls it Settings now
         self.act_settings = self._action("Settings…", self.show_settings, K.Preferences, "settings",
-                                         role=qtg.QAction.PreferencesRole)
+                                         role=qtg.QAction.ApplicationSpecificRole if IS_MAC
+                                         else qtg.QAction.PreferencesRole)
         if not self.act_settings.shortcuts():
             self.act_settings.setShortcut("Ctrl+,")
 
@@ -452,8 +493,9 @@ class Window(qtw.QMainWindow):
         v.addSeparator()
         v.addAction(self.act_prev)
         v.addAction(self.act_next)
-        v.addSeparator()
-        v.addAction(self.act_fullscreen)
+        if not IS_MAC:        # macOS adds its own Enter Full Screen item
+            v.addSeparator()
+            v.addAction(self.act_fullscreen)
 
         s = mb.addMenu("&Stack")
         s.addAction(self.act_stack)
@@ -622,7 +664,8 @@ class Window(qtw.QMainWindow):
             self.setWindowFilePath("")
 
     def show_message(self, text, ms=4000):
-        self.statusBar().showMessage(text, ms)
+        """Show a short message in the status bar, then the image info again."""
+        self.info_label.show_message(text, ms)
 
     # ══ frames ══
     def _image_filter(self):
@@ -990,7 +1033,7 @@ class Window(qtw.QMainWindow):
         link.setObjectName("FlatButton")
         link.setCursor(qtc.Qt.PointingHandCursor)
         link.clicked.connect(lambda: reveal_in_file_manager(path))
-        self.statusBar().addWidget(link)
+        self.statusBar().insertPermanentWidget(0, link)
         qtc.QTimer.singleShot(8000, link.deleteLater)
 
     def batch_export_output_image(self):
