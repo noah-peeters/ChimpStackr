@@ -5,13 +5,19 @@
 """
 import math
 import threading
+import logging
 import os
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 
 # Enable OpenCV multi-threading
 _cv_threads = os.cpu_count() or 4
 cv2.setNumThreads(_cv_threads)
+
+logger = logging.getLogger(__name__)
 
 try:
     import numba.cuda as cuda
@@ -30,6 +36,36 @@ except Exception:
     HAS_GPU = False
 
 
+def _available_memory_bytes():
+    """Available physical memory in bytes, or None if it can't be determined."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                return int(stat.ullAvailPhys)
+            return None
+        if os.path.exists("/proc/meminfo"):
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    if line.startswith("MemAvailable:"):
+                        return int(line.split()[1]) * 1024
+        # macOS / other POSIX: free pages only (underestimates, which is safe)
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_AVPHYS_PAGES")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 class Algorithm:
     def __init__(self):
         self.ImageLoadingHandler = ImageLoadingHandler.ImageLoadingHandler()
@@ -40,7 +76,11 @@ class Algorithm:
         self._pause_event = threading.Event()
         self._pause_event.set()  # Start unpaused (set = running)
         self.alignment_shifts = []  # Track all (x, y) shifts for auto-crop
-        self._ref_gray_cache = (None, None)  # (id(ref_im), gray) cache
+        self._tls = threading.local()  # per-thread caches (parallel pair estimation)
+        # Default resampling for alignment warps (match original behavior);
+        # the breathing pipeline overrides with Lanczos + replicate borders.
+        self.warp_interpolation = cv2.INTER_LINEAR
+        self.warp_border_mode = cv2.BORDER_CONSTANT
 
     def cancel(self):
         self._cancel_event.set()
@@ -113,6 +153,109 @@ class Algorithm:
         result[dy:dy+ch, dx:dx+cw] = im_to_align[sy:sy+ch, sx:sx+cw]
         return result
 
+    # ─── Affine matrix helpers ───
+    #
+    # Convention: a transform matrix is a 2x3 *forward map* from reference
+    # (template) coordinates to source coordinates:
+    #     dst(x, y) = src(M · [x, y, 1])
+    # so `cv2.warpAffine(src, M, (w, h), flags=... | cv2.WARP_INVERSE_MAP)`
+    # warps `src` into the reference frame. Estimators *estimate* these maps,
+    # apply/composition helpers *use* them.
+
+    @staticmethod
+    def _hom(M):
+        """3x3 homogeneous version of a 2x3 affine map."""
+        M = np.asarray(M, dtype=np.float64)
+        return np.vstack([M, [0.0, 0.0, 1.0]])
+
+    @classmethod
+    def compose_affine(cls, first, then):
+        """Compose two forward maps: apply `first`, then `then`.
+
+        Either may be None (treated as identity in that position).
+        Returns a 2x3 float64 matrix (keeps full precision through the
+        sequential chain — the final cast happens only in warpAffine, which
+        accepts float64 matrices natively).
+        """
+        if first is None:
+            return None if then is None else np.asarray(then, np.float64)
+        if then is None:
+            return np.asarray(first, np.float64)
+        M = cls._hom(then) @ cls._hom(first)
+        return M[:2, :].astype(np.float64)
+
+    @classmethod
+    def invert_affine(cls, M):
+        """Invert a 2x3 affine forward map."""
+        H = np.linalg.inv(cls._hom(M))
+        return H[:2, :].astype(np.float32)
+
+    @staticmethod
+    def transform_scale(M):
+        """Uniform scale factor of a (partial-)affine forward map."""
+        L = np.asarray(M, dtype=np.float64)[:, :2]
+        return float(np.sqrt(abs(np.linalg.det(L))))
+
+    @staticmethod
+    def transform_rotation(M):
+        """Rotation in degrees of a (partial-)affine forward map.
+
+        Uses the ``cv2.getRotationMatrix2D`` sign convention (positive =
+        counter-clockwise visually, i.e. ``atan2(M[0, 1], M[0, 0])`` in
+        y-flipped image coordinates).
+        """
+        L = np.asarray(M, dtype=np.float64)[:, :2]
+        return float(np.degrees(np.arctan2(L[0, 1], L[0, 0])))
+
+    @staticmethod
+    def project_to_similarity(M, anchor=None):
+        """Project a 6-DOF affine onto the similarity manifold (4 DOF).
+
+        Replaces the linear part with its closest uniform-scale rotation
+        (scale = sqrt(det(L)), rotation via the getRotationMatrix2D sign
+        convention, shear/scale anisotropy dropped) and re-anchors the
+        translation so the mapping of `anchor` is preserved.
+
+        Used by the high-precision path, where ECC propagates in 6 DOF
+        (MOTION_AFFINE) but the breathing chain must stay 4 DOF.
+        """
+        M = np.asarray(M, dtype=np.float64)
+        L = M[:, :2]
+        s = float(np.sqrt(abs(np.linalg.det(L))))
+        th = float(np.arctan2(L[0, 1], L[0, 0]))
+        c, sn = np.cos(th), np.sin(th)
+        R = s * np.array([[c, sn], [-sn, c]])
+        out = np.hstack([R, M[:, 2:3].copy()])
+        if anchor is not None:
+            # preserve M's mapping of the anchor point: R·a + t' = L·a + t
+            a = np.asarray(anchor, dtype=np.float64)
+            out[:, 2] = (L - R) @ a + M[:, 2]
+        return out
+
+    def apply_transform_matrix(self, im_to_align, M, track=True,
+                               interpolation=None, border_mode=None):
+        """Warp `im_to_align` into the reference frame using forward map M.
+
+        Defaults (linear interpolation, constant border) match the original
+        alignment behavior. The breathing path overrides these with
+        Lanczos resampling + replicated borders for maximum sharpness.
+        """
+        if M is None:
+            return im_to_align
+        if interpolation is None:
+            interpolation = self.warp_interpolation
+        if border_mode is None:
+            border_mode = self.warp_border_mode
+        h, w = im_to_align.shape[:2]
+        result = cv2.warpAffine(
+            im_to_align, M, (w, h),
+            flags=interpolation + cv2.WARP_INVERSE_MAP,
+            borderMode=border_mode, borderValue=0,
+        )
+        if track:
+            self._track_warp_shifts(M, im_to_align.shape)
+        return result
+
     def align_image_pair(self, ref_im, im_to_align, scale_factor=10,
                          coarse_fine=False, use_rst=False, alignment_mode="translation"):
         """
@@ -130,61 +273,123 @@ class Algorithm:
         if isinstance(im_to_align, str):
             im_to_align = self.load_image(im_to_align)
 
-        # Handle different image dimensions (#29)
-        if ref_im is not None and im_to_align is not None:
-            im_to_align = self._match_dimensions(ref_im, im_to_align)
+        if ref_im is None or im_to_align is None:
+            return im_to_align
+
+        # Handle different image dimensions (#29) before estimating, so the
+        # transform is applied to the same image it was estimated on
+        im_to_align = self._match_dimensions(ref_im, im_to_align)
 
         # Legacy compat: use_rst maps to euclidean if no explicit mode
         if use_rst and alignment_mode == "translation":
             alignment_mode = "euclidean"
 
-        if alignment_mode == "similarity":
-            result = self._align_similarity(ref_im, im_to_align, scale_factor)
-        elif alignment_mode == "affine":
-            result = self._align_affine(ref_im, im_to_align, scale_factor)
-        elif alignment_mode == "euclidean":
-            result = self._align_rst(ref_im, im_to_align, scale_factor)
-        else:
-            result = self._align_translation(ref_im, im_to_align, scale_factor, coarse_fine)
+        M, _meta = self._estimate_pair(
+            ref_im, im_to_align, alignment_mode, scale_factor, coarse_fine
+        )
+        if M is None:
+            return im_to_align
+        return self.apply_transform_matrix(im_to_align, M)
 
-        return result
+    def estimate_pair_transform(self, ref_im, im_to_align,
+                                alignment_mode="similarity", scale_factor=10,
+                                coarse_fine=False, precision="default"):
+        """
+        Estimate the 2x3 forward map aligning `im_to_align` onto `ref_im`.
+        Matrix only — no warping, no shift tracking. Accepts paths or arrays.
+
+        precision: "default" (fast u8 ECC, ≤2048px cascade) or "max"
+            (float32 ECC, Lanczos pre-warp, ≤4096px cascade — used by the
+            sequential breathing engine).
+
+        Returns:
+            (matrix, meta): matrix may be None if all estimators failed;
+            meta is a dict with "method", "scale", "angle", "success".
+        """
+        if isinstance(ref_im, str):
+            ref_im = self.load_image(ref_im)
+        if isinstance(im_to_align, str):
+            im_to_align = self.load_image(im_to_align)
+        if ref_im is None or im_to_align is None:
+            return None, {
+                "method": "load_error", "scale": 1.0, "angle": 0.0, "success": 0.0,
+            }
+        return self._estimate_pair(
+            ref_im, im_to_align, alignment_mode, scale_factor, coarse_fine,
+            precision=precision,
+        )
+
+    def _estimate_pair(self, ref_im, im_to_align, alignment_mode,
+                       scale_factor, coarse_fine=False, precision="default"):
+        """Dispatch to a pairwise estimator (arrays only)."""
+        # Handle different image dimensions (#29)
+        im_to_align = self._match_dimensions(ref_im, im_to_align)
+
+        if alignment_mode in ("similarity", "breathing"):
+            return self._estimate_similarity(ref_im, im_to_align, scale_factor,
+                                             precision=precision)
+        if alignment_mode == "affine":
+            return self._estimate_affine(ref_im, im_to_align, scale_factor,
+                                         precision=precision)
+        if alignment_mode == "euclidean":
+            return self._estimate_rst(ref_im, im_to_align, scale_factor,
+                                      precision=precision)
+        return self._estimate_translation(ref_im, im_to_align, scale_factor, coarse_fine)
 
     def _get_ref_gray(self, ref_im):
-        """Get cached grayscale of reference image (avoids redundant cvtColor)."""
-        ref_id = id(ref_im)
-        if self._ref_gray_cache[0] != ref_id:
-            if ref_im.ndim == 3:
-                gray = cv2.cvtColor(ref_im, cv2.COLOR_BGR2GRAY)
-            else:
-                gray = ref_im
-            self._ref_gray_cache = (ref_id, gray)
-        return self._ref_gray_cache[1]
+        """Get grayscale of the reference image, cached per thread.
 
-    def _align_translation(self, ref_im, im_to_align, scale_factor, coarse_fine):
-        """Translation-only alignment using DFT phase correlation."""
+        Sequential alignment estimates pairs in parallel worker threads, so
+        the cache must be thread-local. The cache holds a STRONG reference
+        to the source image and compares by identity: keying on id() alone
+        is unsafe because a freed image's address can be reused by the next
+        pair's image in the same worker, silently returning the previous
+        pair's grayscale (i.e. estimating the wrong transform).
+        """
+        cache = getattr(self._tls, "gray_cache", None)
+        if cache is None:
+            cache = [None, None]   # [source image (strong ref), its grayscale]
+            self._tls.gray_cache = cache
+        if cache[0] is ref_im:
+            return cache[1]
+        if ref_im.ndim == 3:
+            gray = cv2.cvtColor(ref_im, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = ref_im
+        cache[0] = ref_im
+        cache[1] = gray
+        return gray
+
+    def _estimate_translation(self, ref_im, im_to_align, scale_factor, coarse_fine=False):
+        """Translation-only DFT phase correlation estimate."""
         ref_gray = self._get_ref_gray(ref_im)
 
         if coarse_fine and min(ref_im.shape[:2]) > 1000:
             small_ref = cv2.resize(ref_im, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
             small_align = cv2.resize(im_to_align, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
-            self.DFT_Imreg.register_image_translation(
+            self.DFT_Imreg.estimate_translation_matrix(
                 small_ref, small_align, scale_factor=max(1, scale_factor // 2)
             )
             del small_ref, small_align
 
-        result = self.DFT_Imreg.register_image_translation(
+        M, success = self.DFT_Imreg.estimate_translation_matrix(
             ref_im, im_to_align, scale_factor=scale_factor,
             ref_gray=ref_gray,
         )
-        self.alignment_shifts.append(self.DFT_Imreg.last_shift)
-        return result
+        meta = {
+            "method": "dft_translation",
+            "scale": 1.0,
+            "angle": 0.0,
+            "success": success,
+        }
+        return M, meta
 
-    def _align_rst(self, ref_im, im_to_align, scale_factor):
+    def _estimate_rst(self, ref_im, im_to_align, scale_factor, precision="default"):
         """
-        Rotation + Scale + Translation alignment using multi-scale ECC.
-        Uses MOTION_EUCLIDEAN (translation + rotation, 3 DOF) which is
+        Rotation + translation (3 DOF) estimate via multi-scale ECC.
+        Uses MOTION_EUCLIDEAN (translation + rotation) which is
         the right model for focus stacking — no shear, no anisotropic scale.
-        Focus breathing (uniform scale) is handled by ORB feature matching fallback.
+        Uniform scale (focus breathing) is estimated by _estimate_similarity.
         """
         # Convert to grayscale (reuse cached ref grayscale when available)
         ref_gray = self._get_ref_gray(ref_im)
@@ -193,22 +398,34 @@ class Algorithm:
         else:
             align_gray = im_to_align
 
-        # Ensure uint8
-        if ref_gray.dtype != np.uint8:
-            ref_u8 = np.clip(ref_gray, 0, 255).astype(np.uint8)
-            align_u8 = np.clip(align_gray, 0, 255).astype(np.uint8)
+        hq = precision == "max"
+        if hq:
+            # High precision: native-bit-depth float32 grayscale
+            ref_g = self._to_gray_f32(ref_gray)
+            align_g = self._to_gray_f32(align_gray)
+            ref_src, align_src = ref_g, align_g
+            cascade = (512, 1024, 2048, 4096)
+            eps = 1e-7
         else:
-            ref_u8 = ref_gray
-            align_u8 = align_gray
+            # Ensure uint8
+            if ref_gray.dtype != np.uint8:
+                ref_u8 = np.clip(ref_gray, 0, 255).astype(np.uint8)
+                align_u8 = np.clip(align_gray, 0, 255).astype(np.uint8)
+            else:
+                ref_u8 = ref_gray
+                align_u8 = align_gray
+            ref_src, align_src = ref_u8, align_u8
+            cascade = (512, 1024, 2048)
+            eps = 1e-6
 
-        h_full, w_full = ref_u8.shape[:2]
+        h_full, w_full = ref_src.shape[:2]
 
         # Multi-scale ECC: coarse → fine
         # Level 0: 1/4 res (coarse alignment)
         # Level 1: 1/2 res (refine)
-        # Level 2: full or capped at 2048px (final refinement)
+        # Level 2..: full or capped (final refinement; HQ extends to 4096)
         scales = []
-        for max_dim in [512, 1024, min(2048, max(h_full, w_full))]:
+        for max_dim in cascade:
             s = min(max_dim / max(h_full, w_full), 1.0)
             if not scales or s > scales[-1]:
                 scales.append(s)
@@ -218,11 +435,11 @@ class Algorithm:
         try:
             for i, s in enumerate(scales):
                 if s < 1.0:
-                    ref_s = cv2.resize(ref_u8, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
-                    align_s = cv2.resize(align_u8, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+                    ref_s = cv2.resize(ref_src, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+                    align_s = cv2.resize(align_src, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
                 else:
-                    ref_s = ref_u8
-                    align_s = align_u8
+                    ref_s = ref_src
+                    align_s = align_src
 
                 # Scale warp matrix translation from previous level
                 if i > 0:
@@ -235,7 +452,7 @@ class Algorithm:
                 gauss = 11 if i == 0 else 5
                 criteria = (
                     cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
-                    max_iter, 1e-6,
+                    max_iter, eps,
                 )
 
                 # EUCLIDEAN: translation + rotation (3 DOF) — correct for focus stacking
@@ -252,18 +469,15 @@ class Algorithm:
 
         except cv2.error:
             # ECC failed — fall back to translation-only DFT
-            return self._align_translation(ref_im, im_to_align, scale_factor)
+            return self._estimate_translation(ref_im, im_to_align, scale_factor)
 
-        # Apply the warp to the full-resolution color image
-        h, w = im_to_align.shape[:2]
-        result = cv2.warpAffine(
-            im_to_align, warp_matrix, (w, h),
-            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
-            borderMode=cv2.BORDER_CONSTANT, borderValue=0
-        )
-
-        self._track_warp_shifts(warp_matrix, im_to_align.shape)
-        return result
+        meta = {
+            "method": "ecc_euclidean_hp" if hq else "ecc_euclidean",
+            "scale": self.transform_scale(warp_matrix),
+            "angle": self.transform_rotation(warp_matrix),
+            "success": 1.0,
+        }
+        return warp_matrix.astype(np.float32), meta
 
     def _track_warp_shifts(self, warp_matrix, shape):
         """Track max corner displacement for auto-crop (shared by RST/similarity/affine)."""
@@ -278,13 +492,31 @@ class Algorithm:
         self.alignment_shifts.append((max_dx, max_dy))
 
     def _to_gray_u8(self, im):
-        """Convert image to grayscale uint8 for feature matching / ECC."""
+        """Convert image to grayscale uint8 for feature matching."""
         if im.ndim == 3:
             gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
         else:
             gray = im
         if gray.dtype != np.uint8:
             gray = np.clip(gray, 0, 255).astype(np.uint8)
+        return gray
+
+    def _to_gray_f32(self, im):
+        """Convert image to grayscale float32 WITHOUT 8-bit quantization.
+
+        ECC precision is limited by the bit depth it optimizes on: u8
+        quantization noise (~0.5 LSB) directly caps the sub-pixel accuracy
+        the optimizer can steer toward.  Keeping the native float/bit depth
+        preserves 16-bit RAW and unstretched low-contrast gradients.
+        """
+        if im.ndim == 3:
+            gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = im
+        if gray.dtype != np.float32:
+            # uint8 stays in 0-255 range; float16/64 and int types are
+            # converted preserving value scale
+            gray = np.asarray(gray, dtype=np.float32)
         return gray
 
     @staticmethod
@@ -310,6 +542,12 @@ class Algorithm:
         Returns 2x3 warp matrix, or None if there are insufficient matches or
         the result is implausible (callers then fall back to ECC).
         """
+        # OpenCV's RANSAC draws samples from the per-thread global RNG. In
+        # parallel pair estimation the RNG history depends on which pairs
+        # landed on which worker, making the coarse estimate (and hence the
+        # whole breathing chain) nondeterministic run-to-run. Pinning the
+        # seed here makes every pair's estimate depend only on its images.
+        cv2.setRNGSeed(42)
         orb = cv2.ORB_create(nfeatures=2000)
         kp1, des1 = orb.detectAndCompute(ref_u8, None)
         kp2, des2 = orb.detectAndCompute(align_u8, None)
@@ -352,14 +590,83 @@ class Algorithm:
             return None
         return M.astype(np.float32)
 
-    def _ecc_refine(self, ref_u8, prealigned_u8, motion_type=cv2.MOTION_EUCLIDEAN):
+    def _warp_score(self, ref_g, align_g, M):
+        """Alignment quality of transform M between float grays.
+
+        Returns (ncc, highpass_mad): cross-correlation plus the mean
+        absolute difference of highpass (detail) content. NCC is robust to
+        focus-dependent brightness change but nearly blind to sub-0.1%
+        scale errors; the highpass MAD resolves exactly those ties.
+        Higher NCC / lower MAD = better.
+        """
+        if M is None:
+            return (-2.0, float("inf"))
+        h, w = ref_g.shape[:2]
+        warped = cv2.warpAffine(
+            align_g, M, (w, h),
+            flags=cv2.INTER_LANCZOS4 + cv2.WARP_INVERSE_MAP,
+            borderMode=cv2.BORDER_REPLICATE,
+        )
+        ncc = self._ncc(ref_g, warped)
+
+        k = 31
+        ref_hp = ref_g - cv2.GaussianBlur(ref_g, (k, k), 8.0)
+        warped_hp = warped - cv2.GaussianBlur(warped, (k, k), 8.0)
+        ty0, ty1 = h // 16, h - max(1, h // 16)
+        tx0, tx1 = w // 16, w - max(1, w // 16)
+        mad = float(np.mean(np.abs(
+            ref_hp[ty0:ty1, tx0:tx1] - warped_hp[ty0:ty1, tx0:tx1])))
+        return (ncc, mad)
+
+    @staticmethod
+    def _warp_score_better(a, b, ncc_tie=5e-4):
+        """True when score tuple `a` is convincingly better than `b`.
+
+        NCC decides when it clearly separates the candidates (> ncc_tie);
+        otherwise the misalignment-sensitive highpass MAD (lower better).
+        """
+        (ncc_a, mad_a), (ncc_b, mad_b) = a, b
+        if ncc_a > ncc_b + ncc_tie:
+            return True
+        if ncc_b > ncc_a + ncc_tie:
+            return False
+        return mad_a < mad_b
+
+    @staticmethod
+    def _ncc(a, b):
+        """Normalized cross-correlation between two same-shape float images."""
+        a = np.asarray(a, np.float64).ravel()
+        b = np.asarray(b, np.float64).ravel()
+        a -= a.mean()
+        b -= b.mean()
+        d = np.sqrt(float(a @ a) * float(b @ b))
+        if d <= 0.0:
+            return -2.0
+        return float((a @ b) / d)
+
+    def _ecc_refine(self, ref, prealigned, motion_type=cv2.MOTION_EUCLIDEAN,
+                    cascade_dims=None, eps=1e-6, none_on_error=False):
         """
         Multi-scale ECC refinement on a pre-aligned image.
-        Returns residual 2x3 warp matrix (identity if ECC fails).
+
+        Args:
+            ref, prealigned: same-shape grayscale images (uint8 or float32).
+            cascade_dims: max image size per cascade level. Default
+                (512, 1024, 2048); the high-precision path passes a level
+                extending to 4096 so ECC optimizes on (nearly) full res.
+            eps: ECC convergence epsilon — smaller = more precise but
+                more iterations.
+
+        Returns:
+            Residual 2x3 warp matrix (float32, identity if ECC fails), or
+            None when `none_on_error=True` and ECC raised (lets callers
+            fall back to a different estimator).
         """
-        h_full, w_full = ref_u8.shape[:2]
+        h_full, w_full = ref.shape[:2]
+        if cascade_dims is None:
+            cascade_dims = (512, 1024, 2048)
         scales = []
-        for max_dim in [512, 1024, min(2048, max(h_full, w_full))]:
+        for max_dim in cascade_dims:
             s = min(max_dim / max(h_full, w_full), 1.0)
             if not scales or s > scales[-1]:
                 scales.append(s)
@@ -369,20 +676,20 @@ class Algorithm:
         try:
             for i, s in enumerate(scales):
                 if s < 1.0:
-                    ref_s = cv2.resize(ref_u8, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
-                    align_s = cv2.resize(prealigned_u8, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+                    ref_s = cv2.resize(ref, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+                    align_s = cv2.resize(prealigned, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
                 else:
-                    ref_s = ref_u8
-                    align_s = prealigned_u8
+                    ref_s = ref
+                    align_s = prealigned
 
                 if i > 0:
                     prev_s = scales[i - 1]
                     warp[0, 2] *= (s / prev_s)
                     warp[1, 2] *= (s / prev_s)
 
-                max_iter = 200 if i == 0 else 100
+                max_iter = 240 if i == 0 else 160
                 gauss = 11 if i == 0 else 5
-                criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, max_iter, 1e-6)
+                criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, max_iter, eps)
 
                 _, warp = cv2.findTransformECC(
                     ref_s, align_s, warp, motion_type, criteria,
@@ -395,84 +702,380 @@ class Algorithm:
                 warp[1, 2] /= final_s
 
         except cv2.error:
-            pass  # Return identity (no refinement)
+            if none_on_error:
+                return None
+            # Return identity (no refinement)
 
         return warp
 
-    def _align_similarity(self, ref_im, im_to_align, scale_factor):
+    def _estimate_similarity(self, ref_im, im_to_align, scale_factor,
+                             precision="default"):
         """
-        4 DOF similarity alignment: tx, ty, rotation, uniform scale.
+        4 DOF similarity estimate: tx, ty, rotation, uniform scale.
         Hybrid: ORB features for coarse alignment, ECC for sub-pixel refinement.
+        Falls back to euclidean ECC when feature matching fails.
+
+        precision="max" runs the ECC refinement on float32 grayscale (native
+        bit depth, no 8-bit quantization) with Lanczos pre-warping and a
+        cascade extending to 4096px — the maximum-accuracy breathing path.
+        ORB matching still uses u8 (ORB requires 8-bit descriptors).
         """
         ref_u8 = self._to_gray_u8(self._get_ref_gray(ref_im))
         align_u8 = self._to_gray_u8(im_to_align)
+        hq = precision == "max"
 
         # Stage 1: Feature-based coarse alignment
         coarse_warp = self._feature_match(ref_u8, align_u8, mode="similarity")
         if coarse_warp is None:
             # Fallback to euclidean ECC
-            return self._align_rst(ref_im, im_to_align, scale_factor)
+            return self._estimate_rst(ref_im, im_to_align, scale_factor,
+                                      precision=precision)
 
         # Stage 2: Pre-warp and refine with ECC
         h, w = align_u8.shape[:2]
-        prealigned = cv2.warpAffine(
-            align_u8, coarse_warp, (w, h),
-            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
-            borderMode=cv2.BORDER_REPLICATE,
-        )
-        residual = self._ecc_refine(ref_u8, prealigned, cv2.MOTION_EUCLIDEAN)
+        interp_flags = (cv2.INTER_LANCZOS4 if hq else cv2.INTER_LINEAR)
+        if hq:
+            # Refine on native-bit-depth grayscale, NOT the u8 copy
+            ref_g = self._to_gray_f32(self._get_ref_gray(ref_im))
+            align_g = self._to_gray_f32(im_to_align)
+            prealigned = cv2.warpAffine(
+                align_g, coarse_warp, (w, h),
+                flags=interp_flags + cv2.WARP_INVERSE_MAP,
+                borderMode=cv2.BORDER_REPLICATE,
+            )
 
-        # Stage 3: Compose coarse + residual
-        C = np.vstack([coarse_warp, [0, 0, 1]])
-        R = np.vstack([residual, [0, 0, 1]])
-        combined = (R @ C)[:2, :].astype(np.float32)
+            # Scale refinement via 6-DOF ECC: ECC has no 4-DOF mode, so run
+            # MOTION_AFFINE on float32 grayscale and project onto the
+            # similarity manifold (this is where precise breathing
+            # compensation comes from — the scale was otherwise frozen at
+            # the noisy ORB estimate).
+            residual_hq = self._ecc_refine(
+                ref_g, prealigned, cv2.MOTION_AFFINE,
+                cascade_dims=(512, 1024, 2048, 4096), eps=1e-7,
+            )
+            scaled = self.project_to_similarity(
+                self.compose_affine(coarse_warp, residual_hq),
+                anchor=(w * 0.5, h * 0.5),
+            )
 
-        # Apply to full-res color image
-        h, w = im_to_align.shape[:2]
-        result = cv2.warpAffine(
-            im_to_align, combined, (w, h),
-            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
-            borderMode=cv2.BORDER_CONSTANT, borderValue=0,
-        )
-        self._track_warp_shifts(combined, im_to_align.shape)
-        return result
+            # Re-refine rotation + translation AT the refined scale: EUCLIDEAN
+            # ECC restores full translation/rotation precision that the 6-DOF
+            # projection may have traded away, without touching the scale.
+            pre_scaled = cv2.warpAffine(
+                align_g, scaled, (w, h),
+                flags=interp_flags + cv2.WARP_INVERSE_MAP,
+                borderMode=cv2.BORDER_REPLICATE,
+            )
+            residual_rot = self._ecc_refine(
+                ref_g, pre_scaled, cv2.MOTION_EUCLIDEAN,
+                cascade_dims=(512, 1024, 2048, 4096), eps=1e-7,
+            )
+            combined_hq = self.compose_affine(scaled, residual_rot)
 
-    def _align_affine(self, ref_im, im_to_align, scale_factor):
+            # Safe candidate: 3-DOF refinement only (scale frozen at the ORB
+            # estimate — can never drift). Serves as the objective fallback
+            # for texture-poor content where the 6-DOF scale estimate is noise.
+            residual_euc = self._ecc_refine(
+                ref_g, prealigned, cv2.MOTION_EUCLIDEAN,
+                cascade_dims=(512, 1024, 2048), eps=1e-6,
+            )
+            combined_euc = self.compose_affine(coarse_warp, residual_euc)
+
+            # Objective arbitration on actual overlap
+            score_hq = self._warp_score(ref_g, align_g, combined_hq)
+            score_euc = self._warp_score(ref_g, align_g, combined_euc)
+            use_scale_refined = self._warp_score_better(score_hq, score_euc)
+            combined = combined_hq if use_scale_refined else combined_euc
+            logger.debug(
+                "HQ similarity: ncc %.5f/%.5f mad %.5f/%.5f → %s",
+                score_hq[0], score_euc[0], score_hq[1], score_euc[1],
+                "scale-refined" if use_scale_refined else "euclidean",
+            )
+        else:
+            prealigned = cv2.warpAffine(
+                align_u8, coarse_warp, (w, h),
+                flags=interp_flags + cv2.WARP_INVERSE_MAP,
+                borderMode=cv2.BORDER_REPLICATE,
+            )
+            residual = self._ecc_refine(ref_u8, prealigned, cv2.MOTION_EUCLIDEAN)
+            # Stage 3: Compose coarse + residual
+            combined = self.compose_affine(coarse_warp, residual)
+
+        meta = {
+            "method": "orb_ecc_similarity_hp" if hq else "orb_ecc_similarity",
+            "scale": self.transform_scale(combined),
+            "angle": self.transform_rotation(combined),
+            "success": 1.0,
+        }
+        return combined, meta
+
+    def _estimate_affine(self, ref_im, im_to_align, scale_factor,
+                         precision="default"):
         """
-        6 DOF affine alignment: tx, ty, rotation, scale_x, scale_y, shear.
+        6 DOF affine estimate: tx, ty, rotation, scale_x, scale_y, shear.
         Hybrid: ORB features for coarse alignment, ECC MOTION_AFFINE for refinement.
+        Falls back to similarity when feature matching fails.
         """
         ref_u8 = self._to_gray_u8(self._get_ref_gray(ref_im))
         align_u8 = self._to_gray_u8(im_to_align)
+        hq = precision == "max"
 
         # Stage 1: Feature-based coarse alignment (full 6 DOF)
         coarse_warp = self._feature_match(ref_u8, align_u8, mode="affine")
         if coarse_warp is None:
             # Fallback to similarity
-            return self._align_similarity(ref_im, im_to_align, scale_factor)
+            return self._estimate_similarity(ref_im, im_to_align, scale_factor,
+                                             precision=precision)
 
         # Stage 2: Pre-warp and refine with MOTION_AFFINE ECC
         h, w = align_u8.shape[:2]
-        prealigned = cv2.warpAffine(
-            align_u8, coarse_warp, (w, h),
-            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
-            borderMode=cv2.BORDER_REPLICATE,
-        )
-        residual = self._ecc_refine(ref_u8, prealigned, cv2.MOTION_AFFINE)
+        interp_flags = (cv2.INTER_LANCZOS4 if hq else cv2.INTER_LINEAR)
+        if hq:
+            ref_g = self._to_gray_f32(self._get_ref_gray(ref_im))
+            align_g = self._to_gray_f32(im_to_align)
+            prealigned = cv2.warpAffine(
+                align_g, coarse_warp, (w, h),
+                flags=interp_flags + cv2.WARP_INVERSE_MAP,
+                borderMode=cv2.BORDER_REPLICATE,
+            )
+            residual = self._ecc_refine(
+                ref_g, prealigned, cv2.MOTION_AFFINE,
+                cascade_dims=(512, 1024, 2048, 4096), eps=1e-7,
+            )
+        else:
+            prealigned = cv2.warpAffine(
+                align_u8, coarse_warp, (w, h),
+                flags=interp_flags + cv2.WARP_INVERSE_MAP,
+                borderMode=cv2.BORDER_REPLICATE,
+            )
+            residual = self._ecc_refine(ref_u8, prealigned, cv2.MOTION_AFFINE)
 
         # Stage 3: Compose
-        C = np.vstack([coarse_warp, [0, 0, 1]])
-        R = np.vstack([residual, [0, 0, 1]])
-        combined = (R @ C)[:2, :].astype(np.float32)
+        combined = self.compose_affine(coarse_warp, residual)
 
-        h, w = im_to_align.shape[:2]
-        result = cv2.warpAffine(
-            im_to_align, combined, (w, h),
-            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
-            borderMode=cv2.BORDER_CONSTANT, borderValue=0,
-        )
-        self._track_warp_shifts(combined, im_to_align.shape)
-        return result
+        meta = {
+            "method": "orb_ecc_affine_hp" if hq else "orb_ecc_affine",
+            "scale": self.transform_scale(combined),
+            "angle": self.transform_rotation(combined),
+            "success": 1.0,
+        }
+        return combined, meta
+
+    # ─── Sequential (chained) alignment: Helicon-style focus breathing compensation ───
+    #
+    # Focus breathing is a *cumulative* scale drift: frame N vs. frame 0 can
+    # differ by 10-20% while frame N vs. frame N-1 differs by well under 1%.
+    # Aligning each frame to a single reference therefore fails on strongly
+    # breathing lenses; instead we estimate a small transform per consecutive
+    # pair and compose the chain onto the reference frame.
+
+    # Measured peak working memory per pair-estimation worker, in bytes per
+    # image pixel (24MP stack: ~0.96 GB/worker default, ~1.68 GB/worker max)
+    _PAIR_BYTES_PER_PIXEL = {"max": 70, "default": 40}
+
+    def _sequential_worker_count(self, ref_template, precision, n_pairs):
+        """Parallel pair-estimation workers: one per physical core (OpenCV
+        runs single-threaded inside each), capped so the workers' combined
+        working set stays within 70% of the currently available RAM."""
+        workers = min(8, n_pairs, max(1, (os.cpu_count() or 4) // 2))
+        avail = _available_memory_bytes()
+        if avail is not None:
+            h, w = ref_template.shape[:2]
+            per_worker = h * w * self._PAIR_BYTES_PER_PIXEL.get(precision, 70)
+            workers = min(workers, max(1, int(avail * 0.7 // per_worker)))
+        return max(1, workers)
+
+    def estimate_sequential_transforms(self, paths, ref_index=0,
+                                       alignment_mode="similarity",
+                                       scale_factor=10,
+                                       max_scale_step=0.05,
+                                       precision="max",
+                                       emit=None):
+        """
+        Estimate per-frame transforms for sequential (chained) alignment.
+
+        Args:
+            paths: ordered image paths (focus order matters).
+            ref_index: frame all transforms are composed into ("first"/"middle").
+            alignment_mode: per-pair estimator mode
+                ("similarity" [default, handles breathing scale], "euclidean",
+                "affine", "translation"). "breathing" is treated as "similarity".
+            scale_factor: DFT precision parameter for translation fallback.
+            max_scale_step: max plausible scale change per pair (0.05 = 5%).
+                Larger suspected steps are re-estimated with translation-only
+                correlation; if that also fails, the previous delta is held
+                (constant breathing rate assumption).
+            precision: "max" (default) refines scale with float32 ECC at up to
+                4096px and warps with Lanczos — the slow, maximum-accuracy
+                path. "default" uses the fast u8/2048px estimators for quick
+                stacks on easy subjects.
+            emit: optional callable (current, total, seconds) for progress.
+
+        Returns:
+            (transforms, log):
+            transforms[i] is the 2x3 forward map (reference coords → frame-i
+            coords) — cv2.warpAffine(frame_i, transforms[i], WARP_INVERSE_MAP)
+            maps frame i into the reference frame.
+            log is a list of per-frame dicts (step_scale, cumulative scale,
+            method, fallback count). (None, None) if cancelled.
+        """
+        n = len(paths)
+        if n < 2:
+            return [np.eye(2, 3, dtype=np.float32) for _ in range(n)], []
+
+        # Every frame is matched to frame 0's dimensions (#29) so all pair
+        # transforms live in one coordinate system and the chain composes
+        ref_template = self.load_image(paths[0])
+        if ref_template is None:
+            return [np.eye(2, 3, dtype=np.float32) for _ in range(n)], []
+
+        r = max(0, min(ref_index, n - 1))
+        pair_mode = (alignment_mode
+                     if alignment_mode in ("similarity", "affine", "euclidean", "translation")
+                     else "similarity")
+
+        # Scale plausibility bounds per pair
+        lo, hi = 1.0 - max_scale_step, 1.0 + max_scale_step
+
+        def _estimate_pair_step(i):
+            """Estimate the frame i → i+1 forward map (template = frame i)."""
+            t0 = time.time()
+            meta = {"method": "load_error", "scale": 1.0, "angle": 0.0, "success": 0.0}
+            M = None
+            if self.is_cancelled:
+                return i, M, meta, 0.0
+            try:
+                ref = self.load_image(paths[i])
+                src = self.load_image(paths[i + 1])
+                if ref is None or src is None:
+                    raise ValueError("Image failed to load")
+                ref = self._match_dimensions(ref_template, ref)
+                src = self._match_dimensions(ref_template, src)
+                # Maximum precision for the breathing chain: float32 ECC
+                # + Lanczos pre-warp + 4096px cascade per pair (or the fast
+                # default estimators when the user opts for a quick stack)
+                M, meta = self.estimate_pair_transform(
+                    ref, src, alignment_mode=pair_mode, scale_factor=scale_factor,
+                    precision=precision,
+                )
+                meta["scale"] = self.transform_scale(M) if M is not None else 1.0
+
+                # Plausibility check: focus breathing never changes
+                # magnification by large steps between consecutive frames.
+                if M is not None and not lo <= meta["scale"] <= hi:
+                    meta["rejected_scale"] = meta["scale"]
+                    Mt, tmeta = self._estimate_translation(ref, src, scale_factor)
+                    if tmeta["success"] >= 0.3:
+                        M = Mt
+                        meta = {**tmeta, "scale": 1.0,
+                                "fallback": "translation",
+                                "rejected_scale": meta["rejected_scale"],
+                                "pair": i}
+                    else:
+                        M = None
+                        meta["fallback"] = "hold"
+                del ref, src
+            except Exception as exc:  # defensive: keep the stack running
+                M, meta = None, {**meta, "method": "error", "error": str(exc), "pair": i}
+
+            return i, M, meta, time.time() - t0
+
+        # ── Phase 1: estimate all pair deltas in parallel ──
+        # Each pair delta is independent, so this stays parallel even though
+        # the chain composition below is sequential.
+        n_workers = self._sequential_worker_count(ref_template, precision, n - 1)
+        deltas = [None] * (n - 1)   # pair i-1 ↔ i: forward map frame i-1 coords → frame i coords
+        metas = [None] * (n - 1)
+        total = n - 1
+        # Run OpenCV single-threaded inside the workers: nested thread pools
+        # both oversubscribe the CPU and introduce run-to-run numeric jitter
+        # in ECC (parallel reduction order depends on scheduling). With
+        # single-threaded OpenCV, each pair estimate is a pure function of
+        # its two images — the breathing chain becomes reproducible.
+        prev_cv_threads = cv2.getNumThreads()
+        cv2.setNumThreads(1)
+        executor = ThreadPoolExecutor(max_workers=n_workers)
+        try:
+            futs = [executor.submit(_estimate_pair_step, i) for i in range(n - 1)]
+            done = 0
+            t_last = time.time()
+            for i in range(n - 1):
+                self.wait_if_paused()
+                if self.is_cancelled:
+                    logger.info(f"Sequential alignment cancelled at pair {i}")
+                    return None, None
+                idx, M, meta, _dt = futs[i].result()
+                deltas[idx] = M
+                metas[idx] = meta
+                done += 1
+                if emit is not None:
+                    emit(done, total, time.time() - t_last)
+                    t_last = time.time()
+        finally:
+            # Wait for pairs already running (pending ones are dropped) so a
+            # cancelled stack doesn't leave workers holding full-size images
+            executor.shutdown(wait=True, cancel_futures=True)
+            cv2.setNumThreads(prev_cv_threads)
+
+        # ── Phase 2: compose the chain onto the reference frame (cheap) ──
+        transforms = [np.eye(2, 3, dtype=np.float32) for _ in range(n)]
+        log = [None] * n
+        log[r] = {"frame": r, "step_scale": 1.0, "scale": 1.0, "angle": 0.0,
+                  "method": "reference", "fallbacks": 0}
+
+        identity = np.eye(2, 3, dtype=np.float32)
+
+        # Chain upward: reference → end of stack
+        # transforms[i] = Δ(i-1→i) · transforms[i-1]
+        prev_delta = None
+        for i in range(r + 1, n):
+            meta = metas[i - 1] or {}
+            M_delta, fallbacks = deltas[i - 1], (1 if meta.get("fallback") else 0)
+            if M_delta is None:
+                # Hold: assume a constant breathing rate (reuse the last
+                # successful delta); identity if none so far.
+                M_delta = prev_delta if prev_delta is not None else identity
+                fallbacks += 1
+                meta = {**meta, "held": True}
+            else:
+                prev_delta = M_delta
+            transforms[i] = self.compose_affine(transforms[i - 1], M_delta)
+            log[i] = {
+                "frame": i,
+                "step_scale": self.transform_scale(M_delta),
+                "scale": self.transform_scale(transforms[i]),
+                "angle": self.transform_rotation(transforms[i]),
+                "method": meta.get("method", "?"),
+                "fallbacks": fallbacks,
+            }
+
+        # Chain downward: reference → start of stack.
+        # M_ref→(i-1) = Δ(i-1→i)⁻¹ · M_ref→i, with Δ(i-1→i) = deltas[i-1].
+        prev_delta = None
+        for i in range(r, 0, -1):
+            meta = metas[i - 1] or {}
+            fallbacks = 1 if meta.get("fallback") else 0
+            M_delta = deltas[i - 1]
+            if M_delta is None:
+                # Hold: reuse the last successful delta (constant breathing
+                # rate); identity if none so far.
+                M_delta = prev_delta if prev_delta is not None else identity
+                fallbacks += 1
+                meta = {**meta, "held": True}
+            else:
+                prev_delta = M_delta
+            D = self.invert_affine(M_delta)  # maps frame i coords → frame i-1 coords
+            transforms[i - 1] = self.compose_affine(transforms[i], D)
+            log[i - 1] = {
+                "frame": i - 1,
+                "step_scale": self.transform_scale(M_delta),
+                "scale": self.transform_scale(transforms[i - 1]),
+                "angle": self.transform_rotation(transforms[i - 1]),
+                "method": meta.get("method", "?"),
+                "fallbacks": fallbacks,
+            }
+
+        return transforms, log
 
     def generate_laplacian_pyramid(self, im1, num_levels):
         if isinstance(im1, str):

@@ -940,14 +940,15 @@ def resize_image(im, division_factor):
 
 
 class im_reg:
-    # Register im1 to im0 for Translation only
-    def register_image_translation(self, im0, im1, scale_factor,
-                                   ref_gray=None):
-        """Align im1 to im0 using DFT phase correlation.
+    # Estimate translation only (returns the matrix, does not warp)
+    def estimate_translation_matrix(self, im0, im1, scale_factor,
+                                    ref_gray=None):
+        """Estimate the translation-only alignment of im1 to im0.
 
-        Args:
-            ref_gray: Pre-computed grayscale of im0 (avoids redundant cvtColor
-                      when aligning multiple images to the same reference).
+        Returns:
+            tuple: (translation_matrix, success). The matrix is a 2x3
+            forward map (im0 coords → im1 coords), usable directly with
+            cv2.warpAffine(..., WARP_INVERSE_MAP) to align im1 onto im0.
         """
         if ref_gray is None:
             ref_gray = cv2.cvtColor(im0, cv2.COLOR_BGR2GRAY)
@@ -958,19 +959,37 @@ class im_reg:
             resize_image(align_gray, scale_factor),
         )
 
-        height, width = im1.shape[:2]
         y_shift, x_shift = translation_result["tvec"] * scale_factor
 
+        # tvec is the shift that moves im1 onto im0, so the forward map
+        # (im0 coords → im1 coords) is its negation
         translation_matrix = np.float64(
             [
-                [1, 0, x_shift],
-                [0, 1, y_shift],
+                [1, 0, -x_shift],
+                [0, 1, -y_shift],
             ]
         )
-        # warpAffine on float32 input returns float32 — no astype needed
-        result = cv2.warpAffine(im1, translation_matrix, (width, height))
-
         self.last_shift = (float(x_shift), float(y_shift))
+
+        return translation_matrix, float(translation_result.get("success", 1.0))
+
+    # Register im1 to im0 for Translation only
+    def register_image_translation(self, im0, im1, scale_factor,
+                                   ref_gray=None):
+        """Align im1 to im0 using DFT phase correlation.
+
+        Args:
+            ref_gray: Pre-computed grayscale of im0 (avoids redundant cvtColor
+                      when aligning multiple images to the same reference).
+        """
+        translation_matrix, _success = self.estimate_translation_matrix(
+            im0, im1, scale_factor, ref_gray=ref_gray,
+        )
+
+        height, width = im1.shape[:2]
+        # warpAffine on float32 input returns float32 — no astype needed
+        result = cv2.warpAffine(im1, translation_matrix, (width, height),
+                                flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP)
 
         return result
 

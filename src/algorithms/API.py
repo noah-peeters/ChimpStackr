@@ -12,6 +12,8 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+import cv2
+
 import src.utilities as utilities
 import src.algorithms as algorithms
 import src.algorithms.stacking_algorithms.cpu as CPU
@@ -36,6 +38,11 @@ class LaplacianPyramid:
         self.output_image = None
         self.depth_map = None  # Populated by depth_map method
         self.image_paths = []
+        self.sequential_log = None   # per-frame chain log (sequential alignment)
+        self._breathing_transforms = None
+        self._breathing_index = {}   # path → frame index
+        self._progress_offset = 0
+        self._progress_total = None
         self.Algorithm = algorithms.Algorithm()
 
     @property
@@ -104,9 +111,84 @@ class LaplacianPyramid:
 
     def _get_reference_index(self):
         strategy = self.config.alignment_reference
-        if strategy == "middle":
-            return len(self.image_paths) // 2
+        n = len(self.image_paths)
+        if strategy == "middle" and n > 0:
+            return n // 2
         return 0
+
+    # ─── Sequential (chained) alignment: focus breathing compensation ───
+
+    def _is_sequential(self):
+        """True when chaining frame-to-frame estimates instead of one global ref.
+
+        Activated by alignment_mode="breathing", or by the alignment_reference
+        "previous" strategy with any non-auto mode.
+        """
+        mode = self._resolve_alignment_mode()
+        if mode == "breathing":
+            return True
+        if self.config.alignment_reference == "previous":
+            return mode in ("translation", "euclidean", "similarity", "affine")
+        return False
+
+    def _prepare_alignment(self, signals=None, progress_callback=None, total_mult=2):
+        """Precompute per-frame transforms for sequential (breathing) alignment.
+
+        Pair deltas are estimated in parallel by the Algorithm, then composed
+        into a chain anchored at the configured reference frame.
+
+        Returns False if the stack was cancelled.
+        """
+        self._progress_offset = 0
+        self._progress_total = None
+        self._breathing_transforms = None
+        self._breathing_index = {}
+        self.sequential_log = None
+
+        if not self._is_sequential() or len(self.image_paths) < 2:
+            return True
+
+        n = len(self.image_paths)
+        self._progress_total = total_mult * n  # estimation (n) + apply (n-1 or n)
+        transforms, log = self.Algorithm.estimate_sequential_transforms(
+            self.image_paths,
+            ref_index=self._get_reference_index(),
+            alignment_mode=self._resolve_alignment_mode(),
+            scale_factor=self.config.alignment_scale_factor,
+            max_scale_step=self.config.breathing_max_scale_step,
+            precision="max" if self.config.breathing_high_precision else "default",
+            emit=lambda cur, tot, t: self._emit_progress(
+                signals, progress_callback, cur, tot, t),
+        )
+        if transforms is None:
+            logger.info("Sequential alignment cancelled")
+            return False
+
+        self._breathing_transforms = transforms
+        self._breathing_index = {p: i for i, p in enumerate(self.image_paths)}
+        self.sequential_log = log
+        self._progress_offset = n  # later phases report on top of estimation
+        return True
+
+    def _sequential_warp_kwargs(self):
+        """Warp options for the sequential path.
+
+        Lanczos + replicate in both precision modes: the resampling, not the
+        estimator, accounts for nearly all of the sharpness gain over
+        bilinear, at little extra cost (measured on a 50-frame 24MP stack).
+        """
+        return {"interpolation": cv2.INTER_LANCZOS4,
+                "border_mode": cv2.BORDER_REPLICATE}
+
+    def _load_ref_frame(self):
+        """Load frame 0, warped into reference space when chaining."""
+        img = self.Algorithm.load_image(self.image_paths[0])
+        if self._is_sequential() and self._breathing_transforms is not None:
+            img = self.Algorithm.apply_transform_matrix(
+                img, self._breathing_transforms[0],
+                **self._sequential_warp_kwargs(),
+            )
+        return img
 
     def _resolve_alignment_mode(self):
         """Resolve alignment mode from config, handling backward compat."""
@@ -120,6 +202,18 @@ class LaplacianPyramid:
 
     def _load_and_align(self, ref_image, path):
         """Load an image and align it to the reference. Returns float32."""
+        if self._is_sequential() and self._breathing_transforms is not None:
+            # Sequential mode: each frame has its composed transform ready.
+            # Transforms were estimated on frames matched to frame 0's
+            # dimensions (#29), so match before warping too.
+            img = self.Algorithm.load_image(path)
+            if img is not None and ref_image is not None:
+                img = self.Algorithm._match_dimensions(ref_image, img)
+            idx = self._breathing_index.get(path)
+            M = self._breathing_transforms[idx] if idx is not None else None
+            return self.Algorithm.apply_transform_matrix(
+                img, M, **self._sequential_warp_kwargs(),
+            )
         return self.Algorithm.align_image_pair(
             ref_image, path,
             scale_factor=self.config.alignment_scale_factor,
@@ -164,13 +258,19 @@ class LaplacianPyramid:
         self.Algorithm.alignment_shifts = []
 
         # Use fully GPU-resident path when CuPy is available
-        if self._can_use_cupy_path():
+        use_cupy = self._can_use_cupy_path()
+        # Sequential (breathing) alignment adds an estimation phase up front
+        if not self._prepare_alignment(signals, progress_callback,
+                                       total_mult=3 if use_cupy else 2):
+            return
+
+        if use_cupy:
             logger.info("Using CuPy GPU-resident pipeline (use_gpu=True, CuPy available)")
             return self._align_and_stack_laplacian_cupy(signals, progress_callback)
         else:
             logger.info(f"Using CPU pipeline (use_gpu={self.config.use_gpu}, CuPy={_HAS_CUPY})")
 
-        ref_image = self.Algorithm.align_image_pair(self.image_paths[0], self.image_paths[0])
+        ref_image = self._load_ref_frame()
         fused_pyr = self.Algorithm.generate_laplacian_pyramid(
             ref_image, self.pyramid_num_levels
         )
@@ -254,7 +354,7 @@ class LaplacianPyramid:
 
         # ── Phase 1: Align ALL images on CPU (parallel) ──
         t_align = time.time()
-        ref_image = self.Algorithm.align_image_pair(paths[0], paths[0])
+        ref_image = self._load_ref_frame()
         aligned_images = [ref_image]
 
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
@@ -516,8 +616,10 @@ class LaplacianPyramid:
         self.apply_gpu_settings()
         self.Algorithm.reset_cancel()
         self.Algorithm.alignment_shifts = []
+        if not self._prepare_alignment(signals, progress_callback, total_mult=2):
+            return
 
-        ref_image = self.Algorithm.load_image(self.image_paths[0])
+        ref_image = self._load_ref_frame()
 
         def image_iter():
             yield 0, ref_image
@@ -589,8 +691,10 @@ class LaplacianPyramid:
         self.apply_gpu_settings()
         self.Algorithm.reset_cancel()
         self.Algorithm.alignment_shifts = []
+        if not self._prepare_alignment(signals, progress_callback, total_mult=2):
+            return
 
-        ref_image = self.Algorithm.load_image(self.image_paths[0])
+        ref_image = self._load_ref_frame()
 
         def image_iter():
             yield 0, ref_image
@@ -653,7 +757,10 @@ class LaplacianPyramid:
         self.apply_gpu_settings()
         self.Algorithm.reset_cancel()
         self.Algorithm.alignment_shifts = []
-        ref_image = self.Algorithm.load_image(self.image_paths[0])
+        if not self._prepare_alignment(signals, progress_callback, total_mult=2):
+            return
+
+        ref_image = self._load_ref_frame()
 
         def image_iter():
             yield 0, ref_image
@@ -678,6 +785,10 @@ class LaplacianPyramid:
     # ─── Progress ───
 
     def _emit_progress(self, signals, progress_callback, current, total, time_taken):
+        # Sequential alignment has extra phases (estimation); progress totals
+        # and offsets are adjusted so the bar stays monotonic.
+        current += self._progress_offset
+        total = self._progress_total if self._progress_total is not None else total
         if signals is not None:
             signals.finished_inter_task.emit(
                 ["finished_image", current, total, time_taken]

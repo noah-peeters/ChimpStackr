@@ -11,7 +11,7 @@ Open-source focus stacking application for Windows, macOS, and Linux.
 ## Features
 
 - **4 stacking algorithms:** Laplacian Pyramid, Weighted Average, Depth Map, Exposure Fusion (HDR)
-- **Automatic alignment:** Translation, Euclidean (rotation), Similarity (rotation + scale, for focus breathing), or Affine correction
+- **Automatic alignment:** Translation, Euclidean (rotation), Similarity (rotation + scale), Affine correction, or Breathing (sequential chained alignment for focus breathing compensation, like Helicon Focus)
 - **16-bit pipeline:** Full bit-depth preservation from RAW to output
 - **Auto-crop:** Removes black edges from alignment shifts
 - **Auto-tuning:** Parameters auto-detected from image resolution
@@ -51,6 +51,11 @@ chimpstackr-cli -i images/*.jpg -o result.png \
   --pyramid-levels 8 \
   --auto-crop \
   --quality-report
+
+# Strong focus breathing (e.g. macro lens racked by focus): sequential
+# chained alignment with a 5% max scale change per frame pair
+chimpstackr-cli -i images/*.jpg -o result.tif \
+  --align --alignment-mode breathing --alignment-ref middle --max-scale-step 0.05
 ```
 
 **Available methods:** `laplacian` (default), `weighted_average`, `depth_map`
