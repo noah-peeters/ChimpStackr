@@ -132,6 +132,17 @@ Uses OpenCV's Mertens exposure fusion algorithm.
 - Scenes where lighting changed during the stack
 - NOT recommended for pure focus stacking (use Pyramid or Depth Map instead)
 
+## GPU stacking
+
+With **Use GPU** (GUI, under Advanced) or `--gpu` (CLI), the Pyramid and Hybrid methods run on the GPU through OpenCL, which every NVIDIA, AMD, Intel and Apple GPU driver provides -- no CUDA or other toolkit needed.
+
+- Worker threads decode frames (and estimate alignment); each frame is uploaded once (8-bit when the source is 8-bit), then warped, decomposed and fused on the GPU, and only the final image is read back.
+- The GPU code mirrors the CPU code step by step, so results are the same apart from float rounding (and warp interpolation, which OpenCV approximates with 1/32-pixel steps).
+- If no OpenCL GPU is found, or anything fails on the GPU (driver error, out of GPU memory), stacking continues on the CPU automatically.
+- The other methods, slabbing and the Pyramid contrast threshold always run on the CPU.
+
+On a 50-frame 24 MP stack with breathing alignment (RTX 4070, while other apps were using the GPU): Hybrid 87 s -> 20 s, Pyramid 58 s -> 25 s, with lower RAM use. Most of the remaining time is alignment estimation, which runs on the CPU.
+
 ## Slabbing
 
 For very deep stacks (hundreds of frames), any method except HDR can stack in overlapping chunks ("slabs"), then stack the slab results with the same method.

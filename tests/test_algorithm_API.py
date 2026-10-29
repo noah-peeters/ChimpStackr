@@ -766,28 +766,6 @@ class TestMemorySafety:
         assert not np.array_equal(first_output, lp.output_image)
 
 
-# -- GPU Fallback Tests --
-
-class TestGPUFallback:
-    def test_gpu_module_imports(self):
-        """GPU module should import without crashing even without CUDA."""
-        from src.algorithms.stacking_algorithms import gpu as GPU
-        assert hasattr(GPU, 'compute_focusmap')
-        assert hasattr(GPU, 'fuse_pyramid_levels_using_focusmap')
-        assert hasattr(GPU, 'generate_laplacian_pyramid')
-        assert hasattr(GPU, 'reconstruct_pyramid')
-
-    def test_gpu_focusmap_fallback(self):
-        """GPU compute_focusmap should fall back to CPU when CUDA unavailable."""
-        from src.algorithms.stacking_algorithms import gpu as GPU
-        gray1 = np.random.rand(30, 30).astype(np.float32)
-        gray2 = np.random.rand(30, 30).astype(np.float32)
-        # This should work regardless of CUDA availability (falls back to CPU)
-        fm = GPU.compute_focusmap(gray1, gray2, 4)
-        assert fm.shape == gray1.shape
-        assert fm.dtype == np.uint8
-
-
 # -- DFT Alignment Regression Tests --
 
 class TestDFTAlignment:

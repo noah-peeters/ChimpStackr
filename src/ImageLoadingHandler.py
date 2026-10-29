@@ -182,6 +182,27 @@ class ImageLoadingHandler:
             logger.warning("Unsupported format: %s", extension)
             return None
 
+    def read_image_native(self, path):
+        """
+        8-bit sources as uint8 BGR (4x less data to move, e.g. to the GPU);
+        everything else as float32 BGR, exactly like read_image_as_float32.
+        Applies EXIF orientation.
+        """
+        _, extension = os.path.splitext(path)
+        if extension[1:].lower() in self.supported_formats:
+            try:
+                orientation = _read_exif_orientation(path)
+                img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+                if img is not None and img.dtype == np.uint8:
+                    if img.ndim == 2:
+                        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+                    elif img.shape[2] == 4:
+                        img = np.ascontiguousarray(img[:, :, :3])
+                    return _apply_exif_orientation(img, orientation)
+            except Exception as e:
+                logger.error("Failed to load image %s: %s", path, e)
+        return self.read_image_as_float32(path)
+
     def read_image_as_gray_u8(self, path):
         """
         Load image as 8-bit grayscale (for alignment estimation).

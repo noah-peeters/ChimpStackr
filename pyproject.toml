@@ -17,6 +17,7 @@ dependencies = [
     "rawpy>=0.18",
     "imageio>=2.29",
     "pyfftw>=0.13",
+    "pyopencl>=2022.1",
     "scipy>=1.10",
 ]
 
