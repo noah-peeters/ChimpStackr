@@ -757,7 +757,8 @@ __kernel void var_cols(__global const float *rows, __global float *out, int w, i
 # Tests can run the kernels on a CPU OpenCL implementation (e.g. pocl)
 _ANY_DEVICE = os.environ.get("CHIMPSTACKR_OPENCL_ANY_DEVICE") == "1"
 _devices = None
-_gpus = {}
+_gpus = {}            # device index -> GPU, or the exception its setup raised
+_gpus_lock = threading.Lock()
 
 
 def devices():
@@ -787,14 +788,23 @@ def device_names():
 
 
 def get(index=0):
-    """Shared GPU context for a device (kernels are compiled once)."""
+    """Shared GPU context for a device (kernels are compiled once). Raises if
+    the device can't be used (e.g. its driver fails to build the kernels);
+    that is remembered, so later calls fail fast."""
     devs = devices()
     if not devs:
         raise RuntimeError("No OpenCL GPU available")
     index = min(max(int(index), 0), len(devs) - 1)
-    if index not in _gpus:
-        _gpus[index] = GPU(devs[index])
-    return _gpus[index]
+    with _gpus_lock:
+        if index not in _gpus:
+            try:
+                _gpus[index] = GPU(devs[index])
+            except Exception as exc:
+                _gpus[index] = exc
+        gpu = _gpus[index]
+    if isinstance(gpu, Exception):
+        raise RuntimeError(f"GPU not usable: {gpu}") from gpu
+    return gpu
 
 
 class GPU:

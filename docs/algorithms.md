@@ -134,7 +134,7 @@ Uses OpenCV's Mertens exposure fusion algorithm.
 
 ## GPU stacking
 
-With **Use GPU** (GUI, under Advanced) or `--gpu` (CLI), stacking and alignment run on the GPU through OpenCL, which every NVIDIA, AMD, Intel and Apple GPU driver provides -- no CUDA or other toolkit needed. This covers every method (with slabbing and the Pyramid contrast threshold) and the alignment estimation.
+When a GPU is available, stacking and alignment run on it (turn this off with **Use GPU** under Advanced in the GUI, or `--cpu` on the CLI). They run through OpenCL, which every NVIDIA, AMD, Intel and Apple GPU driver provides -- no CUDA or other toolkit needed. This covers every method (with slabbing and the Pyramid contrast threshold) and the alignment estimation.
 
 - Worker threads decode frames; each frame is uploaded once (8-bit when the source is 8-bit), then warped, decomposed and fused on the GPU, and only the final image is read back. Uploads run on their own queue, so they overlap the previous frame's processing.
 - Alignment: the CPU only runs ORB feature matching; the pre-warp, the ECC cascade levels and the ECC iterations themselves run on the GPU. With breathing alignment, each frame is stacked as soon as its transform is known, so estimation and stacking overlap.

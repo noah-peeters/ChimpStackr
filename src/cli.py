@@ -132,12 +132,20 @@ def parse_args():
         default=False,
         help="Legacy: equivalent to --alignment-mode similarity",
     )
-    parser.add_argument(
+    device = parser.add_mutually_exclusive_group()
+    device.add_argument(
         "--gpu",
+        dest="gpu",
         action="store_true",
-        default=False,
-        help="Stack and align on the GPU (every method; OpenCL, any GPU vendor). "
-             "Falls back to the CPU if no GPU is available",
+        default=True,
+        help="Stack and align on the GPU (default; every method; OpenCL, any GPU "
+             "vendor). Falls back to the CPU if no GPU is available",
+    )
+    device.add_argument(
+        "--cpu",
+        dest="gpu",
+        action="store_false",
+        help="Stack on the CPU only",
     )
     parser.add_argument(
         "--gpu-id",
