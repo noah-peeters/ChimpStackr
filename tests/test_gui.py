@@ -10,9 +10,12 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-qtc = pytest.importorskip("PySide6.QtCore")
-qtg = pytest.importorskip("PySide6.QtGui")
-qtw = pytest.importorskip("PySide6.QtWidgets")
+try:
+    import PySide6.QtCore as qtc
+    import PySide6.QtGui as qtg
+    import PySide6.QtWidgets as qtw
+except ImportError as exc:     # e.g. no libEGL on a headless Linux box
+    pytest.skip(f"Qt GUI libraries not available: {exc}", allow_module_level=True)
 
 import src.settings as settings  # noqa: E402
 

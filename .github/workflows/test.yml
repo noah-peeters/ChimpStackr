@@ -54,6 +54,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest pytest-cov
 
+      # Qt's GUI module needs these even offscreen (tests/test_gui.py)
+      - name: Qt system libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+
       # Runners have no GPU: a CPU OpenCL implementation runs the GPU kernels
       - name: CPU OpenCL for the GPU tests
         if: runner.os == 'Linux'
@@ -71,4 +76,6 @@ jobs:
       # Runs everything under tests/ (pyproject testpaths) — new test files
       # are picked up automatically, no need to list them here
       - name: Run tests
+        env:
+          QT_QPA_PLATFORM: offscreen
         run: python -m pytest -v --cov --cov-report=term

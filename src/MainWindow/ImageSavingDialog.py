@@ -47,7 +47,10 @@ def encode(image, fmt, bit_depth=8, quality=95, compression=4):
 def write_image(path, image, fmt, bit_depth=8, quality=95, compression=4):
     """Write the export; raises on failure."""
     data, params = encode(image, fmt, bit_depth, quality, compression)
-    ok, buf = cv2.imencode("." + _BY_KEY[fmt][2], data, params)
+    try:
+        ok, buf = cv2.imencode("." + _BY_KEY[fmt][2], data, params)
+    except cv2.error as exc:
+        raise IOError(f"This build can't write {_BY_KEY[fmt][1]} files ({exc.err})") from exc
     if not ok:
         raise IOError(f"Could not encode the image as {fmt}")
     # imencode + write handles non-ASCII paths on Windows, which imwrite doesn't
