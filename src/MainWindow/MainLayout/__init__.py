@@ -195,11 +195,14 @@ class CenterWidget(qtw.QWidget):
             method_short = method_names.get(method, method)
             if aligned and mainWin:
                 mode = mainWin.LaplacianAlgorithm._resolve_alignment_mode()
+                if mainWin.LaplacianAlgorithm._is_sequential():
+                    mode = "breathing"  # also covers Reference=previous chaining
                 mode_names = {
                     "translation": "Trans",
                     "euclidean": "Euclid",
                     "similarity": "Simil",
                     "affine": "Affine",
+                    "breathing": "Breath",
                 }
                 align_tag = f"_{mode_names.get(mode, mode)}"
             else:
