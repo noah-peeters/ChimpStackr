@@ -236,6 +236,9 @@ if sys.platform == 'darwin':
             'CFBundleVersion': _ver.lstrip('v'),
             'NSHighResolutionCapable': True,
             'NSRequiresAquaSystemAppearance': False,  # Support dark mode
+            # App Nap would throttle stacks (and speed tests) running while the
+            # window is hidden or the screen is locked
+            'NSAppSleepDisabled': True,
             'LSMinimumSystemVersion': '11.0',
             'CFBundleDocumentTypes': [
                 {

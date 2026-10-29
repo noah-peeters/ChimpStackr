@@ -36,13 +36,14 @@ def gpu(monkeypatch):
     """A fake usable GPU with a given measurement."""
     state = {"entry": entry((1.0, 0.02), (0.0, 0.08)), "measured": 0, "info": dict(INFO)}
 
-    def fake_measure(method, gpu_index=0, report=None):
+    def fake_measure(method, gpu_index=0, report=None, check_load=False):
         state["measured"] += 1
         if report:
             report("Measuring GPU speed (1/4)…")
         return state["entry"]
     monkeypatch.setattr(compute, "gpu_info", lambda index=0: state["info"])
     monkeypatch.setattr(compute, "measure", fake_measure)
+    monkeypatch.setattr(compute, "system_busy", lambda: state.get("busy", False))
     return state
 
 
@@ -136,7 +137,7 @@ class TestBackground:
         import threading
         started, release = threading.Event(), threading.Event()
 
-        def slow_measure(method, gpu_index=0, report=None):
+        def slow_measure(method, gpu_index=0, report=None, check_load=False):
             started.set()
             release.wait(5)
             if compute.STOP.is_set():          # measure() checks STOP between steps
@@ -158,6 +159,19 @@ class TestBackground:
         assert compute.missing_methods() == list(compute.GPU_FRAMES_NEEDED)   # nothing half-saved
         got_lock[0].__exit__(None, None, None)
         assert not compute.STOP.is_set()
+
+    def test_busy_computer_postpones_measuring(self, gpu):
+        gpu["busy"] = True
+        assert compute.measure_in_background(["hybrid"]) == [] and gpu["measured"] == 0
+
+    def test_load_check_cancels_a_real_measurement(self, monkeypatch):
+        monkeypatch.setattr(compute, "system_busy", lambda: True)
+        with pytest.raises(compute.Cancelled):
+            compute.measure("laplacian", check_load=True)
+
+    def test_others_cpu(self):
+        cores = compute.others_cpu_cores()
+        assert cores is None or cores >= 0
 
     def test_busy_device_isnt_waited_for(self, gpu):
         with compute.yield_to_stack():

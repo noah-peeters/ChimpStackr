@@ -58,6 +58,35 @@ class Cancelled(Exception):
     pass
 
 
+def others_cpu_cores():
+    """CPU cores other processes are using right now (from `ps`), or None
+    where that isn't available (Windows)."""
+    if sys.platform == "win32":
+        return None
+    import subprocess
+    try:
+        out = subprocess.run(["ps", "-A", "-o", "pid=,%cpu="], capture_output=True, text=True,
+                             timeout=5).stdout
+    except Exception:
+        return None
+    me = os.getpid()
+    total = 0.0
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit() and int(parts[0]) != me:
+            try:
+                total += float(parts[1].replace(",", "."))
+            except ValueError:
+                pass
+    return total / 100.0
+
+
+def system_busy():
+    """True when other programs use enough CPU to skew a speed measurement."""
+    cores = others_cpu_cores()
+    return cores is not None and cores > max(1.5, 0.3 * (os.cpu_count() or 4))
+
+
 def yield_to_stack():
     """Called by a stack before it starts: stops background measuring and
     waits for its current step. Use as `with yield_to_stack(): ...`."""
@@ -253,11 +282,12 @@ def _time_stack(paths, method, gpu, gpu_index, align=True):
     return elapsed / len(paths)
 
 
-def measure(method, gpu_index=0, report=None):
+def measure(method, gpu_index=0, report=None, check_load=False):
     """Time short stacks of synthetic frames on the GPU and the CPU, at two
     frame sizes and two frame counts, so the fixed cost of a stack (setup,
     the final read-back) and the cost per frame can be told apart. Returns
-    the cache entry. `report(text)` gets progress."""
+    the cache entry. `report(text)` gets progress. With check_load, gives up
+    (Cancelled) when other programs keep the CPU busy."""
     tmp = tempfile.mkdtemp(prefix="chimpstackr-calibrate-")
     try:
         os.makedirs(os.path.join(tmp, "warm"))
@@ -276,32 +306,30 @@ def measure(method, gpu_index=0, report=None):
             os.makedirs(folder)
             paths = _synthetic_frames(folder, size, n_large)
             result["mp"].append(size[0] * size[1] / 1e6)
-            for gpu in (True, False):
+            times = {"gpu": [], "cpu": []}
+            for n in (n_small, n_large):
                 step += 1
-                if STOP.is_set():
-                    raise Cancelled()
                 if report:
-                    report(f"Measuring {'GPU' if gpu else 'CPU'} speed ({step}/{steps})…")
-                key = "gpu" if gpu else "cpu"
-                if gpu and result["gpu_error"]:
-                    continue
-                try:
-                    times = []
-                    for n in (n_small, n_large):
-                        if STOP.is_set():
-                            raise Cancelled()
-                        t = _time_stack(paths[:n], method, gpu, gpu_index) * n
+                    report(f"step {step} of {steps}…")
+                # GPU and CPU back to back, so changing load hits both alike
+                for dev in ("gpu", "cpu"):
+                    if dev == "gpu" and result["gpu_error"]:
+                        continue
+                    if STOP.is_set() or (check_load and system_busy()):
+                        raise Cancelled()
+                    try:
+                        t = _time_stack(paths[:n], method, dev == "gpu", gpu_index) * n
                         if t < 1.0:      # short runs are noisy: best of two
-                            t = min(t, _time_stack(paths[:n], method, gpu, gpu_index) * n)
-                        times.append(t)
-                except Cancelled:
-                    raise
-                except Exception as exc:
-                    if not gpu:
-                        raise
-                    result["gpu_error"] = str(exc)[:200]
-                    continue
-                result[key].append(times)
+                            t = min(t, _time_stack(paths[:n], method, dev == "gpu", gpu_index) * n)
+                    except Exception as exc:
+                        if dev == "cpu":
+                            raise
+                        result["gpu_error"] = str(exc)[:200]
+                        continue
+                    times[dev].append(t)
+            for dev in ("gpu", "cpu"):
+                if len(times[dev]) == 2:
+                    result[dev].append(times[dev])
         result["measured"] = time.time()
         return result
     finally:
@@ -336,7 +364,7 @@ def predict(entry, mp, frames):
     return tuple(out)
 
 
-def measurement(method, gpu_index=0, info=None, calibrate=True, report=None):
+def measurement(method, gpu_index=0, info=None, calibrate=True, report=None, check_load=False):
     """The cached measurement for this GPU/driver/app version and method,
     measuring it first if needed (and allowed)."""
     info = info or gpu_info(gpu_index)
@@ -346,7 +374,7 @@ def measurement(method, gpu_index=0, info=None, calibrate=True, report=None):
     entry = _load_cache().get("entries", {}).get(key)
     if entry is None and calibrate:
         logger.info(f"Measuring GPU vs CPU speed for {method} on {info['name']}")
-        entry = measure(method, gpu_index, report)
+        entry = measure(method, gpu_index, report, check_load)
         with _lock:
             data = _load_cache()
             data.setdefault("entries", {})[key] = entry
@@ -366,7 +394,8 @@ def missing_methods(gpu_index=0, methods=None):
 def measure_in_background(methods, gpu_index=0, report=None):
     """Measure the given methods while nothing else runs; returns the
     methods measured. Stops early (losing only the method in progress) when
-    a stack starts (yield_to_stack). Doesn't wait for a busy device."""
+    a stack starts (yield_to_stack) or other programs keep the CPU busy (a
+    measurement then would be skewed). Doesn't wait for a busy device."""
     if not WORK_LOCK.acquire(blocking=False):
         return []
     done = []
@@ -376,8 +405,10 @@ def measure_in_background(methods, gpu_index=0, report=None):
         if info is None:
             return []
         for method in methods:
+            if system_busy():
+                break
             try:
-                measurement(method, gpu_index, info, True, report)
+                measurement(method, gpu_index, info, True, report, check_load=True)
             except Cancelled:
                 break
             done.append(method)
