@@ -519,10 +519,28 @@ class Algorithm:
             gray = np.asarray(gray, dtype=np.float32)
         return gray
 
+    @staticmethod
+    def _is_plausible_warp(M, shape):
+        """Reject degenerate feature-match transforms (e.g. near-zero scale
+        from junk matches on a blurry frame). Limits are generous: focus
+        stacks only ever need modest scale, rotation and shift."""
+        h, w = shape[:2]
+        L = M[:, :2].astype(np.float64)
+        scale = math.sqrt(abs(np.linalg.det(L)))
+        if not 0.7 <= scale <= 1.4:
+            return False
+        sv = np.linalg.svd(L, compute_uv=False)
+        if sv[1] <= 0 or sv[0] / sv[1] > 1.25:  # strong shear / anisotropy
+            return False
+        if abs(math.degrees(math.atan2(L[1, 0], L[0, 0]))) > 15:
+            return False
+        return abs(M[0, 2]) <= 0.25 * w and abs(M[1, 2]) <= 0.25 * h
+
     def _feature_match(self, ref_u8, align_u8, mode="similarity"):
         """
         ORB feature matching → estimateAffinePartial2D (4 DOF) or estimateAffine2D (6 DOF).
-        Returns 2x3 warp matrix or None if insufficient matches.
+        Returns 2x3 warp matrix, or None if there are insufficient matches or
+        the result is implausible (callers then fall back to ECC).
         """
         # OpenCV's RANSAC draws samples from the per-thread global RNG. In
         # parallel pair estimation the RNG history depends on which pairs
@@ -567,6 +585,8 @@ class Algorithm:
             )
 
         if M is None or (inliers is not None and inliers.sum() < min_matches):
+            return None
+        if not self._is_plausible_warp(M, ref_u8.shape):
             return None
         return M.astype(np.float32)
 
