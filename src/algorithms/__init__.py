@@ -121,6 +121,10 @@ class Algorithm:
         """Load image from path as float32 (preserving full bit depth)."""
         return self.ImageLoadingHandler.read_image_as_float32(path)
 
+    def load_gray_u8(self, path):
+        """Load image as 8-bit grayscale (fast path for alignment estimation)."""
+        return self.ImageLoadingHandler.read_image_as_gray_u8(path)
+
     @staticmethod
     def _match_dimensions(ref_im, im_to_align):
         """Resize im_to_align to match ref_im dimensions if they differ.
@@ -869,9 +873,10 @@ class Algorithm:
     # breathing lenses; instead we estimate a small transform per consecutive
     # pair and compose the chain onto the reference frame.
 
-    # Measured peak working memory per pair-estimation worker, in bytes per
-    # image pixel (24MP stack: ~0.96 GB/worker default, ~1.68 GB/worker max)
-    _PAIR_BYTES_PER_PIXEL = {"max": 70, "default": 40}
+    # Peak working memory per pair-estimation worker, in bytes per image
+    # pixel: default works on 8-bit gray frames, max on float color frames
+    # (24MP: ~1.68 GB/worker max)
+    _PAIR_BYTES_PER_PIXEL = {"max": 70, "default": 12}
 
     def _sequential_worker_count(self, ref_template, precision, n_pairs):
         """Parallel pair-estimation workers: one per physical core (OpenCV
@@ -923,9 +928,14 @@ class Algorithm:
         if n < 2:
             return [np.eye(2, 3, dtype=np.float32) for _ in range(n)], []
 
+        # The default-precision estimators work on 8-bit grayscale, so frames
+        # are decoded straight to gray: much faster, and ~12x less memory per
+        # worker. Max precision optimises on native-bit-depth float data.
+        load = self.load_image if precision == "max" else self.load_gray_u8
+
         # Every frame is matched to frame 0's dimensions (#29) so all pair
         # transforms live in one coordinate system and the chain composes
-        ref_template = self.load_image(paths[0])
+        ref_template = load(paths[0])
         if ref_template is None:
             return [np.eye(2, 3, dtype=np.float32) for _ in range(n)], []
 
@@ -945,8 +955,8 @@ class Algorithm:
             if self.is_cancelled:
                 return i, M, meta, 0.0
             try:
-                ref = self.load_image(paths[i])
-                src = self.load_image(paths[i + 1])
+                ref = load(paths[i])
+                src = load(paths[i + 1])
                 if ref is None or src is None:
                     raise ValueError("Image failed to load")
                 ref = self._match_dimensions(ref_template, ref)
