@@ -2,7 +2,6 @@
     Time remaining estimator.
     Simple and reliable: tracks time per image, predicts from rolling average.
 """
-import time
 from collections import deque
 
 

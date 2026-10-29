@@ -1,14 +1,14 @@
 """
 Test loading of RAW and jpg images, including edge cases.
 """
-import os, sys
+import os
+import sys
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
 sys.path.insert(0, parentdir)
 
 import numpy as np
-import pytest
 
 from src.ImageLoadingHandler import ImageLoadingHandler
 import src.settings as settings

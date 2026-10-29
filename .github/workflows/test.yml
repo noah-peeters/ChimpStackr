@@ -6,12 +6,38 @@ on:
   pull_request:
     branches: [master]
 
+# A newer push to the same branch/PR cancels the run still in progress
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Ruff
+        run: |
+          pip install "ruff>=0.6"
+          ruff check --output-format=github .
+
+  test:
+    name: test (${{ matrix.os }}, ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        # Every supported Python on Linux, plus the other shipped platforms
+        os: [ubuntu-latest]
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: windows-latest
+            python-version: "3.12"
+          - os: macos-latest
+            python-version: "3.12"
 
     steps:
       - uses: actions/checkout@v7
@@ -20,12 +46,15 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pytest
+          pip install -r requirements.txt pytest pytest-cov
 
-      - name: Run tests (no Qt)
-        run: |
-          python -m pytest tests/test_ImageLoadingHandler.py tests/test_algorithm_API.py tests/test_cli.py -v
+      # Runs everything under tests/ (pyproject testpaths) — new test files
+      # are picked up automatically, no need to list them here
+      - name: Run tests
+        run: python -m pytest -v --cov --cov-report=term

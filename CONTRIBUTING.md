@@ -11,16 +11,23 @@ cd ChimpStackr
 python3 -m venv .venv
 source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 
-# Install dependencies
-pip install -r requirements.txt
-pip install pytest
+# Install the app plus dev tools (pytest, ruff, pre-commit, ...)
+pip install -e ".[dev]"
 
 # Verify everything works
-pytest tests/ -v
-python src/run.py  # Launch GUI
+pytest              # runs everything under tests/
+ruff check .        # lint (same check CI runs)
+python src/run.py   # Launch GUI
+
+# Optional: lint automatically before each commit
+pre-commit install
 ```
 
 **Python version:** 3.9 - 3.13. PySide6 does not yet support 3.14.
+
+CI runs the lint check and the full test suite on every pull request (all
+supported Python versions on Linux, plus Windows and macOS). New test files in
+`tests/` are picked up automatically.
 
 ## Project Structure
 

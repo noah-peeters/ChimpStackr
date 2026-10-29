@@ -16,7 +16,6 @@ Three acceleration tiers (auto-selected based on available hardware):
     Everything on CPU using cv2.blur variance (O(1)/pixel) and
     Numba parallel fuse. Still 1.35x faster than old per-pixel kernel.
 """
-import math
 import numpy as np
 import cv2
 
@@ -348,7 +347,6 @@ def _cupy_fuse_n_way_batch(images_np, num_levels, kernel_size, progress_callback
     All images must fit in GPU memory simultaneously.
     """
     N = len(images_np)
-    k = kernel_size | 1
 
     # Upload all images and build pyramids on GPU
     pyramids = []

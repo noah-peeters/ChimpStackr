@@ -806,7 +806,7 @@ def compute_similarity(
 
     # TODO: Most time is spent here
     # Register image for scale/rotation
-    for ii in range(numiter):
+    for _ in range(numiter):
         newscale, newangle = _get_ang_scale([im0, im2], exponent, constraints_dynamic)
         scale *= newscale
         angle += newangle

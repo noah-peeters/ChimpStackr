@@ -2,8 +2,8 @@
     Center widget layout for MainWindow.
     Parent of loaded images widget, ImageViewer and splitter layout(s).
 """
-import os, tempfile
-from datetime import datetime
+import os
+import tempfile
 import cv2
 import numpy as np
 import PySide6.QtCore as qtc

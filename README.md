@@ -86,9 +86,10 @@ python src/run.py
 # Run CLI
 python -m src.cli --help
 
-# Run tests
-pip install pytest
-pytest tests/ -v
+# Run tests and lint
+pip install -e ".[dev]"
+pytest
+ruff check .
 ```
 
 ## Packaging

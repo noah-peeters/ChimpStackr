@@ -29,7 +29,7 @@ currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
 sys.path.insert(0, parentdir)
 
-from src.config import AlgorithmConfig, AppConfig, auto_detect_params
+from src.config import AlgorithmConfig, auto_detect_params
 import src.settings as settings
 from src.algorithms.API import LaplacianPyramid
 from src.ImageLoadingHandler import ImageLoadingHandler
@@ -221,7 +221,7 @@ def main():
               file=sys.stderr)
         sys.exit(1)
 
-    print(f"ChimpStackr CLI - Focus Stacking")
+    print("ChimpStackr CLI - Focus Stacking")
     print(f"  Input: {len(input_paths)} images")
     print(f"  Output: {args.output}")
     print(f"  Mode: {'Align + Stack' if args.align else 'Stack only'}")

@@ -1,14 +1,15 @@
 """
 Test the CLI interface.
 """
-import os, sys, subprocess, tempfile
+import os
+import sys
+import subprocess
+import tempfile
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
 sys.path.insert(0, parentdir)
 
-import pytest
-import numpy as np
 import cv2
 
 

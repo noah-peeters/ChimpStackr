@@ -3,7 +3,9 @@ Tests for sequential (chained) alignment — Helicon-style focus breathing compe
 
 No PySide6/Qt dependency required.
 """
-import os, sys, subprocess
+import os
+import sys
+import subprocess
 
 currentdir = os.path.dirname(os.path.realpath(__file__))
 parentdir = os.path.dirname(currentdir)
