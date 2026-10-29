@@ -885,7 +885,7 @@ class SettingsDialog(qtw.QDialog):
             else:
                 g, c = times
                 rows.append(f"{title}: GPU {c / g:.1f}× faster" if g <= c else f"{title}: CPU {g / c:.1f}× faster")
-        text = ("Measured on this computer (50 × 24 MP):\n" + "\n".join(rows)) if rows else \
+        text = ("Measured here, for 50 frames of 24 MP:\n" + "\n".join(rows)) if rows else \
             "ChimpStackr measures GPU and CPU speed once per method in the background (about " \
             "15 s each, paused while you stack). Until then it uses the GPU."
         if self._measuring:
@@ -905,8 +905,9 @@ class SettingsDialog(qtw.QDialog):
         elif not self.gpu_status.ready:
             self.gpu_note.setText("Preparing the GPU…")
         elif mode == "auto":
-            self.gpu_note.setText("Small frames, stacks too big for the GPU's memory, and methods the CPU "
-                                  "measured faster at run on the CPU; everything else on the GPU.")
+            self.gpu_note.setText("Each stack runs on whichever a short speed test on this computer "
+                                  "found faster for its frame size and count. Stacks too big for the "
+                                  "GPU's memory run on the CPU.")
         elif mode == "gpu":
             self.gpu_note.setText("Falls back to the CPU automatically if anything fails on the GPU.")
         else:
