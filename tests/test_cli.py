@@ -12,6 +12,11 @@ sys.path.insert(0, parentdir)
 
 import cv2
 
+# The CLI stacks on the GPU by default. Run it as a user would (real GPUs
+# only): a CPU OpenCL implementation that test runs may enable for the GPU
+# tests (CHIMPSTACKR_OPENCL_ANY_DEVICE) isn't reliable in a subprocess.
+CLI_ENV = {k: v for k, v in os.environ.items() if k != "CHIMPSTACKR_OPENCL_ANY_DEVICE"}
+
 
 class TestCLI:
     def test_cli_stack_only(self):
@@ -30,6 +35,7 @@ class TestCLI:
                 capture_output=True,
                 text=True,
                 cwd=parentdir,
+                env=CLI_ENV,
                 timeout=120,
             )
             assert result.returncode == 0, f"CLI failed: {result.stderr}"
@@ -60,6 +66,7 @@ class TestCLI:
                 capture_output=True,
                 text=True,
                 cwd=parentdir,
+                env=CLI_ENV,
                 timeout=120,
             )
             assert result.returncode == 0, f"CLI failed: {result.stderr}"
@@ -86,6 +93,7 @@ class TestCLI:
                 capture_output=True,
                 text=True,
                 cwd=parentdir,
+                env=CLI_ENV,
                 timeout=120,
             )
             assert result.returncode == 0, f"CLI failed: {result.stderr}"
@@ -105,6 +113,7 @@ class TestCLI:
             capture_output=True,
             text=True,
             cwd=parentdir,
+            env=CLI_ENV,
             timeout=30,
         )
         assert result.returncode != 0
@@ -128,6 +137,7 @@ class TestCLI:
                 capture_output=True,
                 text=True,
                 cwd=parentdir,
+                env=CLI_ENV,
                 timeout=120,
             )
             assert result.returncode == 0, f"CLI failed: {result.stderr}"
@@ -146,6 +156,7 @@ class TestCLI:
             capture_output=True,
             text=True,
             cwd=parentdir,
+            env=CLI_ENV,
             timeout=30,
         )
         assert result.returncode != 0
@@ -166,6 +177,7 @@ class TestCLI:
                 capture_output=True,
                 text=True,
                 cwd=parentdir,
+                env=CLI_ENV,
                 timeout=120,
             )
             assert result.returncode == 0, f"CLI failed: {result.stderr}"
@@ -192,6 +204,7 @@ class TestCLI:
                 capture_output=True,
                 text=True,
                 cwd=parentdir,
+                env=CLI_ENV,
                 timeout=120,
             )
             assert result.returncode == 0, f"CLI failed: {result.stderr}"
@@ -216,6 +229,7 @@ class TestCLI:
                 capture_output=True,
                 text=True,
                 cwd=parentdir,
+                env=CLI_ENV,
                 timeout=120,
             )
             assert result.returncode == 0, f"CLI failed: {result.stderr}"
@@ -240,6 +254,7 @@ class TestCLI:
                 capture_output=True,
                 text=True,
                 cwd=parentdir,
+                env=CLI_ENV,
                 timeout=120,
             )
             assert result.returncode == 0, f"CLI failed: {result.stderr}"
