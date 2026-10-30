@@ -120,6 +120,7 @@ class TestWindow:
         assert window.current_result is window.results[0]
         assert window.act_export.isEnabled() and window.act_compare.isEnabled()
         assert window.has_unsaved_work
+        assert not window.viewer.compare and not window.act_compare.isChecked()   # stays in View
         window.set_compare(True)
         assert wait(app, lambda: window.viewer.before_item.isVisible())
         import src.MainWindow.ImageSavingDialog as Export
