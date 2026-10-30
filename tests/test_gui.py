@@ -105,6 +105,7 @@ class TestWindow:
 
     def test_frame_preview_and_thumbnails(self, app, window):
         window.add_paths(LOW_RES[:3])
+        assert not window.viewer.empty_state.isVisible()      # not even while decoding
         assert wait(app, lambda: window.viewer.has_image)
         assert wait(app, lambda: "frame 1 of 3" in window.info_label.info())
         item = window.sidebar.frames.item(0)

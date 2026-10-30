@@ -802,6 +802,7 @@ class Window(qtw.QMainWindow):
         self.current_result = None
         self.set_compare(False)
         self._pending_path = path
+        self.viewer.empty_state.setVisible(False)   # no drop zone while the first preview decodes
         self.viewer.show_loading(True)
         name = os.path.basename(path)
         self.info_label.setText(name)
