@@ -111,6 +111,11 @@ class TestDecide:
         d = compute.decide("auto", 6000, 4000, "hybrid", frames=50)
         assert not d.use_gpu and d.reason.startswith("CPU measured")
 
+    def test_near_ties_stay_on_the_gpu(self, gpu):
+        gpu["entry"] = entry((0.0, 0.06), (0.0, 0.05))     # CPU 1.2x faster: not clearly
+        d = compute.decide("auto", 6000, 4000, "hybrid", frames=50)
+        assert d.use_gpu and d.reason == "about as fast as the CPU"
+
     def test_frame_count_matters(self, gpu):
         # GPU: 1 s to set up, then 4x cheaper per frame
         assert compute.decide("auto", 2000, 1500, "laplacian", frames=50).use_gpu

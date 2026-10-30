@@ -11,7 +11,8 @@ when no GPU works). "auto" (the default) picks per stack:
    CPU, without measuring (the test would take longer than the stack).
    Larger frames before a measurement exists: GPU, which wins most real
    stacks.
-4. Otherwise a one-time measurement on this computer decides: short
+4. Otherwise a one-time measurement on this computer decides (the CPU
+   only when it is clearly faster, CPU_MARGIN): short
    stacks of synthetic frames (decoded, aligned and stacked like a real
    stack) at two sizes and two frame counts, on the GPU and on the CPU, for
    the chosen method. Stack time is modelled as
@@ -37,6 +38,11 @@ logger = logging.getLogger(__name__)
 
 MODES = ("auto", "gpu", "cpu")
 SMALL_MP = 1.0
+# The CPU only takes over when the test finds it clearly faster: speed tests
+# on a busy computer are noisy, near-ties are better left on the GPU, and
+# the point is catching GPUs that are much slower (as Capture One's and
+# darktable's automatic modes do)
+CPU_MARGIN = 1.5
 MEMORY_HEADROOM = 0.8          # use at most this share of the GPU's memory
 # Peak GPU memory per method in float RGB frames (w * h * 12 bytes), measured
 # on 24 MP stacks with alignment, plus 25 % headroom
@@ -318,9 +324,9 @@ def measure(method, gpu_index=0, report=None, check_load=False):
                     if STOP.is_set() or (check_load and system_busy()):
                         raise Cancelled()
                     try:
-                        t = _time_stack(paths[:n], method, dev == "gpu", gpu_index) * n
-                        if t < 1.0:      # short runs are noisy: best of two
-                            t = min(t, _time_stack(paths[:n], method, dev == "gpu", gpu_index) * n)
+                        # best of two: other programs can only make a run slower
+                        t = min(_time_stack(paths[:n], method, dev == "gpu", gpu_index) * n
+                                for _ in range(2))
                     except Exception as exc:
                         if dev == "cpu":
                             raise
@@ -329,6 +335,9 @@ def measure(method, gpu_index=0, report=None, check_load=False):
                     times[dev].append(t)
             for dev in ("gpu", "cpu"):
                 if len(times[dev]) == 2:
+                    if times[dev][1] <= times[dev][0]:
+                        # 5 frames can't be quicker than 2: the computer was disturbed
+                        raise Cancelled()
                     result[dev].append(times[dev])
         result["measured"] = time.time()
         return result
@@ -447,6 +456,7 @@ def decide(mode="auto", width=0, height=0, method="laplacian", gpu_index=0,
         return Decision(True, mode, info["name"], "not measured yet")
     gpu_t, cpu_t = times
     speedup = cpu_t / gpu_t if gpu_t > 0 else float("inf")
-    if gpu_t <= cpu_t:
-        return Decision(True, mode, info["name"], f"measured {speedup:.1f}× faster", speedup)
+    if gpu_t <= cpu_t * CPU_MARGIN:
+        why = f"measured {speedup:.1f}× faster" if speedup >= 1 else "about as fast as the CPU"
+        return Decision(True, mode, info["name"], why, speedup)
     return Decision(False, mode, reason=f"CPU measured {1 / speedup:.1f}× faster", speedup=speedup)
