@@ -237,6 +237,10 @@ if sys.platform == 'darwin':
             'NSHighResolutionCapable': True,
             'NSRequiresAquaSystemAppearance': False,  # Support dark mode
             'LSMinimumSystemVersion': '11.0',
+            # BUNDLE inherits console=True from the CLI exe in COLLECT, which
+            # makes PyInstaller mark the app background-only (no Dock icon,
+            # no menu bar, the window can't come to the front)
+            'LSBackgroundOnly': False,
             'CFBundleDocumentTypes': [
                 {
                     'CFBundleTypeName': 'Image Files',

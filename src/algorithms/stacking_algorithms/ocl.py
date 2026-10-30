@@ -11,6 +11,7 @@ OpenCV).
 """
 import math
 import os
+import platform
 import queue
 import threading
 import warnings
@@ -460,7 +461,14 @@ __kernel void to_255(__global const float *src, __global float *dst, int n) {
 
 // ── Alignment estimation ──
 // cv2.resize(src, INTER_AREA) shrink by a non-integer factor, bit-exact for
-// 8-bit images: OpenCV's per-axis weight tables, in its summation order
+// 8-bit images: OpenCV's per-axis weight tables, in its summation order.
+// OpenCV's ARM builds fuse the row multiply-add (the compiler contracts it),
+// x86 builds don't: HOST_FMA_ROWS follows the host's OpenCV
+#ifdef HOST_FMA_ROWS
+#define ROW_MAD(p, w, acc) fma(p, w, acc)
+#else
+#define ROW_MAD(p, w, acc) (acc + p * w)
+#endif
 __kernel void resize_area(__global const uchar *src, __global float *dst, int sw, int dw, int dh,
                           __global const int *xofs, __global const int *xsrc,
                           __global const float *xw, __global const int *yofs,
@@ -472,7 +480,7 @@ __kernel void resize_area(__global const uchar *src, __global float *dst, int sw
     for (int j = yofs[y]; j < yofs[y + 1]; j++) {
         __global const uchar *row = src + ysrc[j] * sw;
         float buf = 0.f;
-        for (int k = xofs[x]; k < xofs[x + 1]; k++) buf = buf + row[xsrc[k]] * xw[k];
+        for (int k = xofs[x]; k < xofs[x + 1]; k++) buf = ROW_MAD((float)row[xsrc[k]], xw[k], buf);
         acc = j == yofs[y] ? yw[j] * buf : acc + yw[j] * buf;
     }
     dst[y * dw + x] = clamp(rint(acc), 0.f, 255.f);
@@ -754,6 +762,9 @@ __kernel void var_cols(__global const float *rows, __global float *out, int w, i
 """
 
 
+# resize_area mirrors the host's OpenCV (see the kernel)
+_BUILD_OPTIONS = (["-DHOST_FMA_ROWS"]
+                  if platform.machine().lower() in ("arm64", "aarch64") else [])
 # Tests can run the kernels on a CPU OpenCL implementation (e.g. pocl)
 _ANY_DEVICE = os.environ.get("CHIMPSTACKR_OPENCL_ANY_DEVICE") == "1"
 _devices = None
@@ -769,9 +780,9 @@ def devices():
         if cl is not None:
             kind = cl.device_type.ALL if _ANY_DEVICE else cl.device_type.GPU
             try:
-                for platform in cl.get_platforms():
+                for plat in cl.get_platforms():
                     try:
-                        _devices.extend(platform.get_devices(kind))
+                        _devices.extend(plat.get_devices(kind))
                     except cl.Error:
                         pass
             except cl.Error:
@@ -829,7 +840,7 @@ class GPU:
             # some drivers log notes even for a clean build (e.g. NVIDIA's
             # "overriding noinline attribute" for every kernel)
             warnings.simplefilter("ignore", cl.CompilerWarning)
-            prg = self.prg = cl.Program(self.ctx, _SRC).build()
+            prg = self.prg = cl.Program(self.ctx, _SRC).build(options=_BUILD_OPTIONS)
         self.k = {name: getattr(prg, name) for name in (
             "warp_u8", "warp_f32", "pyr_down", "pyr_up_combine", "to_gray", "conv1d", "sml",
             "hybrid_add", "gate", "hybrid_level", "blend", "max_partial",
