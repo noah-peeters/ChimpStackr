@@ -87,9 +87,13 @@ jobs:
             --entitlements "$ENTITLEMENTS" --sign "$CODESIGN_IDENTITY" "$APP"
           codesign --verify --deep --strict "$APP"
 
+      # The app next to an Applications shortcut, so it can be dragged across
       - name: Create DMG
         run: |
-          hdiutil create -volname "ChimpStackr" -srcfolder "dist/ChimpStackr.app" \
+          mkdir -p dist/dmg
+          cp -R "dist/ChimpStackr.app" dist/dmg/
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname "ChimpStackr" -srcfolder dist/dmg \
             -ov -format UDZO "dist/ChimpStackr-macOS.dmg"
 
       - name: Notarize (if credentials available)

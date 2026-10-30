@@ -66,8 +66,8 @@ hiddenimports = [
     'src.algorithms', 'src.algorithms.API', 'src.algorithms.dft_imreg',
     'src.algorithms.stacking_algorithms', 'src.algorithms.stacking_algorithms.cpu',
     'src.algorithms.stacking_algorithms.ocl',
-    'src.MainWindow', 'src.MainWindow.icons', 'src.MainWindow.style',
-    'src.ImageLoadingHandler',
+    'src.MainWindow', 'src.MainWindow.icons', 'src.MainWindow.theme',
+    'src.ImageLoadingHandler', 'src.updater',
     'cv2', 'numpy', 'scipy', 'scipy.ndimage', 'scipy.ndimage.interpolation',
     'imageio', 'imageio.v2',
 ]
@@ -236,6 +236,9 @@ if sys.platform == 'darwin':
             'CFBundleVersion': _ver.lstrip('v'),
             'NSHighResolutionCapable': True,
             'NSRequiresAquaSystemAppearance': False,  # Support dark mode
+            # App Nap would throttle stacks (and speed tests) running while the
+            # window is hidden or the screen is locked
+            'NSAppSleepDisabled': True,
             'LSMinimumSystemVersion': '11.0',
             # BUNDLE inherits console=True from the CLI exe in COLLECT, which
             # makes PyInstaller mark the app background-only (no Dock icon,

@@ -136,17 +136,27 @@ def parse_args():
     device = parser.add_mutually_exclusive_group()
     device.add_argument(
         "--gpu",
-        dest="gpu",
-        action="store_true",
-        default=True,
-        help="Stack and align on the GPU (default; every method; OpenCL, any GPU "
-             "vendor). Falls back to the CPU if no GPU is available",
+        dest="device",
+        action="store_const",
+        const="gpu",
+        default="auto",
+        help="Always stack and align on the GPU (OpenCL, any vendor); falls back to "
+             "the CPU if no GPU works. Default: automatic, the faster device for "
+             "these frames on this computer (measured once, then cached)",
     )
     device.add_argument(
         "--cpu",
-        dest="gpu",
-        action="store_false",
-        help="Stack on the CPU only",
+        dest="device",
+        action="store_const",
+        const="cpu",
+        help="Always stack on the CPU",
+    )
+    parser.add_argument(
+        "--measure",
+        action="store_true",
+        help="For the automatic GPU/CPU choice: measure both on this computer first if "
+             "this method hasn't been measured yet (about 15 s, once; the app does it in "
+             "the background)",
     )
     parser.add_argument(
         "--gpu-id",
@@ -286,19 +296,14 @@ def main():
         print(f"  Alignment: ref={args.alignment_ref}, scale={scale_factor}, "
               f"mode={alignment_mode}" + (", sequential (breathing compensation)" if sequential else ""))
 
-    if args.gpu:
-        import src.algorithms.stacking_algorithms.ocl as OCL
-        names = OCL.device_names()
-        print(f"  GPU: {names[min(max(args.gpu_id, 0), len(names) - 1)]}" if names
-              else "  GPU: no OpenCL GPU found, stacking on the CPU")
-
     # Configure algorithm
     config = AlgorithmConfig(
         stacking_method=args.method,
         fusion_kernel_size=kernel_size,
         pyramid_num_levels=pyramid_levels,
         alignment_scale_factor=scale_factor,
-        use_gpu=args.gpu,
+        use_gpu=args.device != "cpu",
+        gpu_mode=args.device,
         selected_gpu_id=args.gpu_id,
         alignment_reference=args.alignment_ref,
         align_rotation_scale=alignment_mode in ("euclidean", "similarity", "affine"),
@@ -311,6 +316,20 @@ def main():
 
     algo = LaplacianPyramid(config=config)
     algo.update_image_paths(input_paths)
+
+    measuring = []
+
+    def report(text):
+        if not measuring:
+            measuring.append(1)
+            print(f"  Measuring GPU vs CPU speed for {args.method} (once for this computer)…", flush=True)
+
+    decision = algo.resolve_device(report=report, calibrate=args.measure)
+    print(f"  Device: {decision.summary()}")
+    if decision.reason == "not measured yet":
+        print("    (run once with --measure, or open the app, to measure GPU vs CPU speed here)")
+    if decision.use_gpu:
+        print(f"  GPU: {decision.device}")
 
     # Quality report on inputs
     if args.quality_report:

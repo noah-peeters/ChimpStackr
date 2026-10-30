@@ -13,15 +13,36 @@ Open-source focus stacking application for Windows, macOS, and Linux.
 - **5 stacking algorithms:** Laplacian Pyramid, Hybrid (pyramid detail without halos), Weighted Average, Depth Map, Exposure Fusion (HDR)
 - **Slabbing:** Stack very deep stacks in overlapping chunks
 - **Automatic alignment:** Translation, Euclidean (rotation), Similarity (rotation + scale), Affine correction, or Breathing (sequential chained alignment for focus breathing compensation)
-- **GPU acceleration:** every stacking method and the alignment run on any GPU via OpenCL (NVIDIA, AMD, Intel, Apple): a 50-frame 24 MP stack in under 11 s
+- **GPU acceleration:** every stacking method and the alignment run on any GPU via OpenCL (NVIDIA, AMD, Intel, Apple): a 50-frame 24 MP stack in under 11 s. By default ChimpStackr picks the GPU or the CPU per stack, whichever it measured faster on your computer (see below)
 - **16-bit pipeline:** Full bit-depth preservation from RAW to output
 - **Auto-crop:** Removes black edges from alignment shifts
 - **Auto-tuning:** Parameters auto-detected from image resolution
 - **GUI + CLI:** Full graphical interface and headless command-line tool
 - **Cross-platform:** Native builds for Windows, macOS, Linux
 - **Pause/resume/cancel:** Control long-running stacks
-- **Before/after comparison:** Slider viewer for comparing input vs output
-- **Drag & drop:** Drop image files or folders directly into the app
+- **Before/after comparison:** Draggable divider over the result, at any zoom
+- **Drag & drop:** Drop image files or folders onto the window (or the Dock icon on macOS)
+- **Trackpad, mouse and touch:** Pinch to zoom, two-finger pan, wheel zoom at the cursor, double-click or double-tap for Fit / 100 %
+- **Light and dark:** Follows the system appearance, or pick one in Settings
+- **Automatic updates:** Optional daily check for new releases; downloads are verified against GitHub's SHA-256 and installed in place, then the app relaunches (macOS app, Windows folder, Linux AppImage)
+
+## Using the app
+
+Drop a folder of frames onto the window (or **Add Images…**), pick a method in the inspector on the right, and press **Stack**. Results appear under *Results* in the sidebar; **Export…** saves JPEG, PNG, TIFF or OpenEXR (16-bit PNG/TIFF keep the full precision of the stack).
+
+| Action | macOS | Windows / Linux |
+|---|---|---|
+| Add images / folder | ⌘O / ⇧⌘O | Ctrl+O / Ctrl+Shift+O |
+| Stack | ⌘↩ | Ctrl+Enter |
+| Stop stacking | ⌘. or Esc | Esc |
+| Export | ⌘E | Ctrl+E |
+| Compare before / after | \\ or Y | \\ or Y |
+| Zoom in / out | ⌘+ / ⌘− (or + / −) | Ctrl++ / Ctrl+− (or + / −) |
+| Fit / 100 % | ⌘0 / ⌘1 (or 0 / 1) | Ctrl+0 / Ctrl+1 (or 0 / 1) |
+| Previous / next frame | ← / → | ← / → |
+| Remove selected frames | ⌫ | Delete |
+| Show sidebar / inspector | ⌥⌘S / ⌥⌘I | Ctrl+Alt+S / Ctrl+Alt+I |
+| Settings | ⌘, | Ctrl+, |
 
 ## Download
 
@@ -64,6 +85,18 @@ chimpstackr-cli -i images/*.jpg -o result.tif --align --method hybrid --slab-siz
 ```
 
 **Available methods:** `laplacian` (default), `hybrid`, `weighted_average`, `depth_map`, `exposure_fusion`
+
+### GPU or CPU
+
+The app (Settings → Processing) and the CLI share one choice:
+
+| | App | CLI |
+|---|---|---|
+| Automatic (default) | *Automatic* | no flag |
+| Always the GPU (falls back to the CPU if it fails) | *Always GPU* | `--gpu` |
+| Always the CPU | *Always CPU* | `--cpu` |
+
+Automatic uses the CPU when no GPU works or the stack doesn't fit in the GPU's memory, and when a short test on your computer finds the CPU clearly (1.5×) faster for that frame size and count; otherwise the GPU. The test aligns and stacks a few synthetic frames at two sizes on both devices, takes about 15 s, runs once per method (the first time you stack with it), and is repeated after a new GPU, driver or ChimpStackr version. Stacks of small frames (under 1 MP) don't start the test; they use the CPU until a measurement exists. On a fast CPU with a modest GPU (an M4 MacBook Air) this means the GPU for nearly everything except tiny stacks; it matters most on computers with a weak GPU. The CLI prints its choice, e.g. `Device: Auto: GPU · Apple M4 (measured 2.4× faster)`. The measurements are kept in `~/Library/Caches/ChimpStackr` (macOS), `%LOCALAPPDATA%\ChimpStackr\Cache` (Windows) or `~/.cache/chimpstackr` (Linux); Settings → Processing → Measure Again forgets them.
 
 ## Stacking Algorithms
 

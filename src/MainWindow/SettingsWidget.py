@@ -1,85 +1,331 @@
 """
-Settings panel — docked on the right side of the main window.
-Modern macOS-style grouped settings with sections.
+Inspector (stacking settings, right panel) and the app Settings window.
+
+The inspector shows what matters for a stack: method, alignment, output.
+Parameters only appear under "Advanced" when the chosen method uses them.
+App-wide preferences (appearance, GPU) live in the Settings window
+(Cmd+, / Ctrl+,). Everything is stored in QSettings under the same keys as
+before, so existing user settings carry over.
 """
 import threading
 
-import PySide6.QtWidgets as qtw
 import PySide6.QtCore as qtc
+import PySide6.QtGui as qtg
+import PySide6.QtWidgets as qtw
 
 import src.settings as settings
 import src.algorithms.stacking_algorithms.ocl as OCL
+import src.MainWindow.theme as theme
+from src.MainWindow.icons import icon
 
 HAS_GPU = OCL.available()
 
+METHODS = [
+    ("laplacian", "Pyramid", "Finest detail: hairs, bristles, edges"),
+    ("hybrid", "Hybrid", "Pyramid detail without halos, cleaner backgrounds"),
+    ("weighted_average", "Weighted Average", "Smooth contrast blend, faithful color"),
+    ("depth_map", "Depth Map", "Sharpest source per pixel, original color"),
+    ("exposure_fusion", "HDR (Exposure)", "Merge different exposures, not focus"),
+]
 
-class SettingRow(qtw.QWidget):
-    """A single label + control row."""
-    def __init__(self, label_text, control, tooltip=None):
+# (key, label, description); "off" stacks without aligning
+ALIGNMENTS = [
+    ("standard", "Standard", "Shift, rotation and scale. Best for most stacks"),
+    ("breathing", "Focus breathing", "Frame-to-frame chain for lenses that zoom while focusing"),
+    ("shift", "Shift only", "Fast; for stacks on a rail without rotation"),
+    ("euclidean", "Shift + rotation", "No scale correction"),
+    ("affine", "Full affine", "Also corrects shear; for difficult stacks"),
+    ("off", "Off", "Frames are already aligned"),
+]
+
+
+def qs():
+    return settings.globalVars["QSettings"]
+
+
+def updater_display(version):
+    import src.updater as updater
+    return updater.display_version(version)
+
+
+def get_int(key, default):
+    v = qs().value(key)
+    try:
+        return int(float(v)) if v is not None and v != "" else default
+    except (TypeError, ValueError):
+        return default
+
+
+def get_float(key, default):
+    v = qs().value(key)
+    try:
+        return float(v) if v is not None and v != "" else default
+    except (TypeError, ValueError):
+        return default
+
+
+def get_str(key, default):
+    v = qs().value(key)
+    return str(v) if v not in (None, "") else default
+
+
+def gpu_mode():
+    """"auto", "gpu" or "cpu" (see src.compute)."""
+    mode = get_str("computing/gpu_mode", "auto")
+    return mode if mode in ("auto", "gpu", "cpu") else "auto"
+
+
+def alignment_choice():
+    """Current alignment choice key (see ALIGNMENTS), from the stored keys."""
+    if not get_int("algorithm/align_enabled", 1):
+        return "off"
+    if not get_int("algorithm/align_rst", 1):
+        return "shift"
+    mode = get_str("algorithm/alignment_mode", "similarity")
+    return {"similarity": "standard", "breathing": "breathing", "euclidean": "euclidean",
+            "affine": "affine"}.get(mode, "standard")
+
+
+def store_alignment_choice(key):
+    s = qs()
+    s.setValue("algorithm/align_enabled", 0 if key == "off" else 1)
+    if key == "off":
+        return
+    s.setValue("algorithm/align_rst", 0 if key == "shift" else 1)
+    if key != "shift":
+        s.setValue("algorithm/alignment_mode", {"standard": "similarity"}.get(key, key))
+
+
+# ── building blocks ──
+class OptionCard(qtw.QAbstractButton):
+    """Selectable row: title and one-line description, radio behaviour."""
+
+    def __init__(self, title, description):
         super().__init__()
-        layout = qtw.QHBoxLayout(self)
+        self.setCheckable(True)
+        self.setAutoExclusive(True)
+        self.title, self.description = title, description
+        self.setCursor(qtc.Qt.PointingHandCursor)
+        self.setFocusPolicy(qtc.Qt.StrongFocus)
+        self.setAccessibleName(title)
+        self.setAccessibleDescription(description)
+        self.setToolTip(description)
+        self.setSizePolicy(qtw.QSizePolicy.Expanding, qtw.QSizePolicy.Fixed)
+        self._hover = False
+
+    def sizeHint(self):
+        fm = self.fontMetrics()
+        return qtc.QSize(200, fm.height() * 2 + 14)
+
+    def enterEvent(self, e):
+        self._hover = True
+        self.update()
+
+    def leaveEvent(self, e):
+        self._hover = False
+        self.update()
+
+    def paintEvent(self, event):
+        t = theme.tokens()
+        p = qtg.QPainter(self)
+        p.setRenderHint(qtg.QPainter.Antialiasing)
+        r = qtc.QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        checked = self.isChecked()
+        if checked:
+            fill = qtg.QColor(t.accent)
+            fill.setAlpha(40 if t.dark else 28)
+            p.setBrush(fill)
+            p.setPen(qtg.QPen(qtg.QColor(t.accent), 1.2))
+        else:
+            p.setBrush(qtg.QColor(t.surface_hover if self._hover else t.surface))
+            p.setPen(qtg.QPen(qtg.QColor(t.border), 1))
+        if self.hasFocus():
+            p.setPen(qtg.QPen(qtg.QColor(t.focus), 2))
+        p.drawRoundedRect(r, theme.RADIUS_SM, theme.RADIUS_SM)
+
+        # radio dot
+        cy = r.center().y()
+        dot = qtc.QRectF(r.left() + 10, cy - 7, 14, 14)
+        p.setPen(qtg.QPen(qtg.QColor(t.accent if checked else t.text_tertiary), 1.4))
+        p.setBrush(qtc.Qt.NoBrush)
+        p.drawEllipse(dot)
+        if checked:
+            p.setPen(qtc.Qt.NoPen)
+            p.setBrush(qtg.QColor(t.accent))
+            p.drawEllipse(dot.adjusted(3.5, 3.5, -3.5, -3.5))
+
+        text_x = dot.right() + 10
+        fm = self.fontMetrics()
+        title_font = qtg.QFont(self.font())
+        title_font.setWeight(qtg.QFont.DemiBold)
+        p.setFont(title_font)
+        p.setPen(qtg.QColor(t.text if self.isEnabled() else t.text_tertiary))
+        line_h = fm.height()
+        top = cy - line_h - 1
+        p.drawText(qtc.QRectF(text_x, top, r.right() - text_x - 8, line_h),
+                   qtc.Qt.AlignLeft | qtc.Qt.AlignVCenter, self.title)
+        small = qtg.QFont(self.font())
+        small.setPointSizeF(self.font().pointSizeF() * 0.9)
+        p.setFont(small)
+        p.setPen(qtg.QColor(t.text_secondary if self.isEnabled() else t.text_tertiary))
+        desc = qtg.QFontMetrics(small).elidedText(self.description, qtc.Qt.ElideRight,
+                                                  int(r.right() - text_x - 8))
+        p.drawText(qtc.QRectF(text_x, cy + 1, r.right() - text_x - 8, line_h),
+                   qtc.Qt.AlignLeft | qtc.Qt.AlignVCenter, desc)
+
+    def keyPressEvent(self, event):
+        if event.key() in (qtc.Qt.Key_Down, qtc.Qt.Key_Up):
+            self.focusNextPrevChild(event.key() == qtc.Qt.Key_Down)
+            return
+        super().keyPressEvent(event)
+
+
+class OptionGroup(qtw.QWidget):
+    changed = qtc.Signal(str)
+
+    def __init__(self, options, current):
+        super().__init__()
+        layout = qtw.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        self.cards = {}
+        group = qtw.QButtonGroup(self)
+        for key, title, desc in options:
+            card = OptionCard(title, desc)
+            card.setChecked(key == current)
+            card.toggled.connect(lambda on, k=key: on and self.changed.emit(k))
+            group.addButton(card)
+            layout.addWidget(card)
+            self.cards[key] = card
 
-        label = qtw.QLabel(label_text)
-        label.setStyleSheet("color: #ececec; font-size: 12px; background: transparent;")
-        layout.addWidget(label)
-        layout.addStretch()
-
-        control.setFixedWidth(120)
-        layout.addWidget(control)
-
-        if tooltip:
-            self.setToolTip(tooltip)
+    def set_current(self, key):
+        if key in self.cards:
+            self.cards[key].setChecked(True)
 
 
-class SettingSection(qtw.QWidget):
-    """A titled group of settings (macOS-style grouped section)."""
+class Section(qtw.QWidget):
     def __init__(self, title):
         super().__init__()
-        self._layout = qtw.QVBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 12)
-        self._layout.setSpacing(0)
+        self.layout_ = qtw.QVBoxLayout(self)
+        self.layout_.setContentsMargins(0, 0, 0, 0)
+        self.layout_.setSpacing(6)
+        label = qtw.QLabel(title.upper())
+        label.setObjectName("SectionTitle")
+        self.layout_.addWidget(label)
 
-        # Section title
-        title_label = qtw.QLabel(title)
-        title_label.setStyleSheet(
-            "color: #999999; font-size: 11px; font-weight: 600; "
-            "text-transform: uppercase; padding: 8px 0 4px 0; background: transparent;"
-        )
-        self._layout.addWidget(title_label)
-
-        # Container for rows
-        self.container = qtw.QWidget()
-        self.container.setStyleSheet(
-            "QWidget { background: #2a2a2a; border-radius: 8px; }"
-        )
-        self.container_layout = qtw.QVBoxLayout(self.container)
-        self.container_layout.setContentsMargins(12, 6, 12, 6)
-        self.container_layout.setSpacing(0)
-        self._row_count = 0
-        self._layout.addWidget(self.container)
-
-    def add_row(self, label_text, control, tooltip=None):
-        if self._row_count > 0:
-            sep = qtw.QFrame()
-            sep.setFrameShape(qtw.QFrame.HLine)
-            sep.setStyleSheet("background: #3d3d3d; max-height: 1px;")
-            self.container_layout.addWidget(sep)
-
-        row = SettingRow(label_text, control, tooltip)
-        row.setStyleSheet("background: transparent;")
-        self.container_layout.addWidget(row)
-        self._row_count += 1
+    def add(self, widget):
+        self.layout_.addWidget(widget)
+        return widget
 
 
-class SettingsPanel(qtw.QWidget):
-    """Right-side settings panel (replaces the old floating window)."""
+class FormCard(qtw.QFrame):
+    """Rounded card with label/control rows."""
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("Card")
+        self.grid = qtw.QFormLayout(self)
+        self.grid.setContentsMargins(12, 8, 12, 8)
+        self.grid.setHorizontalSpacing(12)
+        self.grid.setVerticalSpacing(8)
+        self.grid.setLabelAlignment(qtc.Qt.AlignLeft | qtc.Qt.AlignVCenter)
+        self.grid.setFieldGrowthPolicy(qtw.QFormLayout.ExpandingFieldsGrow)
+        self.grid.setRowWrapPolicy(qtw.QFormLayout.DontWrapRows)
+        self.rows = {}
+
+    def add_row(self, key, label, control, tooltip=None):
+        if isinstance(control, qtw.QAbstractSpinBox):
+            control.setFixedWidth(112)
+            field = qtw.QWidget()
+            fl = qtw.QHBoxLayout(field)
+            fl.setContentsMargins(0, 0, 0, 0)
+            fl.addStretch()
+            fl.addWidget(control)
+        else:
+            field = control
+            if isinstance(control, qtw.QComboBox):
+                control.setSizePolicy(qtw.QSizePolicy.Expanding, qtw.QSizePolicy.Fixed)
+        lab = qtw.QLabel(label)
+        if tooltip:
+            lab.setToolTip(tooltip)
+            control.setToolTip(tooltip)
+        lab.setBuddy(control)
+        control.setAccessibleName(label)
+        self.grid.addRow(lab, field)
+        self.rows[key] = (lab, field)
+        return control
+
+    def set_row_visible(self, key, visible):
+        lab, field = self.rows[key]
+        lab.setVisible(visible)
+        field.setVisible(visible)
+
+
+class Switch(qtw.QAbstractButton):
+    """iOS/macOS-style toggle switch."""
+
+    def __init__(self, checked=False):
+        super().__init__()
+        self.setCheckable(True)
+        self.setChecked(checked)
+        self.setCursor(qtc.Qt.PointingHandCursor)
+        self.setFocusPolicy(qtc.Qt.StrongFocus)
+        self.setSizePolicy(qtw.QSizePolicy.Fixed, qtw.QSizePolicy.Fixed)
+
+    def sizeHint(self):
+        return qtc.QSize(36, 20)
+
+    def paintEvent(self, event):
+        t = theme.tokens()
+        p = qtg.QPainter(self)
+        p.setRenderHint(qtg.QPainter.Antialiasing)
+        r = qtc.QRectF(0, 0, 36, 20).translated(0, (self.height() - 20) / 2)
+        on = self.isChecked()
+        track = qtg.QColor(t.accent if on else t.control_pressed)
+        if not self.isEnabled():
+            track.setAlpha(90)
+        p.setPen(qtg.QPen(qtg.QColor(t.focus), 2) if self.hasFocus() else qtc.Qt.NoPen)
+        p.setBrush(track)
+        p.drawRoundedRect(r, 10, 10)
+        knob = qtc.QRectF(r.left() + (18 if on else 2), r.top() + 2, 16, 16)
+        p.setPen(qtc.Qt.NoPen)
+        p.setBrush(qtg.QColor("#ffffff") if self.isEnabled() else qtg.QColor(t.text_tertiary))
+        p.drawEllipse(knob)
+
+
+def switch_row(switch):
+    w = qtw.QWidget()
+    lay = qtw.QHBoxLayout(w)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.addStretch()
+    lay.addWidget(switch)
+    w.setAccessibleName(switch.accessibleName())
+    return w
+
+
+def spin(lo, hi, value, step=1, decimals=None, special=None, suffix=""):
+    if decimals is None:
+        w = qtw.QSpinBox()
+    else:
+        w = qtw.QDoubleSpinBox()
+        w.setDecimals(decimals)
+    w.setRange(lo, hi)
+    w.setSingleStep(step)
+    w.setValue(value)
+    if special:
+        w.setSpecialValueText(special)
+    if suffix:
+        w.setSuffix(suffix)
+    w.setKeyboardTracking(False)
+    w.setAlignment(qtc.Qt.AlignRight)
+    return w
+
+
+class Inspector(qtw.QWidget):
+    """Right panel with the stacking settings."""
     setting_updated = qtc.Signal(tuple)
-    gpu_unusable = qtc.Signal(str)   # from the startup GPU check thread
 
     default_settings = {
-        "user_interface": {"theme": 2},
-        "computing": {"use_gpu": 1, "selected_gpu_id": 0},
         "algorithm": {
             "stacking_method": "laplacian",
             "kernel_size": 6,
@@ -87,6 +333,7 @@ class SettingsPanel(qtw.QWidget):
             "scale_factor": 10,
             "alignment_ref": "first",
             "align_rst": 1,
+            "align_enabled": 1,
             "auto_crop": 1,
             "contrast_threshold": 0.0,
             "feather_radius": 2,
@@ -94,473 +341,580 @@ class SettingsPanel(qtw.QWidget):
             "breathing_max_scale_step": 5,
             "breathing_high_precision": 0,
         },
+        "computing": {"use_gpu": 1, "selected_gpu_id": 0},
     }
 
     def __init__(self):
         super().__init__()
-        self.setFixedWidth(300)
-        self.setStyleSheet("background: #1e1e1e;")
+        self.setObjectName("Inspector")
+        self.setAttribute(qtc.Qt.WA_StyledBackground, True)
+        self.setMinimumWidth(280)
 
+        s = qs()
         # GPU stacking is on by default since v0.4. Earlier versions stored
         # their default (off), so switch it on once for existing settings.
-        qs = settings.globalVars["QSettings"]
-        if not qs.contains("computing/gpu_default_on"):
-            qs.setValue("computing/use_gpu", 1)
-            qs.setValue("computing/gpu_default_on", 1)
-
-        # Initialize default QSettings values
-        for key, dict_val in self.default_settings.items():
-            for name, value in dict_val.items():
-                path = f"{key}/{name}"
-                if settings.globalVars["QSettings"].contains(path):
-                    value = settings.globalVars["QSettings"].value(path)
-                self.change_setting(path, value)
+        if not s.contains("computing/gpu_default_on"):
+            s.setValue("computing/use_gpu", 1)
+            s.setValue("computing/gpu_default_on", 1)
+        # Automatic device choice since the redesign: "Use GPU" on becomes
+        # Automatic, off stays CPU
+        if not s.contains("computing/gpu_mode"):
+            s.setValue("computing/gpu_mode", "auto" if get_int("computing/use_gpu", 1) else "cpu")
+        for group, values in self.default_settings.items():
+            for name, value in values.items():
+                if not s.contains(f"{group}/{name}"):
+                    s.setValue(f"{group}/{name}", value)
 
         scroll = qtw.QScrollArea()
+        scroll.setObjectName("InspectorScroll")
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(qtc.Qt.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("QScrollArea { border: none; background: #1e1e1e; }")
+        scroll.setFrameShape(qtw.QFrame.NoFrame)
+        qtw.QScroller.grabGesture(scroll.viewport(), qtw.QScroller.TouchGesture)
 
         content = qtw.QWidget()
-        content.setStyleSheet("background: #1e1e1e;")
         layout = qtw.QVBoxLayout(content)
-        layout.setContentsMargins(16, 8, 16, 16)
-        layout.setSpacing(4)
+        layout.setContentsMargins(14, 12, 14, 16)
+        layout.setSpacing(16)
 
-        # Header
-        header = qtw.QLabel("Settings")
-        header.setStyleSheet(
-            "font-size: 16px; font-weight: 700; color: #ececec; "
-            "padding: 4px 0 8px 0; background: transparent;"
-        )
-        layout.addWidget(header)
+        # Method
+        method_section = Section("Method")
+        self.method_group = OptionGroup(METHODS, get_str("algorithm/stacking_method", "laplacian"))
+        self.method_group.changed.connect(self._on_method)
+        method_section.add(self.method_group)
+        layout.addWidget(method_section)
 
-        # ── Stacking Method Section (segmented control) ──
-        method_label = qtw.QLabel("STACKING METHOD")
-        method_label.setStyleSheet(
-            "color: #999999; font-size: 11px; font-weight: 600; "
-            "padding: 8px 0 4px 0; background: transparent;"
-        )
-        layout.addWidget(method_label)
-
-        self._method_buttons = {}
-        methods = [
-            ("laplacian", "Pyramid", "Best for fine detail\n(hairs, bristles, edges)"),
-            ("hybrid", "Hybrid", "Pyramid detail without halos\naround edges, cleaner backgrounds"),
-            ("weighted_average", "Weighted", "Smooth contrast-based blend\n(good color fidelity)"),
-            ("depth_map", "Depth Map", "Per-pixel sharpest source\n(best original color)"),
-            ("exposure_fusion", "HDR", "Exposure/HDR fusion\n(varying lighting, not focus)"),
-        ]
-        method_container = qtw.QWidget()
-        method_container.setStyleSheet("background: #2a2a2a; border-radius: 8px;")
-        method_layout = qtw.QHBoxLayout(method_container)
-        method_layout.setContentsMargins(3, 3, 3, 3)
-        method_layout.setSpacing(2)
-
-        saved_method = settings.globalVars["QSettings"].value("algorithm/stacking_method") or "laplacian"
-        for key, label, tooltip in methods:
-            btn = qtw.QPushButton(label)
-            btn.setCheckable(True)
-            btn.setToolTip(tooltip)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background: transparent; color: #999; border: none;
-                    border-radius: 6px; padding: 6px 4px; font-size: 11px; font-weight: 500;
-                }
-                QPushButton:hover { color: #ccc; }
-                QPushButton:checked {
-                    background: #505050; color: #fff; font-weight: 600;
-                }
-            """)
-            btn.setChecked(key == saved_method)
-            btn.clicked.connect(lambda checked, k=key: self._select_method(k))
-            method_layout.addWidget(btn)
-            self._method_buttons[key] = btn
-
-        layout.addWidget(method_container)
-
-        # ── Advanced Parameters (collapsible section) ──
-        advanced_container = qtw.QWidget()
-        advanced_container.setStyleSheet("background: #2a2a2a; border-radius: 8px;")
-        advanced_outer = qtw.QVBoxLayout(advanced_container)
-        advanced_outer.setContentsMargins(0, 0, 0, 0)
-        advanced_outer.setSpacing(0)
-
-        self._advanced_toggle = qtw.QPushButton("  \u25b6  Advanced")
-        self._advanced_toggle.setCheckable(True)
-        self._advanced_toggle.setChecked(False)
-        self._advanced_toggle.setStyleSheet(
-            "QPushButton { background: #2a2a2a; color: #999; font-size: 11px; "
-            "font-weight: 600; text-align: left; padding: 8px 12px; border: none; "
-            "border-radius: 8px; }"
-            "QPushButton:hover { color: #ccc; background: #333; }"
-            "QPushButton:checked { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }"
-        )
-        advanced_outer.addWidget(self._advanced_toggle)
-
-        self.advanced_widget = qtw.QWidget()
-        self.advanced_widget.setVisible(False)
-        self.advanced_widget.setStyleSheet("background: #2a2a2a;")
-
-        def _toggle_advanced(checked):
-            self.advanced_widget.setVisible(checked)
-            arrow = "\u25bc" if checked else "\u25b6"
-            self._advanced_toggle.setText(f"  {arrow}  Advanced")
-
-        self._advanced_toggle.toggled.connect(_toggle_advanced)
-
-        advanced_layout = qtw.QVBoxLayout(self.advanced_widget)
-        advanced_layout.setContentsMargins(12, 0, 12, 8)
-        advanced_layout.setSpacing(4)
-
-        # Auto-detect button
-        auto_btn = qtw.QPushButton("Reset to recommended")
-        auto_btn.setStyleSheet(
-            "QPushButton { font-size: 11px; padding: 4px 8px; background: #383838; "
-            "border-radius: 4px; color: #ccc; border: none; }"
-            "QPushButton:hover { background: #444; color: #fff; }"
-        )
-        auto_btn.clicked.connect(self._auto_detect_params)
-        advanced_layout.addWidget(auto_btn)
-
-        algo_section = SettingSection("PARAMETERS")
-
-        self.kernel_spin = qtw.QSpinBox()
-        self.kernel_spin.setRange(2, 20)
-        self.kernel_spin.setValue(int(settings.globalVars["QSettings"].value("algorithm/kernel_size") or 6))
-        self.kernel_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/kernel_size", v))
-        algo_section.add_row("Kernel size", self.kernel_spin,
-            "Focus comparison kernel. Larger = smoother transitions, slower")
-
-        self.pyramid_spin = qtw.QSpinBox()
-        self.pyramid_spin.setRange(2, 16)
-        self.pyramid_spin.setValue(int(settings.globalVars["QSettings"].value("algorithm/pyramid_levels") or 8))
-        self.pyramid_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/pyramid_levels", v))
-        algo_section.add_row("Pyramid levels", self.pyramid_spin,
-            "Laplacian pyramid depth. More = finer detail, slower.\n"
-            "Only used by Pyramid method.")
-
-        self.contrast_thresh_spin = qtw.QDoubleSpinBox()
-        self.contrast_thresh_spin.setRange(0.0, 50.0)
-        self.contrast_thresh_spin.setSingleStep(0.5)
-        self.contrast_thresh_spin.setDecimals(1)
-        self.contrast_thresh_spin.setValue(float(settings.globalVars["QSettings"].value("algorithm/contrast_threshold") or 0.0))
-        self.contrast_thresh_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/contrast_threshold", v))
-        algo_section.add_row("Contrast threshold", self.contrast_thresh_spin,
-            "Minimum contrast to switch sources.\n"
-            "0 = off. Higher = ignore flat areas (reduces noise).\n"
-            "Only used by Pyramid method.")
-
-        self.feather_spin = qtw.QSpinBox()
-        self.feather_spin.setRange(0, 20)
-        self.feather_spin.setValue(int(settings.globalVars["QSettings"].value("algorithm/feather_radius") or 2))
-        self.feather_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/feather_radius", v))
-        algo_section.add_row("Feather radius", self.feather_spin,
-            "Blur radius for soft transitions between sources.\n"
-            "0 = hard edges. Higher = smoother blending.\n"
-            "Only used by Pyramid method.")
-
-        self.smoothing_spin = qtw.QSpinBox()
-        self.smoothing_spin.setRange(0, 30)
-        self.smoothing_spin.setValue(int(settings.globalVars["QSettings"].value("algorithm/depthmap_smoothing") or 5))
-        self.smoothing_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/depthmap_smoothing", v))
-        algo_section.add_row("DMap smoothing", self.smoothing_spin,
-            "Smoothing of the depth/focus selection map.\n"
-            "Higher = fewer artifacts, slightly softer.\n"
-            "Lower = sharper but may have halos.\n"
-            "Only used by Depth Map method.")
-
-        self.slab_spin = qtw.QSpinBox()
-        self.slab_spin.setRange(0, 500)
-        self.slab_spin.setSpecialValueText("Off")
-        self.slab_spin.setValue(int(settings.globalVars["QSettings"].value("algorithm/slab_size") or 0))
-        self.slab_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/slab_size", v))
-        algo_section.add_row("Slab size", self.slab_spin,
-            "Stack deep stacks in chunks of this many frames,\n"
-            "then stack the chunks (neighbouring chunks share 2 frames).\n"
-            "Off = stack everything in one pass.\n"
-            "Used by Pyramid, Hybrid, Weighted and Depth Map.")
-
-        # ── Alignment (visible) ──
-        align_section = SettingSection("ALIGNMENT")
-
-        self.rst_checkbox = qtw.QCheckBox()
-        self.rst_checkbox.setChecked(
-            bool(int(settings.globalVars["QSettings"].value("algorithm/align_rst") or 1))
-        )
-        self.rst_checkbox.toggled.connect(lambda v: self.change_setting("algorithm/align_rst", int(v)))
-        rst_control = qtw.QWidget()
-        rst_control.setStyleSheet("background: transparent;")
-        rst_layout = qtw.QHBoxLayout(rst_control)
-        rst_layout.setContentsMargins(0, 0, 0, 0)
-        rst_layout.addStretch()
-        rst_layout.addWidget(self.rst_checkbox)
-        align_section.add_row("Rotation + Scale", rst_control,
-            "Corrects rotation, scale, and focus breathing.\n"
-            "Recommended for most stacks.\n"
-            "Disable only if images are already pre-aligned.")
-
+        # Alignment
+        align_section = Section("Alignment")
+        self.align_combo = qtw.QComboBox()
+        for key, title, desc in ALIGNMENTS:
+            self.align_combo.addItem(title, key)
+            self.align_combo.setItemData(self.align_combo.count() - 1, desc, qtc.Qt.ToolTipRole)
+        self.align_combo.setAccessibleName("Alignment")
+        self.align_hint = qtw.QLabel()
+        self.align_hint.setObjectName("Hint")
+        self.align_hint.setWordWrap(True)
+        idx = self.align_combo.findData(alignment_choice())
+        self.align_combo.setCurrentIndex(max(0, idx))
+        self.align_combo.currentIndexChanged.connect(self._on_alignment)
+        align_section.add(self.align_combo)
+        align_section.add(self.align_hint)
         layout.addWidget(align_section)
 
-        # ── Advanced: alignment params, algorithm params, GPU ──
-        self.scale_spin = qtw.QSpinBox()
-        self.scale_spin.setRange(1, 50)
-        self.scale_spin.setValue(int(settings.globalVars["QSettings"].value("algorithm/scale_factor") or 10))
-        self.scale_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/scale_factor", v))
+        # Output
+        out_section = Section("Output")
+        out_card = FormCard()
+        self.autocrop_switch = Switch(bool(get_int("algorithm/auto_crop", 1)))
+        self.autocrop_switch.setAccessibleName("Auto-crop edges")
+        self.autocrop_switch.toggled.connect(lambda v: self.change_setting("algorithm/auto_crop", int(v)))
+        out_card.add_row("autocrop", "Auto-crop edges", switch_row(self.autocrop_switch),
+                         "Crop the borders that alignment leaves empty")
+        out_section.add(out_card)
+        layout.addWidget(out_section)
 
+        # Advanced
+        self.adv_toggle = qtw.QToolButton()
+        self.adv_toggle.setObjectName("Disclosure")
+        self.adv_toggle.setText("ADVANCED")
+        self.adv_toggle.setCheckable(True)
+        self.adv_toggle.setToolButtonStyle(qtc.Qt.ToolButtonTextBesideIcon)
+        self.adv_toggle.setIconSize(qtc.QSize(12, 12))
+        self.adv_toggle.setCursor(qtc.Qt.PointingHandCursor)
+        self.adv_toggle.toggled.connect(self._on_advanced_toggled)
+        layout.addWidget(self.adv_toggle)
+
+        self.advanced = qtw.QWidget()
+        adv = qtw.QVBoxLayout(self.advanced)
+        adv.setContentsMargins(0, 0, 0, 0)
+        adv.setSpacing(12)
+
+        self.params = FormCard()
+        p = self.params
+        self.kernel_spin = p.add_row("kernel", "Kernel size", spin(2, 20, get_int("algorithm/kernel_size", 6)),
+                                     "Focus comparison window. Larger = smoother transitions, slower")
+        self.pyramid_spin = p.add_row("levels", "Pyramid levels", spin(2, 16, get_int("algorithm/pyramid_levels", 8)),
+                                      "Pyramid depth. More = finer detail, slower")
+        self.contrast_thresh_spin = p.add_row(
+            "contrast", "Contrast threshold",
+            spin(0.0, 50.0, get_float("algorithm/contrast_threshold", 0.0), 0.5, 1, "Off"),
+            "Minimum contrast to switch source frame. Higher ignores flat, noisy areas")
+        self.feather_spin = p.add_row("feather", "Feather radius",
+                                      spin(0, 20, get_int("algorithm/feather_radius", 2), special="Off"),
+                                      "Soft transitions between source frames. Off = hard edges")
+        self.smoothing_spin = p.add_row("smoothing", "Depth smoothing",
+                                        spin(0, 30, get_int("algorithm/depthmap_smoothing", 5), special="Off"),
+                                        "Smooths the depth map. Higher = fewer artifacts, slightly softer")
+        self.slab_spin = p.add_row("slab", "Slab size",
+                                   spin(0, 500, get_int("algorithm/slab_size", 0), special="Off", suffix=" frames"),
+                                   "Stack deep stacks in chunks of this many frames, then stack the chunks")
+        self.kernel_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/kernel_size", v))
+        self.pyramid_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/pyramid_levels", v))
+        self.contrast_thresh_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/contrast_threshold", v))
+        self.feather_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/feather_radius", v))
+        self.smoothing_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/depthmap_smoothing", v))
+        self.slab_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/slab_size", v))
+
+        params_section = Section("Method parameters")
+        params_section.add(self.params)
+        reset = qtw.QPushButton("Reset to Recommended")
+        reset.setToolTip("Pick parameters for the loaded frames' size and count")
+        reset.clicked.connect(self._auto_detect_params)
+        params_section.add(reset)
+        adv.addWidget(params_section)
+
+        self.align_adv = FormCard()
+        a = self.align_adv
         self.ref_combo = qtw.QComboBox()
-        self.ref_combo.addItems(["first", "middle", "previous"])
-        saved = settings.globalVars["QSettings"].value("algorithm/alignment_ref") or "first"
-        idx = self.ref_combo.findText(saved)
-        if idx >= 0:
-            self.ref_combo.setCurrentIndex(idx)
-        self.ref_combo.currentTextChanged.connect(lambda v: self.change_setting("algorithm/alignment_ref", v))
-
-        self.breathing_spin = qtw.QSpinBox()
-        self.breathing_spin.setRange(1, 50)
-        saved_breath = float(settings.globalVars["QSettings"].value("algorithm/breathing_max_scale_step") or 5.0)
-        self.breathing_spin.setValue(int(round(saved_breath)))
+        for key, title in (("first", "First frame"), ("middle", "Middle frame"), ("previous", "Previous frame (chain)")):
+            self.ref_combo.addItem(title, key)
+        self.ref_combo.setCurrentIndex(max(0, self.ref_combo.findData(get_str("algorithm/alignment_ref", "first"))))
+        self.ref_combo.currentIndexChanged.connect(
+            lambda _i: (self.change_setting("algorithm/alignment_ref", self.ref_combo.currentData()),
+                        self._update_visibility()))
+        a.add_row("ref", "Reference", self.ref_combo, "Frame the others are aligned to")
+        self.scale_spin = a.add_row("precision", "Shift precision",
+                                    spin(1, 50, get_int("algorithm/scale_factor", 10)),
+                                    "Sub-pixel upscale factor for shift-only alignment")
+        self.scale_spin.valueChanged.connect(lambda v: self.change_setting("algorithm/scale_factor", v))
+        self.breathing_spin = a.add_row(
+            "breath", "Max scale step",
+            spin(1, 50, int(round(get_float("algorithm/breathing_max_scale_step", 5.0))), suffix=" %"),
+            "Largest plausible magnification change between neighbouring frames")
         self.breathing_spin.valueChanged.connect(
             lambda v: self.change_setting("algorithm/breathing_max_scale_step", v))
-
-        align_adv_section = SettingSection("ALIGNMENT")
-        align_adv_section.add_row("Precision", self.scale_spin,
-            "DFT subpixel upscale factor.\n"
-            "Higher = more precise translation, slower.\n"
-            "Only used when Rotation+Scale is off.")
-        align_adv_section.add_row("Reference", self.ref_combo,
-            "first: align all to first image\n"
-            "middle: align all to middle image\n"
-            "previous: chain-align each image to the previous one\n"
-            "(sequential — best with Breathing mode)")
-
-        self.alignment_mode_combo = qtw.QComboBox()
-        self.alignment_mode_combo.addItems(
-            ["Similarity (recommended)", "Euclidean", "Full Affine",
-             "Breathing (focus breathing compensation)"])
-        mode_map = {"similarity": 0, "euclidean": 1, "affine": 2, "breathing": 3}
-        saved_mode = settings.globalVars["QSettings"].value("algorithm/alignment_mode") or "similarity"
-        self.alignment_mode_combo.setCurrentIndex(mode_map.get(saved_mode, 0))
-        self.alignment_mode_combo.currentIndexChanged.connect(self._on_alignment_mode_changed)
-        align_adv_section.add_row("Alignment mode", self.alignment_mode_combo,
-            "Similarity (4 DOF): shift, rotation, uniform scale — best for most stacks\n"
-            "Euclidean (3 DOF): shift, rotation only — no scale correction\n"
-            "Full Affine (6 DOF): shift, rotation, scale, shear — for extreme cases\n"
-            "Breathing: sequential chained alignment with scale-drift plausibility\n"
-            "checks — for lenses with strong focus breathing")
-        align_adv_section.add_row("Breathing max scale %", self.breathing_spin,
-            "Sequential alignment: maximum plausible magnification\n"
-            "change per consecutive frame pair (percent).\n"
-            "Higher values reject less; lower values are stricter.\n"
-            "Only used by Breathing mode / previous reference.")
-
-        self.precision_checkbox = qtw.QCheckBox()
-        saved_hp = settings.globalVars["QSettings"].value("algorithm/breathing_high_precision")
-        self.precision_checkbox.setChecked(False if saved_hp is None else bool(int(saved_hp)))
-        self.precision_checkbox.toggled.connect(self._on_precision_toggled)
-        precision_control = qtw.QWidget()
-        precision_control.setStyleSheet("background: transparent;")
-        hp_layout = qtw.QHBoxLayout(precision_control)
-        hp_layout.setContentsMargins(0, 0, 0, 0)
-        hp_layout.addStretch()
-        hp_layout.addWidget(self.precision_checkbox)
-        align_adv_section.add_row("Max precision (slow)", precision_control,
-            "Only for Breathing mode / Reference=previous.\n"
-            "Checked: float32 ECC up to 4096 px per frame pair,\n"
-            "on the CPU — several times slower overall.\n"
-            "Unchecked (default): 8-bit ECC scale refinement, just as\n"
-            "accurate on most stacks (and GPU-accelerated).\n"
-            "Greyed out when sequential alignment is not active.")
-
-        # Slowness warning, shown only while the sequential (max-precision)
-        # engine is active: Breathing mode, or Reference=previous
+        self.precision_switch = Switch(bool(get_int("algorithm/breathing_high_precision", 0)))
+        self.precision_switch.setAccessibleName("Maximum precision")
+        self.precision_switch.toggled.connect(self._on_precision_toggled)
+        a.add_row("hq", "Maximum precision", switch_row(self.precision_switch),
+                  "Full-resolution float refinement per frame pair, on the CPU. Several times slower")
         self.breathing_warning = qtw.QLabel(
-            "⚠ Slow processing: max precision runs full-resolution float32 "
-            "refinement on every frame pair, on the CPU. Expect several "
-            "times longer stacking than with it off."
-        )
+            "Maximum precision runs on the CPU and makes stacking several times slower.")
+        self.breathing_warning.setObjectName("Warning")
         self.breathing_warning.setWordWrap(True)
-        self.breathing_warning.setStyleSheet(
-            "color: #e0a458; font-size: 11px; padding: 8px 2px 4px 2px; "
-            "background: transparent;"
-        )
-        align_adv_section.container_layout.addWidget(self.breathing_warning)
-        self.breathing_warning.setVisible(False)
-        self.ref_combo.currentTextChanged.connect(
-            lambda _v: self._update_breathing_warning())
-        self._update_breathing_warning()
+        align_adv_section = Section("Alignment details")
+        align_adv_section.add(self.align_adv)
+        align_adv_section.add(self.breathing_warning)
+        adv.addWidget(align_adv_section)
 
-        self.autocrop_checkbox = qtw.QCheckBox()
-        self.autocrop_checkbox.setChecked(
-            bool(int(settings.globalVars["QSettings"].value("algorithm/auto_crop") or 1))
-        )
-        self.autocrop_checkbox.toggled.connect(lambda v: self.change_setting("algorithm/auto_crop", int(v)))
-        autocrop_control = qtw.QWidget()
-        autocrop_control.setStyleSheet("background: transparent;")
-        ac_layout = qtw.QHBoxLayout(autocrop_control)
-        ac_layout.setContentsMargins(0, 0, 0, 0)
-        ac_layout.addStretch()
-        ac_layout.addWidget(self.autocrop_checkbox)
-        align_adv_section.add_row("Auto-crop edges", autocrop_control,
-            "Automatically crop black edges\ncaused by alignment shifts.")
-
-        advanced_layout.addWidget(align_adv_section)
-
-        advanced_layout.addWidget(algo_section)
-
-        # ── GPU Section (in advanced) ──
-        gpu_section = SettingSection("GPU ACCELERATION")
-
-        self.gpu_checkbox = qtw.QCheckBox()
-        self.gpu_checkbox.setEnabled(HAS_GPU)
-        self.gpu_checkbox.setChecked(
-            bool(int(settings.globalVars["QSettings"].value("computing/use_gpu") or 0)) and HAS_GPU
-        )
-        self.gpu_checkbox.toggled.connect(lambda v: self.change_setting("computing/use_gpu", int(v)))
-        gpu_control = qtw.QWidget()
-        gpu_control.setStyleSheet("background: transparent;")
-        gpu_layout = qtw.QHBoxLayout(gpu_control)
-        gpu_layout.setContentsMargins(0, 0, 0, 0)
-        gpu_layout.addStretch()
-        gpu_layout.addWidget(self.gpu_checkbox)
-        gpu_section.add_row(
-            "Use GPU" if HAS_GPU else "GPU (not available)",
-            gpu_control,
-            "Stacking (every method) and alignment run on the GPU\n"
-            "(OpenCL, any vendor).\n"
-            "Falls back to the CPU automatically if anything fails."
-        )
-
-        if HAS_GPU:
-            self.gpu_combo = qtw.QComboBox()
-            for name in OCL.device_names():
-                self.gpu_combo.addItem(name)
-            saved_id = int(settings.globalVars["QSettings"].value("computing/selected_gpu_id") or 0)
-            self.gpu_combo.setCurrentIndex(min(saved_id, self.gpu_combo.count() - 1))
-            self.gpu_combo.currentIndexChanged.connect(
-                lambda v: self.change_setting("computing/selected_gpu_id", v)
-            )
-            gpu_section.add_row("GPU device", self.gpu_combo)
-            self.gpu_unusable.connect(self._on_gpu_unusable)
-            threading.Thread(target=self._check_gpu, args=(saved_id,), daemon=True).start()
-
-        advanced_layout.addWidget(gpu_section)
-
-        advanced_outer.addWidget(self.advanced_widget)
-        layout.addWidget(advanced_container)
-
+        layout.addWidget(self.advanced)
         layout.addStretch()
-
         scroll.setWidget(content)
 
         outer = qtw.QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
 
-        # Left border separator
-        wrapper = qtw.QHBoxLayout()
-        wrapper.setContentsMargins(0, 0, 0, 0)
-        wrapper.setSpacing(0)
-        sep = qtw.QFrame()
-        sep.setFrameShape(qtw.QFrame.VLine)
-        sep.setStyleSheet("background: #3d3d3d; max-width: 1px;")
-        wrapper.addWidget(sep)
-        wrapper.addWidget(scroll)
+        self.adv_toggle.setChecked(bool(get_int("ui/inspector_advanced", 0)))
+        self._on_advanced_toggled(self.adv_toggle.isChecked())
+        self._update_visibility()
+        tm = theme.manager()
+        if tm is not None:
+            tm.changed.connect(lambda: self._on_advanced_toggled(self.adv_toggle.isChecked()))
 
-        outer.addLayout(wrapper)
+    # ── handlers ──
+    def change_setting(self, key, value):
+        qs().setValue(key, value)
+        self.setting_updated.emit((key, value))
 
-    def _check_gpu(self, index):
-        """Build the GPU kernels in the background: the first stack doesn't
-        wait for the compile, and a GPU whose driver can't build them is
-        reported here instead of on every stack."""
-        try:
-            OCL.get(index)
-        except Exception as exc:
-            self.gpu_unusable.emit(str(exc))
+    def _on_method(self, key):
+        self.change_setting("algorithm/stacking_method", key)
+        self._update_visibility()
 
-    def _on_gpu_unusable(self, error):
-        self.gpu_checkbox.blockSignals(True)   # keep the user's setting
-        self.gpu_checkbox.setChecked(False)
-        self.gpu_checkbox.blockSignals(False)
-        self.gpu_checkbox.setEnabled(False)
-        self.gpu_checkbox.setToolTip(f"The GPU driver can't run ChimpStackr's GPU code:\n{error}\n"
-                                     "Stacking runs on the CPU.")
+    def _on_alignment(self, _index):
+        key = self.align_combo.currentData()
+        store_alignment_choice(key)
+        self.setting_updated.emit(("algorithm/alignment", key))
+        self._update_visibility()
 
-    def _on_alignment_mode_changed(self, index):
-        """Handle alignment mode dropdown change."""
-        mode_keys = ["similarity", "euclidean", "affine", "breathing"]
-        if 0 <= index < len(mode_keys):
-            self.change_setting("algorithm/alignment_mode", mode_keys[index])
-        self._update_breathing_warning()
+    def _on_precision_toggled(self, on):
+        self.change_setting("algorithm/breathing_high_precision", int(on))
+        self._update_visibility()
 
-    def _on_precision_toggled(self, checked):
-        self.change_setting("algorithm/breathing_high_precision", int(checked))
-        self._update_breathing_warning()
+    def _on_advanced_toggled(self, on):
+        self.advanced.setVisible(on)
+        self.adv_toggle.setIcon(icon("chevron_down" if on else "chevron_right", "secondary"))
+        qs().setValue("ui/inspector_advanced", int(on))
 
-    def _update_breathing_warning(self):
-        """Enable the precision toggle only while the sequential engine is
-        active (Breathing mode, or Reference=previous), and show the slowness
-        warning only when the slow path is actually going to run."""
-        sequential = (
-            self.alignment_mode_combo.currentIndex() == 3
-            or self.ref_combo.currentText() == "previous"
-        )
-        self.precision_checkbox.setEnabled(sequential)
-        self.breathing_spin.setEnabled(sequential)
-        self.breathing_warning.setVisible(
-            sequential and self.precision_checkbox.isChecked())
+    def _update_visibility(self):
+        method = get_str("algorithm/stacking_method", "laplacian")
+        pyramid = method in ("laplacian", "hybrid")
+        p = self.params
+        p.set_row_visible("kernel", method in ("laplacian", "hybrid", "weighted_average"))
+        p.set_row_visible("levels", pyramid)
+        p.set_row_visible("contrast", method == "laplacian")
+        p.set_row_visible("feather", method == "laplacian")
+        p.set_row_visible("smoothing", method == "depth_map")
+        p.set_row_visible("slab", method != "exposure_fusion")
 
-    def _select_method(self, method_key):
-        """Handle segmented control method selection."""
-        for key, btn in self._method_buttons.items():
-            btn.setChecked(key == method_key)
-        self.change_setting("algorithm/stacking_method", method_key)
+        choice = self.align_combo.currentData()
+        desc = dict((k, d) for k, _t, d in ALIGNMENTS).get(choice, "")
+        self.align_hint.setText(desc)
+        sequential = choice == "breathing" or (choice != "off" and self.ref_combo.currentData() == "previous")
+        a = self.align_adv
+        a.set_row_visible("ref", choice not in ("off", "breathing"))
+        a.set_row_visible("precision", choice == "shift")
+        a.set_row_visible("breath", sequential)
+        a.set_row_visible("hq", sequential)
+        self.breathing_warning.setVisible(sequential and self.precision_switch.isChecked())
+        self.align_adv.parentWidget().setVisible(choice != "off")
+
+    def alignment_enabled(self):
+        return self.align_combo.currentData() != "off"
 
     def _auto_detect_params(self):
-        """Auto-detect optimal parameters from currently loaded images."""
+        """Pick parameters for the loaded frames' size and count."""
         from src.config import auto_detect_params
         paths = settings.globalVars.get("LoadedImagePaths", [])
         if not paths:
             return
         import cv2
-        sample = cv2.imread(paths[0])
+        sample = cv2.imread(paths[0], cv2.IMREAD_REDUCED_GRAYSCALE_2)
         if sample is None:
             return
-        params = auto_detect_params(sample.shape, len(paths))
+        shape = (sample.shape[0] * 2, sample.shape[1] * 2)
+        params = auto_detect_params(shape, len(paths))
         self.kernel_spin.setValue(params["fusion_kernel_size"])
         self.pyramid_spin.setValue(params["pyramid_num_levels"])
         self.scale_spin.setValue(params["alignment_scale_factor"])
-        if hasattr(self, 'feather_spin'):
-            self.feather_spin.setValue(params.get("feather_radius", 2))
-        if hasattr(self, 'contrast_thresh_spin'):
-            self.contrast_thresh_spin.setValue(params.get("contrast_threshold", 0.0))
-
-    def change_setting(self, key, value):
-        settings.globalVars["QSettings"].setValue(key, value)
-        self.setting_updated.emit((key, value))
+        self.feather_spin.setValue(params.get("feather_radius", 2))
+        self.contrast_thresh_spin.setValue(params.get("contrast_threshold", 0.0))
 
     def get_algorithm_config(self):
         from src.config import AlgorithmConfig
-        qs = settings.globalVars["QSettings"]
         return AlgorithmConfig(
-            stacking_method=str(qs.value("algorithm/stacking_method") or "laplacian"),
-            fusion_kernel_size=int(qs.value("algorithm/kernel_size") or 6),
-            pyramid_num_levels=int(qs.value("algorithm/pyramid_levels") or 8),
-            alignment_scale_factor=int(qs.value("algorithm/scale_factor") or 10),
-            use_gpu=bool(int(qs.value("computing/use_gpu") or 0)),
-            selected_gpu_id=int(qs.value("computing/selected_gpu_id") or 0),
-            alignment_reference=str(qs.value("algorithm/alignment_ref") or "first"),
-            align_rotation_scale=bool(int(qs.value("algorithm/align_rst") or 0)),
-            alignment_mode=str(qs.value("algorithm/alignment_mode") or "auto"),
-            contrast_threshold=float(qs.value("algorithm/contrast_threshold") or 0.0),
-            feather_radius=int(qs.value("algorithm/feather_radius") or 2),
-            depthmap_smoothing=int(qs.value("algorithm/depthmap_smoothing") or 5),
-            slab_size=int(qs.value("algorithm/slab_size") or 0),
-            breathing_max_scale_step=float(qs.value("algorithm/breathing_max_scale_step") or 5.0) / 100.0,
-            breathing_high_precision=bool(int(
-                0 if qs.value("algorithm/breathing_high_precision") is None
-                else qs.value("algorithm/breathing_high_precision"))),
+            stacking_method=get_str("algorithm/stacking_method", "laplacian"),
+            fusion_kernel_size=get_int("algorithm/kernel_size", 6),
+            pyramid_num_levels=get_int("algorithm/pyramid_levels", 8),
+            alignment_scale_factor=get_int("algorithm/scale_factor", 10),
+            use_gpu=gpu_mode() != "cpu",
+            gpu_mode=gpu_mode(),
+            selected_gpu_id=get_int("computing/selected_gpu_id", 0),
+            alignment_reference=get_str("algorithm/alignment_ref", "first"),
+            align_rotation_scale=bool(get_int("algorithm/align_rst", 1)),
+            alignment_mode=(get_str("algorithm/alignment_mode", "similarity")
+                            if get_int("algorithm/align_rst", 1) else "translation"),
+            contrast_threshold=get_float("algorithm/contrast_threshold", 0.0),
+            feather_radius=get_int("algorithm/feather_radius", 2),
+            depthmap_smoothing=get_int("algorithm/depthmap_smoothing", 5),
+            slab_size=get_int("algorithm/slab_size", 0),
+            breathing_max_scale_step=get_float("algorithm/breathing_max_scale_step", 5.0) / 100.0,
+            breathing_high_precision=bool(get_int("algorithm/breathing_high_precision", 0)),
         )
 
 
-# Keep backward compatibility name
-SettingsWidget = SettingsPanel
+# ── Settings window ──
+class GpuStatus(qtc.QObject):
+    """Builds the GPU kernels in the background at startup (the first stack
+    doesn't wait for the compile) and remembers whether the device works."""
+    changed = qtc.Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.error = None if HAS_GPU else "No OpenCL GPU found"
+        self.ready = False
+        if HAS_GPU:
+            threading.Thread(target=self._check, args=(get_int("computing/selected_gpu_id", 0),),
+                             daemon=True).start()
+
+    def _check(self, index):
+        try:
+            OCL.get(index)
+            self.error, self.ready = None, True
+        except Exception as exc:
+            self.error = str(exc)
+        self.changed.emit()
+
+    def recheck(self):
+        if HAS_GPU:
+            self.ready = False
+            threading.Thread(target=self._check, args=(get_int("computing/selected_gpu_id", 0),),
+                             daemon=True).start()
+
+    def usable(self):
+        return HAS_GPU and self.error is None
+
+    def device_name(self):
+        names = OCL.device_names()
+        return names[min(get_int("computing/selected_gpu_id", 0), len(names) - 1)] if names else ""
+
+    def summary(self):
+        """Status bar text before a stack has decided anything."""
+        mode = gpu_mode()
+        if mode == "cpu" or not self.usable():
+            return "CPU" if mode == "cpu" else "CPU (no usable GPU)"
+        return f"GPU · {self.device_name()}" if mode == "gpu" else f"Auto · GPU {self.device_name()} or CPU"
+
+
+class BackgroundMeasurer(qtc.QObject):
+    """Measures GPU vs CPU speed per method while the app is idle, for the
+    Automatic device choice (src.compute). Stacks interrupt it; it picks up
+    again a little later."""
+    progress = qtc.Signal(str)      # status text, "" when idle
+    finished = qtc.Signal()
+
+    START_DELAY_MS = 20_000
+    RETRY_MS = 30_000
+
+    class _Task(qtc.QRunnable):
+        def __init__(self, owner, methods):
+            super().__init__()
+            self.owner, self.methods = owner, methods
+
+        def run(self):
+            import src.compute as compute
+            names = dict((k, t) for k, t, _d in METHODS)
+            current = {"m": ""}
+
+            def report(text):
+                self.owner.progress.emit(f"Measuring {names.get(current['m'], current['m'])}: {text}")
+            try:
+                for m in self.methods:
+                    current["m"] = m
+                    if not compute.measure_in_background([m], get_int("computing/selected_gpu_id", 0), report):
+                        break
+            except Exception as exc:     # never let measuring disturb the app
+                import logging
+                logging.getLogger(__name__).warning(f"Speed measurement failed: {exc}")
+            self.owner._running = False
+            self.owner.progress.emit("")
+            self.owner.finished.emit()
+
+    def __init__(self, gpu_status, parent=None):
+        super().__init__(parent)
+        self.gpu_status = gpu_status
+        self.pool = qtc.QThreadPool(self)
+        self.pool.setMaxThreadCount(1)
+        self._running = False
+        self.timer = qtc.QTimer(self)
+        self.timer.setSingleShot(True)
+        self.timer.timeout.connect(self.run_now)
+        self.finished.connect(lambda: self.schedule(self.RETRY_MS))
+
+    def schedule(self, delay_ms=None):
+        self.timer.start(self.START_DELAY_MS if delay_ms is None else delay_ms)
+
+    def wanted(self):
+        return gpu_mode() == "auto" and self.gpu_status.usable() and self.gpu_status.ready
+
+    def run_now(self):
+        import src.compute as compute
+        if self._running:
+            return
+        if gpu_mode() == "auto" and self.gpu_status.usable() and not self.gpu_status.ready:
+            self.schedule(5000)            # the GPU check is still building the kernels
+            return
+        if not self.wanted():
+            return
+        window = settings.globalVars.get("MainWindow")
+        if window is not None and getattr(window, "is_stacking", False):
+            self.schedule(self.RETRY_MS)
+            return
+        current = get_str("algorithm/stacking_method", "laplacian")
+        missing = compute.missing_methods(get_int("computing/selected_gpu_id", 0))
+        if not missing:
+            return
+        missing.sort(key=lambda m: m != current)        # the method in use first
+        self._running = True
+        self.pool.start(self._Task(self, missing))
+
+    def stop(self):
+        import src.compute as compute
+        self.timer.stop()
+        compute.STOP.set()
+
+
+class SettingsDialog(qtw.QDialog):
+    """App preferences: appearance and processing."""
+
+    def __init__(self, gpu_status, updates=None, parent=None, measurer=None):
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self.setModal(False)
+        self.gpu_status = gpu_status
+        self.updates = updates
+        self.measurer = measurer
+        self._measuring = ""
+        self.setMinimumWidth(460)
+
+        layout = qtw.QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(16)
+
+        appearance = Section("Appearance")
+        ac = FormCard()
+        self.theme_combo = qtw.QComboBox()
+        for key, title in (("system", "Match system"), ("dark", "Dark"), ("light", "Light")):
+            self.theme_combo.addItem(title, key)
+        self.theme_combo.setCurrentIndex(max(0, self.theme_combo.findData(get_str("ui/theme", "system"))))
+        self.theme_combo.currentIndexChanged.connect(self._on_theme)
+        ac.add_row("theme", "Theme", self.theme_combo)
+        appearance.add(ac)
+        layout.addWidget(appearance)
+
+        processing = Section("Processing")
+        pc = FormCard()
+        self.mode_combo = qtw.QComboBox()
+        for key, title in (("auto", "Automatic (recommended)"), ("gpu", "Always GPU"), ("cpu", "Always CPU")):
+            self.mode_combo.addItem(title, key)
+        self.mode_combo.setCurrentIndex(max(0, self.mode_combo.findData(gpu_mode())))
+        self.mode_combo.currentIndexChanged.connect(self._on_mode)
+        pc.add_row("mode", "Stack on", self.mode_combo,
+                   "Automatic uses whichever is faster for your frames on this computer")
+        self.gpu_combo = qtw.QComboBox()
+        for name in OCL.device_names():
+            self.gpu_combo.addItem(name)
+        if not HAS_GPU:
+            self.gpu_combo.addItem("No OpenCL GPU found")
+        self.gpu_combo.setCurrentIndex(min(get_int("computing/selected_gpu_id", 0),
+                                           max(0, self.gpu_combo.count() - 1)))
+        self.gpu_combo.currentIndexChanged.connect(self._on_device)
+        pc.add_row("device", "GPU", self.gpu_combo)
+        processing.add(pc)
+        self.gpu_note = qtw.QLabel()
+        self.gpu_note.setObjectName("Hint")
+        self.gpu_note.setWordWrap(True)
+        self.gpu_note.setTextInteractionFlags(qtc.Qt.TextSelectableByMouse)
+        processing.add(self.gpu_note)
+        self.speed_note = qtw.QLabel()
+        self.speed_note.setObjectName("Hint")
+        self.speed_note.setWordWrap(True)
+        self.remeasure = qtw.QPushButton("Measure Again")
+        self.remeasure.setToolTip("Forget the measured GPU and CPU speeds; the next stack measures again")
+        self.remeasure.clicked.connect(self._on_remeasure)
+        srow = qtw.QHBoxLayout()
+        srow.addWidget(self.speed_note, 1)
+        srow.addWidget(self.remeasure, 0, qtc.Qt.AlignTop)
+        processing.layout_.addLayout(srow)
+        layout.addWidget(processing)
+
+        import src.MainWindow.UpdateDialog as UpdateDialog
+        import src.updater as updater
+        upd = Section("Updates")
+        uc = FormCard()
+        self.auto_update_switch = Switch(UpdateDialog.auto_check_enabled())
+        self.auto_update_switch.setAccessibleName("Automatically check for updates")
+        self.auto_update_switch.toggled.connect(lambda v: qs().setValue("updates/auto_check", int(v)))
+        uc.add_row("auto", "Automatically check for updates", switch_row(self.auto_update_switch),
+                   "Once a day, ChimpStackr asks GitHub whether a newer release exists")
+        self.prerelease_switch = Switch(UpdateDialog.include_prereleases())
+        self.prerelease_switch.setAccessibleName("Include pre-releases")
+        self.prerelease_switch.toggled.connect(lambda v: qs().setValue("updates/prerelease", int(v)))
+        uc.add_row("pre", "Include pre-releases", switch_row(self.prerelease_switch),
+                   "Also offer beta versions")
+        upd.add(uc)
+        row = qtw.QHBoxLayout()
+        self.update_note = qtw.QLabel()
+        self.update_note.setObjectName("Hint")
+        self.update_note.setWordWrap(True)
+        check = qtw.QPushButton("Check Now")
+        check.setEnabled(updates is not None)
+        check.clicked.connect(lambda: (updates.check(manual=True), self._refresh_update_note()))
+        row.addWidget(self.update_note, 1)
+        row.addWidget(check)
+        upd.layout_.addLayout(row)
+        layout.addWidget(upd)
+        self._version = updater.current_version()
+        self._refresh_update_note()
+
+        layout.addStretch()
+        buttons = qtw.QDialogButtonBox(qtw.QDialogButtonBox.Close)
+        buttons.rejected.connect(self.close)
+        layout.addWidget(buttons)
+
+        gpu_status.changed.connect(self._refresh_gpu)
+        if measurer is not None:
+            measurer.progress.connect(self._on_measuring)
+            measurer.finished.connect(self._refresh_speeds)
+        self._refresh_gpu()
+
+    def _refresh_update_note(self):
+        import time
+        last = get_float("updates/last_check", 0)
+        when = time.strftime("%d %b %Y, %H:%M", time.localtime(last)) if last else "never"
+        self.update_note.setText(f"You have version {updater_display(self._version)}. Last checked: {when}.")
+
+    def showEvent(self, event):
+        self._refresh_update_note()
+        self._refresh_speeds()
+        super().showEvent(event)
+
+    def _on_theme(self, _i):
+        mode = self.theme_combo.currentData()
+        qs().setValue("ui/theme", mode)
+        tm = theme.manager()
+        if tm is not None:
+            tm.set_mode(mode)
+
+    def _on_mode(self, _i):
+        mode = self.mode_combo.currentData()
+        qs().setValue("computing/gpu_mode", mode)
+        qs().setValue("computing/use_gpu", int(mode != "cpu"))
+        self.gpu_status.changed.emit()
+        self._refresh_gpu()
+        if self.measurer is not None and mode == "auto":
+            self.measurer.schedule(5000)
+
+    def _on_device(self, index):
+        if HAS_GPU:
+            qs().setValue("computing/selected_gpu_id", index)
+            self.gpu_status.recheck()
+
+    def _on_measuring(self, text):
+        self._measuring = text
+        self._refresh_speeds()
+
+    def _on_remeasure(self):
+        import src.compute as compute
+        compute.clear_measurements()
+        self._refresh_speeds()
+        if self.measurer is not None:
+            self.measurer.schedule(3000)
+
+    def _refresh_speeds(self):
+        import src.compute as compute
+        rows = []
+        name = self.gpu_status.device_name()
+        for key, entry in sorted(compute.measurements().items()):
+            dev, method = key.split("|")[0], key.split("|")[-1]
+            if dev != name:
+                continue
+            times = compute.predict(entry, 24.0, 50)
+            title = dict((k, t) for k, t, _d in METHODS).get(method, method)
+            if times is None:
+                rows.append(f"{title}: GPU failed in the test")
+            else:
+                g, c = times
+                rows.append(f"{title}: GPU {c / g:.1f}× faster" if g <= c else f"{title}: CPU {g / c:.1f}× faster")
+        text = ("Measured here, for 50 frames of 24 MP:\n" + "\n".join(rows)) if rows else \
+            "ChimpStackr measures GPU and CPU speed once per method in the background (about " \
+            "15 s each, paused while you stack). Until then it uses the GPU."
+        if self._measuring:
+            text += f"\n{self._measuring}"
+        self.speed_note.setText(text)
+        self.remeasure.setEnabled(bool(rows) and not self._measuring)
+
+    def _refresh_gpu(self):
+        mode = self.mode_combo.currentData()
+        self.gpu_combo.setEnabled(HAS_GPU and len(OCL.device_names()) > 1 and mode != "cpu")
+        self.mode_combo.setEnabled(True)
+        if not HAS_GPU:
+            self.gpu_note.setText("No OpenCL GPU was found; stacking runs on the CPU.")
+        elif self.gpu_status.error:
+            self.gpu_note.setText(f"This GPU's driver can't run ChimpStackr's GPU code, so stacking "
+                                  f"runs on the CPU.\n{self.gpu_status.error}")
+        elif not self.gpu_status.ready:
+            self.gpu_note.setText("Preparing the GPU…")
+        elif mode == "auto":
+            self.gpu_note.setText("Each stack runs on whichever a short speed test on this computer "
+                                  "found faster for its frame size and count. Stacks too big for the "
+                                  "GPU's memory run on the CPU.")
+        elif mode == "gpu":
+            self.gpu_note.setText("Falls back to the CPU automatically if anything fails on the GPU.")
+        else:
+            self.gpu_note.setText("The GPU isn't used.")
+        self._refresh_speeds()
+
+
+# Old names
+SettingsPanel = Inspector
+SettingsWidget = Inspector

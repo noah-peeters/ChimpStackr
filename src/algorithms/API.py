@@ -66,6 +66,8 @@ class LaplacianPyramid:
             config = AlgorithmConfig()
         self.config = config
         self.output_image = None
+        self.device_decision = None   # src.compute.Decision for the last resolve_device()
+        self._device_key = None
         self.depth_map = None  # Populated by depth_map method
         self.image_paths = []
         self.sequential_log = None   # per-frame chain log (sequential alignment)
@@ -650,8 +652,42 @@ class LaplacianPyramid:
     # them, and only the result comes back. Falls back to the CPU path when
     # no GPU is available or anything goes wrong on it.
 
+    def gpu_mode(self):
+        import src.compute as compute
+        return compute.normalize_mode(self.config.gpu_mode or self.config.use_gpu)
+
+    def frame_size(self):
+        """(width, height) of the first frame, from its header when possible."""
+        if not self.image_paths:
+            return 0, 0
+        path = self.image_paths[0]
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                return im.size
+        except Exception:
+            pass
+        img = self.Algorithm.ImageLoadingHandler.read_image_from_path(path)
+        return (img.shape[1], img.shape[0]) if img is not None else (0, 0)
+
+    def resolve_device(self, report=None, calibrate=False):
+        """Decide GPU or CPU for the current frames and settings (see
+        src.compute); remembered in `device_decision` until they change."""
+        import src.compute as compute
+        c = self.config
+        key = (self.gpu_mode(), c.stacking_method, c.selected_gpu_id,
+               tuple(self.image_paths[:1]), len(self.image_paths))
+        if self.device_decision is None or self._device_key != key:
+            w, h = self.frame_size() if key[0] == "auto" else (0, 0)
+            self.device_decision = compute.decide(key[0], w, h, c.stacking_method,
+                                                  c.selected_gpu_id, calibrate, report,
+                                                  frames=len(self.image_paths))
+            self._device_key = key
+            logger.info(f"Device: {self.device_decision.summary()}")
+        return self.device_decision
+
     def _gpu_wanted(self):
-        return self.config.use_gpu and OCL.available()
+        return self.resolve_device().use_gpu
 
     def _gpu_fuser(self, gpu):
         c = self.config
